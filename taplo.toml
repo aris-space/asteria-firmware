@@ -1,3 +1,5 @@
+exclude = ["hermes-can/**/*.toml"]
+
 [formatting]
 column_width = 100
 indent_string = "    " # 4 spaces
