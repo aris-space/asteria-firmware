@@ -9,11 +9,7 @@ embedded_utils = { path = "../embedded_utils" }
 cortex-m = { workspace = true, features = ["inline-asm", "critical-section-single-core"] }
 cortex-m-rt = { workspace = true }
 
-embassy-stm32 = { workspace = true, features = [
-    "stm32g473rc",
-    "time-driver-any",
-    "memory-x",
-] }
+embassy-stm32 = { workspace = true, features = ["stm32g473rc", "time-driver-any", "memory-x"] }
 embassy-time = { workspace = true, features = ["tick-hz-32_768"] }
 embassy-executor = { workspace = true, features = ["arch-cortex-m", "executor-thread"] }
 embassy-futures = { workspace = true }

@@ -1,0 +1,49 @@
+repos:
+  # --- General sanity checks and cleanup ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Prevent accidentally committing large binaries or logs (>512 KB)
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+
+      # Validate YAML and TOML syntax for config files
+      - id: check-yaml
+      - id: check-toml
+
+      # Clean up whitespace and ensure newline at end of files
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+
+  # --- Rust formatting (auto-fix) ---
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+        # Automatically formats all Rust code before committing
+
+  # --- TOML formatting (auto-fix) ---
+  - repo: local
+    hooks:
+      - id: taplo-fmt
+        name: taplo fmt
+        entry: taplo fmt
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+        # Formats all TOML files using Taplo before committing
+
+  # --- Rust linting (manual) ---
+  - repo: local
+    hooks:
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        language: system
+        pass_filenames: false
+        stages: [manual]
+        # Lints code with clippy (manual run: `pre-commit run cargo-clippy`)

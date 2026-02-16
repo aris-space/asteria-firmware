@@ -78,7 +78,7 @@ defmt = [
     "max31889_thermistor/defmt-03",
     "ads1120_thermocouples/defmt",
     "trafag_pressure/defmt",
-    "keller_pressure/defmt"
+    "keller_pressure/defmt",
 ]
 
 [[bin]]

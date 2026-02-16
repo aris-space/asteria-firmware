@@ -52,7 +52,7 @@ hermes-can = { workspace = true, features = [
     "message-pressure-vent-control-rfs",
     "message-fuel-pressurization",
     "message-fuel-pressurization-abort",
-    "message-fuel-pressurization-gain"
+    "message-fuel-pressurization-gain",
 
 ] }
 
@@ -78,7 +78,7 @@ defmt = [
     "embassy-stm32/defmt",
     "embedded-hal-async/defmt-03",
     "embedded-hal-bus/defmt-03",
-    "keller_pressure/defmt"
+    "keller_pressure/defmt",
 ]
 
 [[bin]]

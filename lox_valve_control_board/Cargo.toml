@@ -53,7 +53,7 @@ defmt = [
     "embassy-time/defmt",
     "embassy-time/defmt-timestamp-uptime",
     "embassy-stm32/defmt",
-    "epos4/defmt"
+    "epos4/defmt",
 ]
 
 [[bin]]
