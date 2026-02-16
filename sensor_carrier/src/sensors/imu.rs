@@ -1,19 +1,19 @@
 #![allow(unused)]
 
-use crate::drivers::inertial;
-use crate::drivers::inertial::{ImuMeasurement, InertialDriver, INERTIAL_DRIVER};
-use crate::sensors::{update_status, CommonSensorConfig, SensorId, SensorStatus};
-use crate::util::ExponentialBackoff;
 use crate::Debug2Format;
+use crate::drivers::inertial;
+use crate::drivers::inertial::{INERTIAL_DRIVER, ImuMeasurement, InertialDriver};
+use crate::sensors::{CommonSensorConfig, SensorId, SensorStatus, update_status};
+use crate::util::ExponentialBackoff;
 use core::convert::Infallible;
 use core::future::pending;
 use embassy_executor::task;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::spi::Error;
 use embassy_stm32::time::mhz;
-use embassy_time::{with_timeout, Delay, Duration, Instant, TimeoutError};
-use embedded_utils::fmt::*;
+use embassy_time::{Delay, Duration, Instant, TimeoutError, with_timeout};
 use embedded_utils::ExtendTime;
+use embedded_utils::fmt::*;
 use heapless::Deque;
 use imu_fusion::{Fusion, FusionAhrsSettings, FusionVector};
 use lsm6dso32::{

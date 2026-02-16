@@ -2,8 +2,8 @@ use bitflags::bitflags;
 use core::sync::atomic::{AtomicU16, Ordering};
 use embedded_utils::fmt::{error, info, trace, warn};
 
-use crate::valve::{get_position_percent, move_to_position_percent, LOX_VALVE_MOTOR};
 use crate::Db2F;
+use crate::valve::{LOX_VALVE_MOTOR, get_position_percent, move_to_position_percent};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{Error as UsartError, Uart};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;

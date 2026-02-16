@@ -4,10 +4,10 @@
    Inspired by code from Domenic Nebiker (meaning that I copied most of it)
 */
 use cortex_m::prelude::_embedded_hal_Pwm;
+use embassy_stm32::PeripheralType;
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
-use embassy_stm32::PeripheralType;
 use embedded_utils::fmt::*;
 // idk if this is possible to do it nicer. Ill have to see
 use hermes_can::messages::board_status::ActuatorStatus;

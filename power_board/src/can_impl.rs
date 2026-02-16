@@ -5,12 +5,12 @@ use embassy_stm32::can::filter::{Action, FilterType, StandardFilter};
 use embassy_stm32::can::frame::{self, FdFrame, Header};
 use embassy_stm32::can::{Can, CanConfigurator, CanRx, CanTx, OperatingMode, RxPin, TxPin};
 use embassy_stm32::interrupt::typelevel::Binding;
-use embassy_stm32::{can, Peri};
+use embassy_stm32::{Peri, can};
 use embassy_time::TimeoutError;
 use embedded_can::Id;
 use embedded_utils::fmt::*;
 use hermes_can::{
-    messages::Message, next_valid_length, CanDecodeError, CanEncodeError, CanMessage,
+    CanDecodeError, CanEncodeError, CanMessage, messages::Message, next_valid_length,
 };
 
 #[allow(unused_imports)]
@@ -119,8 +119,8 @@ pub fn setup_can<'a, T: can::Instance>(
     rx: Peri<'a, impl RxPin<T>>,
     tx: Peri<'a, impl TxPin<T>>,
     _irqs: impl Binding<T::IT0Interrupt, can::IT0InterruptHandler<T>>
-        + Binding<T::IT1Interrupt, can::IT1InterruptHandler<T>>
-        + 'a,
+    + Binding<T::IT1Interrupt, can::IT1InterruptHandler<T>>
+    + 'a,
 ) -> Can<'a> {
     let mut can = CanConfigurator::new(peri, rx, tx, _irqs);
     can.set_bitrate(1_000_000);

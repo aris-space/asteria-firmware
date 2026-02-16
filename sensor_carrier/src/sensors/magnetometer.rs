@@ -1,5 +1,5 @@
 use crate::drivers::magnetic_field::{MagMeasurement, MagneticField, MagneticFieldDriver};
-use crate::sensors::{update_status, CommonSensorConfig, SensorId, SensorStatus};
+use crate::sensors::{CommonSensorConfig, SensorId, SensorStatus, update_status};
 use crate::util::ExponentialBackoff;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::i2c::I2c;

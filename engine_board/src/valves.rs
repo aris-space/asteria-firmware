@@ -1,4 +1,4 @@
-use crate::buzzer::{BuzzerState, BUZZER_WATCH};
+use crate::buzzer::{BUZZER_WATCH, BuzzerState};
 use crate::drivers::{CAP, PUB, SUB, WATCH};
 use core::future::pending;
 use embassy_futures::join::join;

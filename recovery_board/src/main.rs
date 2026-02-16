@@ -8,12 +8,12 @@ mod servo;
 /// IN THE FINAL VERSION; MAKE SURE THAT SERVO ID 2 IS LEFT, AND SERVO ID 3 IS RIGHT POSITION!!!
 mod watchdog;
 
-use crate::can_impl::{setup_can, CanReceiver, CanTransmitter};
+use crate::can_impl::{CanReceiver, CanTransmitter, setup_can};
 use crate::recovery_actuator_control::{
-    arming_detection, deployment_task, separation_task, steering_task, ServoTargetState,
-    SteeringStatus, ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS,
-    DEPLOYMENT_TARGET_STATE, SEPARATION_OCCURRED, SEPARATION_SERVO_STATUS, SEPARATION_TARGET_STATE,
-    STEERING_POWER, STEERING_STATUS, STEERING_TARGET_POSITIONS, WATCHDOG_STATE,
+    ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS, DEPLOYMENT_TARGET_STATE,
+    SEPARATION_OCCURRED, SEPARATION_SERVO_STATUS, SEPARATION_TARGET_STATE, STEERING_POWER,
+    STEERING_STATUS, STEERING_TARGET_POSITIONS, ServoTargetState, SteeringStatus, WATCHDOG_STATE,
+    arming_detection, deployment_task, separation_task, steering_task,
 };
 use crate::servo::{RecoveryActuator, Servo};
 use crate::watchdog::Watchdog;
@@ -25,17 +25,17 @@ use embassy_stm32::mode::Async;
 use embassy_stm32::peripherals::FDCAN1;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
-use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::timer::Channel::{Ch1, Ch2};
+use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::Uart;
 use embassy_stm32::{bind_interrupts, can, peripherals, usart};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::{with_timeout, Timer};
 use embassy_time::{Duration, Instant};
+use embassy_time::{Timer, with_timeout};
 use embedded_utils::fmt::*;
-use hermes_can::messages::board_status::{ActuatorStatus, ArmingState, WatchdogState};
 use hermes_can::messages::Message;
+use hermes_can::messages::board_status::{ActuatorStatus, ArmingState, WatchdogState};
 
 mod clocks {
     include!(concat!(
@@ -254,8 +254,16 @@ async fn main(spawner: Spawner) -> ! {
     let mut led_red = Output::new(p.PB2, Level::Low, Speed::Low);
     /* END LEDS */
 
-    debug!("pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
-        built_info::PKG_NAME, built_info::GIT_COMMIT_HASH_SHORT, built_info::GIT_DIRTY, built_info::PROFILE, built_info::FEATURES, built_info::RUSTC, built_info::TARGET);
+    debug!(
+        "pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
+        built_info::PKG_NAME,
+        built_info::GIT_COMMIT_HASH_SHORT,
+        built_info::GIT_DIRTY,
+        built_info::PROFILE,
+        built_info::FEATURES,
+        built_info::RUSTC,
+        built_info::TARGET
+    );
 
     //indication that async is working correctly, hopefully
     spawner.spawn(blink(led_yellow)).unwrap();

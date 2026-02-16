@@ -2,7 +2,7 @@ use crate::board::{CAMERA_SETTINGS_CHANGED, LIVESTREAM_CAMERA, RECORDING_CAMERA}
 use crate::can_impl::CanReceiver;
 use crate::can_impl::{CanError, CanTransmitter};
 use crate::reset_now;
-use crate::sensor_readout::{RAIL_24V_LAST, RAIL_5V_LAST};
+use crate::sensor_readout::{RAIL_5V_LAST, RAIL_24V_LAST};
 use crate::unix_time::init_utc_clock;
 use core::sync::atomic::Ordering;
 use embassy_futures::select::select;
@@ -10,9 +10,9 @@ use embassy_stm32::can::{CanRx, CanTx};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
-use embassy_time::{with_timeout, Duration, Instant, Ticker, Timer};
-use embedded_utils::fmt::{error, info, trace};
+use embassy_time::{Duration, Instant, Ticker, Timer, with_timeout};
 use embedded_utils::ERROR_COUNT;
+use embedded_utils::fmt::{error, info, trace};
 use hermes_can::messages::board_status::{
     CameraPowerStatus, PowerBoardStatus, StatusCommonMessage,
 };
@@ -99,8 +99,13 @@ async fn can_24v_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
                 }
             }
         } else {
-            trace!("Discarding 24V rail data: {:?}, because now={}ms - last_sent={}ms < min_period={}ms",
-                   can_data, now.as_millis(), last_sent.as_millis(), min_period.as_millis());
+            trace!(
+                "Discarding 24V rail data: {:?}, because now={}ms - last_sent={}ms < min_period={}ms",
+                can_data,
+                now.as_millis(),
+                last_sent.as_millis(),
+                min_period.as_millis()
+            );
         }
     }
 }
@@ -143,8 +148,13 @@ async fn can_5v_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
                 }
             }
         } else {
-            trace!("Discarding 5V rail data: {:?}, because now={}ms - last_sent={}ms < min_period={}ms",
-                   can_data, now.as_millis(), last_sent.as_millis(), min_period.as_millis());
+            trace!(
+                "Discarding 5V rail data: {:?}, because now={}ms - last_sent={}ms < min_period={}ms",
+                can_data,
+                now.as_millis(),
+                last_sent.as_millis(),
+                min_period.as_millis()
+            );
         }
     }
 }

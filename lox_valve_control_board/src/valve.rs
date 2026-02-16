@@ -1,5 +1,5 @@
-use crate::modbus_server::{clear_status, set_status, DeviceStatus};
 use crate::Db2F;
+use crate::modbus_server::{DeviceStatus, clear_status, set_status};
 use core::fmt::Debug;
 use core::future::Future;
 use core::sync::atomic::{AtomicI32, Ordering};
@@ -9,7 +9,7 @@ use embassy_stm32::usart::{self, Uart};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
-use embassy_time::{with_timeout, Duration, TimeoutError, Timer};
+use embassy_time::{Duration, TimeoutError, Timer, with_timeout};
 use embedded_io_async::{Read, Write};
 use embedded_utils::{error, info};
 use epos4::{Epos4, Epos4Error, EposStatus};

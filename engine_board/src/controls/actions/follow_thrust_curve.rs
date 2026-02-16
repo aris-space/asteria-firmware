@@ -1,13 +1,13 @@
-use crate::controls::actions::detect::SENSOR_TIMEOUT;
-use crate::controls::actions::ActionCompleteness;
-use crate::controls::controller::{PIDController, PIDGains, CONTROL_TIME_STEP_MS};
 use crate::controls::THRUST_CURVE;
-use crate::drivers::digital_pressure::DIGITAL_PRESSURE_WATCH;
+use crate::controls::actions::ActionCompleteness;
+use crate::controls::actions::detect::SENSOR_TIMEOUT;
+use crate::controls::controller::{CONTROL_TIME_STEP_MS, PIDController, PIDGains};
 use crate::drivers::WATCH;
-use crate::valves::{ExternalValve, EXTERNAL_VALVE_CONTROL};
+use crate::drivers::digital_pressure::DIGITAL_PRESSURE_WATCH;
+use crate::valves::{EXTERNAL_VALVE_CONTROL, ExternalValve};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Receiver;
-use embassy_time::{with_timeout, Instant, Timer};
+use embassy_time::{Instant, Timer, with_timeout};
 use embedded_utils::{error, info};
 use hermes_can::messages::event_messages::{DprState, FiringAbortInitiation};
 

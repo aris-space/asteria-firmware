@@ -11,12 +11,12 @@ use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
-use embassy_stm32::{bind_interrupts, peripherals, Config};
+use embassy_stm32::{Config, bind_interrupts, peripherals};
 use embedded_utils::fmt::*;
 
 use crate::modbus_server::{
-    clear_status, lox_valve_motor_controller_task, lox_valve_motor_position_updater_task,
-    modbus_server_task, set_status, DeviceStatus,
+    DeviceStatus, clear_status, lox_valve_motor_controller_task,
+    lox_valve_motor_position_updater_task, modbus_server_task, set_status,
 };
 use crate::valve::init_lox_valve_motor;
 
@@ -54,8 +54,16 @@ async fn main(spawner: Spawner) -> ! {
     debug!("{:?}", Db2F(&x));
     pac::RCC.csr().modify(|w| w.set_rmvf(true));
 
-    debug!("pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
-        built_info::PKG_NAME, built_info::GIT_COMMIT_HASH_SHORT, built_info::GIT_DIRTY, built_info::PROFILE, built_info::FEATURES, built_info::RUSTC, built_info::TARGET);
+    debug!(
+        "pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
+        built_info::PKG_NAME,
+        built_info::GIT_COMMIT_HASH_SHORT,
+        built_info::GIT_DIRTY,
+        built_info::PROFILE,
+        built_info::FEATURES,
+        built_info::RUSTC,
+        built_info::TARGET
+    );
 
     let green = Output::new(p.PB8, Level::Low, Speed::Low);
     let red = Output::new(p.PB7, Level::Low, Speed::Low);

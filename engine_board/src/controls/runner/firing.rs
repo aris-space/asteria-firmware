@@ -4,10 +4,10 @@ use crate::controls::actions::actuate::{actuate_external_valve, actuate_onboard_
 use crate::controls::actions::detect::detect_with_abort;
 use crate::controls::actions::follow_thrust_curve::follow_thrust_curve;
 use crate::controls::actions::wait::wait_with_abort;
-use crate::controls::actions::watch::{WatchState, WATCH_STATE};
+use crate::controls::actions::watch::{WATCH_STATE, WatchState};
 use crate::controls::actions::{ActionCompleteness, Actions};
 use crate::controls::firing_sequence::FIRING_SEQUENCE;
-use crate::controls::runner::{FiringInfo, ABORT_INITIATION, FIRING_INFO, FIRING_INITIATION};
+use crate::controls::runner::{ABORT_INITIATION, FIRING_INFO, FIRING_INITIATION, FiringInfo};
 use crate::sensors::Sensor;
 use embassy_time::{Duration, Timer};
 use embedded_utils::{fmt::warn, info};

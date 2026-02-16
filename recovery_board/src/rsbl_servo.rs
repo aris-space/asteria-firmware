@@ -296,7 +296,8 @@ const ACTION: u8 = 0x05; //Triggering the action of REG WRITE operation | Parame
 const SYNCREAD_DATA: u8 = 0x82; // Query multiple servos at the same time. | Parameter length >= 3
 const SYNCWRITE_DATA: u8 = 0x83; //Controlling multiple servos at the same time | Parameter length >= 2
 const RESET: u8 = 0x06; //Reset the control table to the factory value | Parameter length = 0
-                        //</editor-fold>
+
+//</editor-fold>
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum RsblError {

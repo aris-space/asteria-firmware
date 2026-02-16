@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::drivers::inertial::ORIENTATION_WATCH;
-use crate::sensors::gnss::PvtData;
 use crate::sensors::SensorId;
+use crate::sensors::gnss::PvtData;
 use embassy_sync::{
     blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex},
     mutex::Mutex,

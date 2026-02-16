@@ -16,7 +16,7 @@ use crate::sensors::dht::dht_task;
 use crate::sensors::gnss::gnss_task;
 use crate::sensors::imu::imu_task;
 use crate::sensors::magnetometer::magnetometer_task;
-use crate::sensors::{SensorId, SHARED_BUS1, SHARED_BUS2};
+use crate::sensors::{SHARED_BUS1, SHARED_BUS2, SensorId};
 use core::future::pending;
 use drivers::pressure;
 use drivers::pressure::{PRESSURE_DRIVER_PUBSUB, PRESSURE_DRIVER_WATCH};
@@ -90,8 +90,16 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     use build_info::built as built_info;
-    debug!("pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
-        built_info::PKG_NAME, built_info::GIT_COMMIT_HASH_SHORT, built_info::GIT_DIRTY, built_info::PROFILE, built_info::FEATURES, built_info::RUSTC, built_info::TARGET);
+    debug!(
+        "pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
+        built_info::PKG_NAME,
+        built_info::GIT_COMMIT_HASH_SHORT,
+        built_info::GIT_DIRTY,
+        built_info::PROFILE,
+        built_info::FEATURES,
+        built_info::RUSTC,
+        built_info::TARGET
+    );
 
     // Buzzer PWM pin (TIM4_CH4) is on PD15 (not PB10)
     let _buzzer = Output::new(p.PD15, Level::Low, Speed::VeryHigh);

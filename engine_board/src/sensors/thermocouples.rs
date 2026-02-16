@@ -2,10 +2,10 @@ use embassy_time::{Duration, Ticker};
 use hermes_can::messages::board_status::SensorStatus;
 use max31889_thermistor::MAX31889;
 
-use crate::drivers::temperature::{TCDriver, ThermoMeasurementRaw, THERMOCOUPLE_ERROR_WATCH};
+use crate::drivers::temperature::{TCDriver, THERMOCOUPLE_ERROR_WATCH, ThermoMeasurementRaw};
 use crate::sensors::ACQ_THERMOCOUPLE_FREQ_HZ;
-use ads1120_thermocouples::thermocouple_conversions::{ThermocoupleConversion, ThermocoupleType};
 use ads1120_thermocouples::ADSThermocouples;
+use ads1120_thermocouples::thermocouple_conversions::{ThermocoupleConversion, ThermocoupleType};
 use embedded_utils::error;
 use embedded_utils::fmt::warn;
 

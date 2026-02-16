@@ -4,20 +4,21 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Level, Output};
-use embassy_stm32::peripherals::{TIM16, TIM17, TIM2, TIM3};
+use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::watch::Watch;
-use embassy_time::{with_timeout, Timer};
 use embassy_time::{Duration, Instant};
+use embassy_time::{Timer, with_timeout};
 use embedded_utils::fmt::*;
 // this is maybe not nice, think about using another enum?
 use crate::recovery_actuator_control::SteeringStatus::{Connected, NotConnected, Responsive};
-use crate::rsbl_servo::{RsblData, LEFT, RIGHT};
+use crate::rsbl_servo::{LEFT, RIGHT, RsblData};
 use crate::servo::RecoveryActuator;
 use crate::{
-    rsbl_servo, watchdog, DEPLOYMENT_INITIAL_ANGLE, DEPLOYMENT_SERVO_ANGLE, SAFETY_SPIRAL_POS_LEFT,
-    SAFETY_SPIRAL_POS_RIGHT, SEPARATION_INITIAL_ANGLE, SEPARATION_SERVO_ANGLE,
+    DEPLOYMENT_INITIAL_ANGLE, DEPLOYMENT_SERVO_ANGLE, SAFETY_SPIRAL_POS_LEFT,
+    SAFETY_SPIRAL_POS_RIGHT, SEPARATION_INITIAL_ANGLE, SEPARATION_SERVO_ANGLE, rsbl_servo,
+    watchdog,
 };
 use hermes_can::messages::board_status::{ActuatorStatus, ArmingState, WatchdogState};
 

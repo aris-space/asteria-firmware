@@ -1,8 +1,8 @@
 use crate::controls::abort_sequence::ABORT_SEQUENCE;
+use crate::controls::actions::Actions;
 use crate::controls::actions::actuate::{actuate_external_valve, actuate_onboard_valve};
 use crate::controls::actions::wait::wait_no_abort;
-use crate::controls::actions::Actions;
-use crate::controls::runner::{FiringInfo, ABORT_INITIATION, FIRING_INFO};
+use crate::controls::runner::{ABORT_INITIATION, FIRING_INFO, FiringInfo};
 use embassy_time::{Duration, Timer};
 use embedded_utils::fmt::warn;
 use embedded_utils::info;

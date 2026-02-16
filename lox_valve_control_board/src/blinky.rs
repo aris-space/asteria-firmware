@@ -1,4 +1,4 @@
-use crate::modbus_server::{DeviceStatus, DEVICE_STATUS};
+use crate::modbus_server::{DEVICE_STATUS, DeviceStatus};
 use core::sync::atomic::Ordering;
 use embassy_stm32::gpio::{Level, Output};
 use embassy_time::{Duration, Ticker};

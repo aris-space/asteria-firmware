@@ -1,6 +1,6 @@
 use crate::drivers::digital_pressure::{
-    DigitalPressureMeasurementRaw, DigitalTemperatureMeasurementRaw, KellerDriver,
-    KELLER_BUS_ERROR_WATCH,
+    DigitalPressureMeasurementRaw, DigitalTemperatureMeasurementRaw, KELLER_BUS_ERROR_WATCH,
+    KellerDriver,
 };
 use crate::sensors::{ACQ_PRESSURE_FREQ_HZ, ENG_CC_P, FUE_INJ_P, OXD_INJ_P};
 use embassy_time::{Duration, Ticker, Timer};
@@ -65,8 +65,10 @@ pub(crate) async fn keller_acquisition(mut keller_handle: KellerSensRS485<'stati
             },
         );
 
-        trace!("[Keller] (ENG_P: {} barg, ENG_T: {} °C), (FUE_P: {} barg, FUE_T: {} °C), (OXD_P: {} barg, OXD_T: {} °C)",
-            eng_cc_p, eng_cc_t, fue_inj_p, fue_inj_t, oxd_inj_p, oxd_inj_t);
+        trace!(
+            "[Keller] (ENG_P: {} barg, ENG_T: {} °C), (FUE_P: {} barg, FUE_T: {} °C), (OXD_P: {} barg, OXD_T: {} °C)",
+            eng_cc_p, eng_cc_t, fue_inj_p, fue_inj_t, oxd_inj_p, oxd_inj_t
+        );
 
         if error_count > 0 {
             warn!("[Keller] Pressure sensor errors detected: {}", error_count);

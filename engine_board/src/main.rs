@@ -47,7 +47,7 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::i2c::I2c;
 use embassy_stm32::peripherals::{FDCAN1, USART3};
-use embassy_stm32::time::{khz, Hertz};
+use embassy_stm32::time::{Hertz, khz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -75,8 +75,16 @@ pub static CRICITAL_ERROR_INDICATOR: OnceLock<Mutex<NoopRawMutex, Output<'static
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) -> ! {
-    debug!("pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
-        built_info::PKG_NAME, built_info::GIT_COMMIT_HASH_SHORT, built_info::GIT_DIRTY, built_info::PROFILE, built_info::FEATURES, built_info::RUSTC, built_info::TARGET);
+    debug!(
+        "pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
+        built_info::PKG_NAME,
+        built_info::GIT_COMMIT_HASH_SHORT,
+        built_info::GIT_DIRTY,
+        built_info::PROFILE,
+        built_info::FEATURES,
+        built_info::RUSTC,
+        built_info::TARGET
+    );
 
     let mut config = clocks_config();
     set_adc_configs(&mut config);

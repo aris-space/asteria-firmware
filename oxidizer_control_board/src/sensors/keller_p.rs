@@ -1,6 +1,6 @@
 use crate::drivers::digital_pressure::{
-    DigitalPressureDriver, DigitalPressureMeasurementRaw, TankLevelDriver, TankLevelMeasurementRaw,
-    KELLER_BUS_ERROR_WATCH,
+    DigitalPressureDriver, DigitalPressureMeasurementRaw, KELLER_BUS_ERROR_WATCH, TankLevelDriver,
+    TankLevelMeasurementRaw,
 };
 use crate::sensors::{
     ACQ_PRESSURE_FREQUENCY_HZ, ACQ_TANK_LEVEL_FREQUENCY_HZ, OSS_TNK_LVL, OSS_TNK_P1, OSS_TNK_P2,

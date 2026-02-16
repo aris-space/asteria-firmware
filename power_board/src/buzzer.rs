@@ -1,7 +1,7 @@
 use crate::sensor_readout::RAIL_24V_LAST;
 use embassy_stm32::time::Hertz;
-use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_stm32::timer::GeneralInstance4Channel;
+use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_time::{Duration, Timer};
 use micromath::F32Ext;
 

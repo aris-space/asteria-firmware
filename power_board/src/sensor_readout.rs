@@ -4,7 +4,7 @@ use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Ticker};
 use embedded_utils::fmt::{error, info};
-use hermes_can::messages::sensor_data::{RailStatus, RailStatus24V, RailStatus5V};
+use hermes_can::messages::sensor_data::{RailStatus, RailStatus5V, RailStatus24V};
 use ltc2945::I2cInterface;
 
 pub static RAIL_5V_LAST: Watch<ThreadModeRawMutex, RailStatus5V, 2> = Watch::new();

@@ -16,17 +16,17 @@ use embassy_stm32::can::filter::{Action, FilterType, StandardFilter};
 use embassy_stm32::can::frame::{self, FdFrame, Header};
 use embassy_stm32::can::{Can, CanConfigurator, CanRx, CanTx, OperatingMode, RxPin, TxPin};
 use embassy_stm32::interrupt::typelevel::Binding;
-use embassy_stm32::{can, Peri};
+use embassy_stm32::{Peri, can};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::{with_timeout, Duration, Instant, Ticker, TimeoutError, Timer};
+use embassy_time::{Duration, Instant, Ticker, TimeoutError, Timer, with_timeout};
 use embedded_can::Id;
 use embedded_utils::fmt::*;
 use hermes_can::messages::board_status::SensorStatus::Online;
 use hermes_can::messages::board_status::{FuelControlBoardStatus, FuelControlBoardValveStates};
 use hermes_can::messages::sensor_data::{FuelTankPressure, PressurizationLinePressure};
 use hermes_can::{
-    messages::Message, next_valid_length, CanDecodeError, CanEncodeError, CanMessage,
+    CanDecodeError, CanEncodeError, CanMessage, messages::Message, next_valid_length,
 };
 
 /// Error type for CAN operations.
@@ -129,8 +129,8 @@ pub fn setup_can<'a, T: can::Instance>(
     rx: Peri<'a, impl RxPin<T>>,
     tx: Peri<'a, impl TxPin<T>>,
     _irqs: impl Binding<T::IT0Interrupt, can::IT0InterruptHandler<T>>
-        + Binding<T::IT1Interrupt, can::IT1InterruptHandler<T>>
-        + 'a,
+    + Binding<T::IT1Interrupt, can::IT1InterruptHandler<T>>
+    + 'a,
 ) -> Can<'a> {
     let mut can = CanConfigurator::new(peri, rx, tx, _irqs);
     can.set_bitrate(1_000_000);
@@ -188,7 +188,9 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
                     }
                     Message::ResetSpecific(x) => {
                         if x.board_id == THIS_BOARD_ID {
-                            warn!("[CAN Task] Received ResetSpecific message, resetting FuelControlBoard");
+                            warn!(
+                                "[CAN Task] Received ResetSpecific message, resetting FuelControlBoard"
+                            );
                             reset_now();
                         }
                     }

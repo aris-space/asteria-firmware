@@ -1,7 +1,7 @@
-use crate::drivers::environmental::EnvironmentalDriver;
-use crate::sensors::{update_status, CommonSensorConfig, SensorId, SensorStatus};
-use crate::util::ExponentialBackoff;
 use crate::Debug2Format;
+use crate::drivers::environmental::EnvironmentalDriver;
+use crate::sensors::{CommonSensorConfig, SensorId, SensorStatus, update_status};
+use crate::util::ExponentialBackoff;
 use core::fmt::Debug;
 use core::future::pending;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;

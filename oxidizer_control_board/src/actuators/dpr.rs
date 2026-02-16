@@ -1,14 +1,14 @@
 #![allow(unused_assignments)]
 
 use crate::actuators::{CYCLE_TIME_MS, KD, KI, KP, SAFETY_LIMIT_BARG};
-use crate::buzzer::{BuzzerState, BUZZER_WATCH};
-use crate::drivers::digital_pressure::DPR_PRESSURE_WATCH;
+use crate::buzzer::{BUZZER_WATCH, BuzzerState};
 use crate::drivers::WATCH;
+use crate::drivers::digital_pressure::DPR_PRESSURE_WATCH;
 use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::watch::Watch;
-use embassy_time::{with_timeout, Duration, Ticker, Timer};
+use embassy_time::{Duration, Ticker, Timer, with_timeout};
 use embedded_utils::fmt::warn;
 use embedded_utils::trace;
 use hermes_can::messages::board_status::ValveState::{Active, Inactive};

@@ -1,11 +1,11 @@
-use crate::controls::actions::detect::SENSOR_TIMEOUT;
 use crate::controls::actions::Watcher;
+use crate::controls::actions::detect::SENSOR_TIMEOUT;
 use crate::controls::runner::ABORT_INITIATION;
 use crate::drivers::{ENGINE_P_WATCH, IGNITER_P_WATCH};
 use crate::sensors::Sensor;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
-use embassy_time::{with_timeout, Duration, Timer};
+use embassy_time::{Duration, Timer, with_timeout};
 use hermes_can::messages::event_messages::FiringAbortInitiation;
 
 #[derive(Clone, PartialEq)]

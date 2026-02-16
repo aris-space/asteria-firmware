@@ -3,7 +3,7 @@ use crate::drivers::{ENGINE_P_WATCH, IGNITER_P_WATCH, WATCH};
 use crate::sensors::Sensor;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::{Receiver, Sender};
-use embassy_time::{with_timeout, Duration, Instant};
+use embassy_time::{Duration, Instant, with_timeout};
 use embedded_utils::fmt::warn;
 use hermes_can::messages::event_messages::FiringAbortInitiation;
 

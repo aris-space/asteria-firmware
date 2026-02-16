@@ -1,7 +1,7 @@
 use crate::drivers::magnetic_field;
 use crate::drivers::magnetic_field::MagMeasurement;
-use crate::sensors::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
 use crate::sensors::SensorId;
+use crate::sensors::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
@@ -9,8 +9,8 @@ use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel};
 use embassy_sync::watch;
 use embassy_sync::watch::{Sender, Watch};
 use embassy_time::{Duration, Instant};
-use embedded_utils::fmt::*;
 use embedded_utils::ExtendTime;
+use embedded_utils::fmt::*;
 use hermes_can::messages::sensor_data::ImuData;
 use imu_fusion::{Fusion, FusionAhrsSettings, FusionVector};
 use lsm6dso32::{Acceleration, AngularRate};

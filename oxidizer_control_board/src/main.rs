@@ -13,7 +13,7 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
 use embassy_stm32::i2c::I2c;
 use embassy_stm32::peripherals::{FDCAN1, USART3};
-use embassy_stm32::time::{khz, Hertz};
+use embassy_stm32::time::{Hertz, khz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, can, i2c, peripherals, usart};
 use embassy_time::Timer;
@@ -42,8 +42,8 @@ use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::buzzer::buzzer_task;
 use crate::can_impl::{can_rx_task, setup_can, spawn_can_tx_task};
-use crate::sensors::thermocouples::thermocouple_task;
 use crate::sensors::FSS_TNK_T;
+use crate::sensors::thermocouples::thermocouple_task;
 use ads1120_thermocouples::thermocouple_conversions::ThermocoupleType;
 use ads1120_thermocouples::{ADSThermocouples, PGAGain};
 use keller_pressure::KellerSensRS485;
@@ -64,8 +64,16 @@ bind_interrupts!(struct Irqs {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) -> ! {
-    debug!("pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
-        built_info::PKG_NAME, built_info::GIT_COMMIT_HASH_SHORT, built_info::GIT_DIRTY, built_info::PROFILE, built_info::FEATURES, built_info::RUSTC, built_info::TARGET);
+    debug!(
+        "pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
+        built_info::PKG_NAME,
+        built_info::GIT_COMMIT_HASH_SHORT,
+        built_info::GIT_DIRTY,
+        built_info::PROFILE,
+        built_info::FEATURES,
+        built_info::RUSTC,
+        built_info::TARGET
+    );
 
     let config = clocks_config();
     let p = embassy_stm32::init(config);
