@@ -11,7 +11,7 @@ embassy-stm32 = { workspace = true, features = ["stm32g473rc", "unstable-pac"] }
 cortex-m = { workspace = true }
 
 defmt = { version = "0.3", optional = true }
-embedded_utils = { path = "../../../embedded_utils" }
+embedded_utils = { path = "../../embedded_utils" }
 
 [features]
 defmt = ["dep:defmt"]

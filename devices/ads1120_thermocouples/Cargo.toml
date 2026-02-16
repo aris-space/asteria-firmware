@@ -7,7 +7,7 @@ description = "Driver for ADS1120 device reading thermocouples"
 keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
 
 [dependencies]
-embedded_utils = { path = "../../../embedded_utils" }
+embedded_utils = { path = "../../embedded_utils" }
 
 embassy-stm32 = { workspace = true, features = ["stm32g473rc", "exti"] }
 embassy-time = { workspace = true }

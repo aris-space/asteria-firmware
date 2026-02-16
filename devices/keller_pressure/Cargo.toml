@@ -7,7 +7,7 @@ description = "Driver for Keller Pressure Sensors over RS485"
 keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
 
 [dependencies]
-embedded_utils = { path = "../../../embedded_utils" }
+embedded_utils = { path = "../../embedded_utils" }
 
 embassy-stm32 = { workspace = true, features = ["stm32g473rc"] }
 embassy-time = { workspace = true }
