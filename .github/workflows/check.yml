@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: nightly-2025-08-04
+  RUST_TOOLCHAIN: nightly-2026-02-03
 
 jobs:
   test:
@@ -97,7 +97,7 @@ jobs:
       - name: Build docs
         # Not quite sure anymore about these flags. But --workspace is important.
         run: >
-          cargo hack doc --no-deps --all-features --workspace 
+          cargo hack doc --no-deps --all-features --workspace
           --document-private-items -Zrustdoc-map --target thumbv7em-none-eabihf
         env:
           RUSTDOCFLAGS: -Zunstable-options --cfg docsrs -D warnings
