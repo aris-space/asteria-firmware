@@ -64,11 +64,10 @@ embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0
 embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
 
 [profile.dev]
-codegen-units = 1
 debug = 2
 debug-assertions = true
 incremental = true
-opt-level = 'z'
+opt-level = 1
 overflow-checks = true
 
 [profile.release]
