@@ -1,0 +1,14 @@
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::watch::Watch;
+
+pub(crate) mod digital_pressure;
+pub(crate) mod pressure;
+pub(crate) mod temperature;
+
+pub const CAP: usize = 10;
+pub const PUB: usize = 1;
+pub const SUB: usize = 2;
+pub const WATCH: usize = 4;
+
+pub static ENGINE_P_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
+pub static IGNITER_P_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();

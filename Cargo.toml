@@ -1,0 +1,80 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "embedded_utils",
+    "embedded_utils_2",
+    "sensor_carrier",
+    "recovery_board",
+    "power_board",
+    "communication_board",
+    "lox_valve_control_board",
+    "devices/ms5607",
+    "devices/lsm6dso32",
+    "devices/epos4",
+    "hephaestus/engine_board",
+    "hephaestus/fuel_control_board",
+    "hephaestus/oxidizer_control_board",
+    "hephaestus/engine_board",
+    "hephaestus/devices/ads1120_thermocouples",
+    "hephaestus/devices/keller_pressure",
+    "hephaestus/devices/trafag_pressure",
+    "hephaestus/devices/max31889_thermistor",
+    "hephaestus/filters",
+]
+
+exclude = [
+    # SUPER important! Uuurgh took me hours to figure out why CI was failing.
+    # Necessary, so that --all-features does not include the default features of hermes-can,
+    # because those include std, and we can't have that.
+    "hermes-can",
+]
+
+[workspace.dependencies]
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.5"
+
+embassy-stm32 = "*"
+embassy-time = "*"
+embassy-executor = "*"
+embassy-futures = "*"
+embassy-sync = "*"
+embassy-embedded-hal = "*"
+
+defmt = { version = "0.3.8" }
+defmt-rtt = { version = "0.4.1" }
+
+embedded-can = "0.4.1"
+embedded-hal-async = "1.0.0"
+embedded-hal-bus = "0.3.0"
+
+panic-probe = "0.3.2"
+panic-reset = "0.1.1"
+
+hermes-can = { path = "hermes-can", version = "=0.3" }
+thiserror = { version = "2.0.11", default-features = false }
+
+[patch.crates-io]
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+
+[profile.dev]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = true
+opt-level = 'z'
+overflow-checks = true
+
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false

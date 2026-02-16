@@ -1,0 +1,21 @@
+[package]
+name = "ms5607"
+version = "0.1.0"
+edition = "2024"
+authors = ["Louis Schell <louis.schell1@gmx.de>"]
+description = "Embedded hal driver for the TE MS5607 pressure sensor"
+keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
+
+[dependencies]
+embedded-hal-async = "1.0.0"
+embedded-hal = "1.0.0"
+
+defmt = { version = "0.3", optional = true }
+
+[features]
+defmt-03 = ["dep:defmt", "embedded-hal/defmt-03", "embedded-hal-async/defmt-03"]
+
+[lib]
+test = true
+doctest = false
+bench = false

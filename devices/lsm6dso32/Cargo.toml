@@ -1,0 +1,22 @@
+[package]
+name = "lsm6dso32"
+version = "0.1.0"
+edition = "2024"
+authors = ["Louis Schell <louis.schell1@gmx.de>", "Robert Jahnke <robert.jahnke@aris-space.ch>"]
+description = "Device driver for the LSM6DSO32 IMU"
+
+[dependencies]
+device-driver = "1.0.4"
+embedded-hal-async = "1.0.0"
+embedded-hal = "1.0.0"
+
+defmt = { version = "0.3", optional = true }
+
+[features]
+default = ["defmt-03"]
+defmt-03 = ["device-driver/defmt-03", "defmt"]
+
+[lib]
+test = false
+doctest = false
+bench = false

@@ -1,0 +1,14 @@
+[package]
+name = "filters"
+version = "0.1.0"
+edition = "2024"
+authors = ["Domenic Nebiker <dnebiker@aris-space.ch"]
+description = "Gaussian Moving Average filter implementation"
+
+[dependencies]
+libm = "0.2.15"
+
+[lib]
+test = false
+doctest = false
+bench = false

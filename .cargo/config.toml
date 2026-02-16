@@ -1,0 +1,8 @@
+[env]
+RUSTFLAGS = { value = "", relative = false }
+
+[unstable]
+feature-unification = true
+
+[resolver]
+feature-unification = "package"

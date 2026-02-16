@@ -1,0 +1,25 @@
+[package]
+name = "ads1120_thermocouples"
+version = "0.1.0"
+edition = "2024"
+authors = ["Domenic Nebiker <dnebiker@aris-space.ch"]
+description = "Driver for ADS1120 device reading thermocouples"
+keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
+
+[dependencies]
+embedded_utils = { path = "../../../embedded_utils" }
+
+embassy-stm32 = { workspace = true, features = ["stm32g473rc", "exti"] }
+embassy-time = { workspace = true }
+
+defmt = { version = "0.3", optional = true }
+
+micromath = { git = "https://github.com/tarcieri/micromath", rev = "7139d27" }
+
+[features]
+defmt = ["dep:defmt", "embassy-stm32/defmt"]
+
+[lib]
+test = false
+doctest = false
+bench = false

@@ -1,0 +1,21 @@
+[package]
+name = "max31889_thermistor"
+version = "0.1.0"
+edition = "2024"
+authors = ["Matteo Vass <matteo.vass@aris-space.ch"]
+description = "Driver for ADS1120 device reading thermocouples"
+keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
+
+[dependencies]
+embassy-time = { workspace = true }
+embassy-stm32 = { workspace = true, features = ["stm32g473rc"] }
+
+defmt = { version = "0.3", optional = true }
+
+[features]
+defmt-03 = ["dep:defmt"]
+
+[lib]
+test = false
+doctest = false
+bench = false

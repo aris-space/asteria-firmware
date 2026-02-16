@@ -1,0 +1,94 @@
+[package]
+name = "sensor_carrier"
+version = "0.1.0"
+edition = "2021"
+authors = ["Louis Schell <louis.schell1@gmx.de>"]
+
+[dependencies]
+embedded_utils_3 = { path = "../embedded_utils_3" }
+
+cortex-m = { workspace = true, features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = { workspace = true }
+
+embassy-stm32 = { workspace = true, features = [
+    "stm32h723zg",
+    "time-driver-any",
+    "memory-x",
+    "unstable-pac",
+    "exti",
+] }
+embassy-time = { workspace = true, features = ["tick-hz-32_768"] }
+embassy-executor = { workspace = true, features = ["arch-cortex-m", "executor-thread"] }
+embassy-futures = { workspace = true }
+embassy-sync = { workspace = true }
+
+embedded-can = { workspace = true }
+embedded-hal-async = { workspace = true }
+embassy-embedded-hal = { workspace = true }
+embedded-hal-bus = { workspace = true, features = ["async"] }
+embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
+
+defmt = { workspace = true, optional = true }
+defmt-rtt = { workspace = true, optional = true }
+
+panic-probe = { workspace = true, optional = true }
+panic-reset = { workspace = true }
+
+hermes-can = { workspace = true, features = ["defmt"] }
+
+#atomic = { version = "0.6.0", default-features = false }
+#bytemuck = { version = "1.21.0", default-features = false, features = ["derive"] }
+
+atomic_enum = { version = "0.3.0", default-features = false }
+
+# Drivers
+lsm303agr = { version = "1.1.0", features = ["async"] }
+sht4x = { version = "0.2.0", features = ["embedded-hal-async", "defmt"] }
+ms5607 = { path = "../devices/ms5607", features = ['defmt-03'] }
+ublox = { version = "0.4.5", default-features = false }
+lsm6dso32 = { path = "../devices/lsm6dso32", features = ['defmt-03'] }
+
+# Sensor fusion
+imu-fusion = { git = "https://github.com/Rechenmaschine/imu-fusion-rs.git", default-features = false }
+
+micromath = { git = "https://github.com/tarcieri/micromath", rev = "7139d27", features = [
+    "defmt",
+    "num-traits",
+] }
+minikalman = { version = "0.6.0", features = [] }
+num-traits = { version = "0.2.19", default-features = false, features = [] }
+nalgebra = { version = "0.33.2", default-features = false, features = [] }
+simba = { version = "0.9.0", default-features = false, features = ["libm"] }
+libm = "0.2.11"
+
+# Utilities
+thiserror = { workspace = true, default-features = false }
+heapless = "0.8.0"
+
+[build-dependencies]
+built = { version = "0.7.7", features = ["git2"] }
+
+[features]
+default = ["debug"]
+debug = ["defmt", "dep:panic-probe"]
+defmt = [
+    "dep:defmt",
+    "dep:defmt-rtt",
+    "panic-probe/defmt",
+    "panic-probe/defmt-error",
+    "panic-probe/print-defmt",
+    "embassy-executor/defmt",
+    "embassy-sync/defmt",
+    "embassy-futures/defmt",
+    "embassy-time/defmt",
+    "embassy-time/defmt-timestamp-uptime",
+    "embassy-stm32/defmt",
+    "embedded-hal-async/defmt-03",
+    "embedded-hal-bus/defmt-03",
+]
+
+[[bin]]
+name = "sensor_carrier"
+test = false
+doctest = false
+bench = false

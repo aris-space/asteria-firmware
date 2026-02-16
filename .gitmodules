@@ -1,0 +1,3 @@
+[submodule "hermes-can"]
+	path = hermes-can
+	url = git@github.com:aris-space/hermes-can.git

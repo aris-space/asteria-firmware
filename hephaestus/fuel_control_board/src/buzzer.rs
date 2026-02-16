@@ -1,0 +1,67 @@
+use crate::drivers::WATCH;
+use cortex_m::prelude::_embedded_hal_Pwm;
+use embassy_stm32::peripherals::TIM2;
+use embassy_stm32::time::Hertz;
+use embassy_stm32::timer::simple_pwm::SimplePwm;
+use embassy_stm32::timer::Channel::Ch3;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::watch::Watch;
+use embassy_time::{Duration, Instant, Timer};
+
+pub static BUZZER_WATCH: Watch<ThreadModeRawMutex, BuzzerState, WATCH> = Watch::new();
+
+const STATUS_BEEP_INTERVAL: Duration = Duration::from_secs(10);
+
+#[derive(Clone)]
+pub enum BuzzerState {
+    Idle,
+    Error,
+}
+#[embassy_executor::task]
+pub async fn buzzer_task(mut pwm: SimplePwm<'static, TIM2>) {
+    let mut watcher = BUZZER_WATCH.receiver().unwrap();
+
+    pwm.enable(Ch3);
+    let on = (pwm.get_max_duty() as f32 * 0.95) as u32;
+    let off = 0;
+
+    start_up(&mut pwm).await;
+
+    pwm.set_frequency(Hertz(440));
+
+    let mut status_beep_time = Instant::now();
+    loop {
+        let state = watcher.get().await;
+
+        match state {
+            BuzzerState::Error => {
+                pwm.set_duty(Ch3, on);
+            }
+            BuzzerState::Idle => {
+                pwm.set_duty(Ch3, off);
+
+                if Instant::now() - status_beep_time >= STATUS_BEEP_INTERVAL {
+                    pwm.set_duty(Ch3, on);
+                    Timer::after(Duration::from_millis(100)).await;
+                    pwm.set_duty(Ch3, off);
+                    Timer::after(Duration::from_millis(100)).await;
+                    pwm.set_duty(Ch3, on);
+                    Timer::after(Duration::from_millis(100)).await;
+                    pwm.set_duty(Ch3, off);
+                    status_beep_time = Instant::now();
+                }
+            }
+        }
+        Timer::after(Duration::from_millis(500)).await;
+    }
+}
+
+pub(crate) async fn start_up<'a>(pwm: &mut SimplePwm<'a, TIM2>) {
+    pwm.set_duty(Ch3, pwm.get_max_duty() / 2);
+    Timer::after(Duration::from_millis(250)).await;
+    pwm.set_frequency(Hertz(760));
+    Timer::after(Duration::from_millis(250)).await;
+    pwm.set_frequency(Hertz(1520));
+    Timer::after(Duration::from_millis(500)).await;
+    pwm.set_duty(Ch3, 0);
+}

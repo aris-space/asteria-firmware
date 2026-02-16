@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+
+BIN="$1"
+BIN_DIR=$(dirname "$BIN")
+BIN_NO_EXT="${BIN%.*}"
+BIN_BIN="${BIN_NO_EXT}.bin"
+
+# Convert ELF to .bin in the same target dir
+arm-none-eabi-objcopy -O binary "$BIN" "$BIN_BIN"
+
+# Flash with STM32CubeProgrammer
+STM32_Programmer_CLI -c port=SWD -d "$BIN_BIN" 0x08000000 -rst
+
+# Attach probe-rs
+exec probe-rs attach --chip STM32G473RCTx "$BIN"
