@@ -42,14 +42,14 @@ embassy-futures = "*"
 embassy-sync = "*"
 embassy-embedded-hal = "*"
 
-defmt = { version = "0.3.8" }
-defmt-rtt = { version = "0.4.1" }
+defmt = { version = "1.0.1" }
+defmt-rtt = { version = "1.0.0" }
 
 embedded-can = "0.4.1"
 embedded-hal-async = "1.0.0"
 embedded-hal-bus = "0.3.0"
 
-panic-probe = "0.3.2"
+panic-probe = "1.0.0"
 panic-reset = "0.1.1"
 
 hermes-can = { path = "hermes-can", version = "=0.3" }
