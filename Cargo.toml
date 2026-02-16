@@ -3,8 +3,6 @@ resolver = "2"
 
 members = [
     "embedded_utils",
-    "embedded_utils_2",
-    "embedded_utils_3",
     "sensor_carrier",
     "recovery_board",
     "power_board",

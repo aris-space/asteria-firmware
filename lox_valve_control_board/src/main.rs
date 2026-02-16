@@ -12,7 +12,7 @@ use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
 use embassy_stm32::{bind_interrupts, peripherals, Config};
-use embedded_utils_2::fmt::*;
+use embedded_utils::fmt::*;
 
 use crate::modbus_server::{
     clear_status, lox_valve_motor_controller_task, lox_valve_motor_position_updater_task,

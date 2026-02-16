@@ -32,11 +32,19 @@ use embassy_stm32::{bind_interrupts, can, i2c, peripherals, spi, usart};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Duration, Timer};
-use embedded_utils::clocks_config;
 use embedded_utils::fmt::*;
 use lsm6dso32::spi::Lsm6Dso32SpiInterface;
 use ms5607::Ms5607;
 use sht4x::Sht4xAsync;
+
+mod clocks {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../shared/stm32h723_clocks.rs"
+    ));
+}
+
+use clocks::clocks_config;
 
 #[cfg(not(feature = "defmt"))]
 pub struct Debug2Format<'a, T: core::fmt::Debug + ?Sized>(pub &'a T);

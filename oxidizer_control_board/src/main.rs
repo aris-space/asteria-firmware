@@ -17,8 +17,16 @@ use embassy_stm32::time::{khz, Hertz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, can, i2c, peripherals, usart};
 use embassy_time::Timer;
-use embedded_utils::clocks_config;
 use embedded_utils::fmt::*;
+
+mod clocks {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../shared/stm32g473_clocks.rs"
+    ));
+}
+
+use clocks::clocks_config;
 
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));

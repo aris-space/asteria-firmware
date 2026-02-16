@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Louis Schell <louis.schell1@gmx.de>"]
 
 [dependencies]
-embedded_utils_2 = { path = "../embedded_utils_2" }
+embedded_utils = { path = "../embedded_utils" }
 
 cortex-m = { workspace = true, features = ["critical-section-single-core"] }
 cortex-m-rt = { workspace = true }

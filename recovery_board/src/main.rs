@@ -33,10 +33,18 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{with_timeout, Timer};
 use embassy_time::{Duration, Instant};
-use embedded_utils::clocks_config;
 use embedded_utils::fmt::*;
 use hermes_can::messages::board_status::{ActuatorStatus, ArmingState, WatchdogState};
 use hermes_can::messages::Message;
+
+mod clocks {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../shared/stm32g473_clocks.rs"
+    ));
+}
+
+use clocks::clocks_config;
 
 /* BEGIN CONSTANTS */
 

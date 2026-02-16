@@ -11,7 +11,7 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{with_timeout, Duration, TimeoutError, Timer};
 use embedded_io_async::{Read, Write};
-use embedded_utils_2::{error, info};
+use embedded_utils::{error, info};
 use epos4::{Epos4, Epos4Error, EposStatus};
 use static_cell::StaticCell;
 

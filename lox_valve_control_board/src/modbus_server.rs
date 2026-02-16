@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use core::sync::atomic::{AtomicU16, Ordering};
-use embedded_utils_2::fmt::{error, info, trace, warn};
+use embedded_utils::fmt::{error, info, trace, warn};
 
 use crate::valve::{get_position_percent, move_to_position_percent, LOX_VALVE_MOTOR};
 use crate::Db2F;

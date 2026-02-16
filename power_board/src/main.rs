@@ -33,10 +33,17 @@ pub use ::panic_reset as _;
 #[cfg(feature = "defmt")]
 use {defmt_rtt as _, panic_probe as _};
 
+mod clocks {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../shared/stm32g473_clocks.rs"
+    ));
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) -> ! {
     // Initialize clocks and peripherals
-    let config = embedded_utils::clocks_config();
+    let config = clocks::clocks_config();
     let p = embassy_stm32::init(config);
 
     // Configure LEDs (PB0, PB1, PB2) as outputs (low = off)

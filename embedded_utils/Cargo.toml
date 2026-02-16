@@ -5,7 +5,6 @@ edition = "2021"
 authors = ["Louis Schell <louis.schell1@gmx.de>"]
 
 [dependencies]
-embassy-stm32 = { workspace = true, features = ["time-driver-any", "stm32g473rc"] }
 embassy-time = { workspace = true, features = ["tick-hz-32_768"] }
 defmt = { version = "0.3.10", optional = true }
 

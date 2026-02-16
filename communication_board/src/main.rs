@@ -4,8 +4,16 @@
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_time::Timer;
-use embedded_utils::clocks_config;
 use embedded_utils::fmt::*;
+
+mod clocks {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../shared/stm32g473_clocks.rs"
+    ));
+}
+
+use clocks::clocks_config;
 
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));

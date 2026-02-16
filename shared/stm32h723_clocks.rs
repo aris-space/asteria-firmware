@@ -1,19 +1,11 @@
-#![no_std]
-
-pub mod fmt;
-
-use core::sync::atomic::AtomicU32;
-use embassy_stm32::rcc::mux::I2c1235sel;
-use embassy_stm32::rcc::mux::I2c4sel;
-use embassy_stm32::rcc::mux::Saisel;
-use embassy_stm32::rcc::mux::Usart16910sel;
-use embassy_stm32::rcc::mux::Usart234578sel;
-use embassy_stm32::rcc::{AHBPrescaler, APBPrescaler, Hse, Pll, PllDiv, Sysclk, VoltageScale};
-use embassy_stm32::rcc::{HseMode, PllMul, PllPreDiv, PllSource};
-use embassy_stm32::time::Hertz;
-use embassy_time::{Duration, Instant};
-
 pub fn clocks_config() -> embassy_stm32::Config {
+    use embassy_stm32::rcc::mux::{I2c1235sel, I2c4sel, Saisel, Usart16910sel, Usart234578sel};
+    use embassy_stm32::rcc::{
+        AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllDiv, PllMul, PllPreDiv, PllSource,
+        Sysclk, VoltageScale,
+    };
+    use embassy_stm32::time::Hertz;
+
     let mut config = embassy_stm32::Config::default();
 
     // 16 MHz XTAL
@@ -67,21 +59,4 @@ pub fn clocks_config() -> embassy_stm32::Config {
     config.rcc.mux.usart234578sel = Usart234578sel::PCLK1;
 
     config
-}
-
-pub static ERROR_COUNT: AtomicU32 = AtomicU32::new(0);
-pub static WARN_COUNT: AtomicU32 = AtomicU32::new(0);
-
-pub trait ExtendTime {
-    fn as_secs_f32(&self) -> f32;
-}
-impl ExtendTime for Instant {
-    fn as_secs_f32(&self) -> f32 {
-        self.as_micros() as f32 / 1e6
-    }
-}
-impl ExtendTime for Duration {
-    fn as_secs_f32(&self) -> f32 {
-        self.as_micros() as f32 / 1e6
-    }
 }
