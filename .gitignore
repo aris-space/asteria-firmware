@@ -5,4 +5,9 @@
 **/Embed.local.toml
 *.log
 
+# Don't upload credentials
+.b2.env
+# Cached ELF artifacts
+.artifacts/
+
 crates/Cargo.lock

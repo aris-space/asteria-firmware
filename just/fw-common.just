@@ -1,5 +1,7 @@
 target := "thumbv7em-none-eabihf"
 
+import './fw-artifacts.just'
+
 # The following variables must be set by the caller of this justfile
 # `chip`: The STM32 chip being targeted, e.g. `STM32G473RCTx` or `STM32H723ZG`.
 # `bin` : The name of the binary being built, e.g. `fw-engine-board` or `fw-sensor-carrier`.
@@ -14,13 +16,14 @@ build *args:
         --target {{target}} \
         {{args}}
 
-# Build the firmware and flash it to the device. Attaches to the target after flashing
-# either with probe-rs (if use_probe_rs=true) or with the STM32 Programmer utility otherwise.
+# Build the firmware, upload its ELF artifact to B2, and flash it to the device.
+# Attaches to the target after flashing either with probe-rs (if use_probe_rs=true)
+# or with the STM32 Programmer utility otherwise.
 run *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ " {{args}} " == *" --message-format "* ]]; then
+    if [[ " {{args}} " == *" --message-format "* ]] || [[ " {{args}} " == *" --message-format="* ]]; then
       echo "Do not pass --message-format; recipe needs JSON output." >&2
       exit 2
     fi
@@ -70,14 +73,47 @@ run *args:
     echo "Built with profile: $requested_profile => $chosen_dir"
     echo "Using ELF: $elf"
 
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    upload_script="$repo_root/just/scripts/upload-elf.sh"
+    if [[ ! -x "$upload_script" ]]; then
+      echo "Missing executable upload script: $upload_script" >&2
+      exit 1
+    fi
+
+    upload_log="$(mktemp)"
+    cleanup_upload() {
+      rm -f "$upload_log"
+    }
+    trap cleanup_upload EXIT
+
+    echo "Starting ELF upload in background."
+    (
+      "$upload_script" "$elf"
+    ) >"$upload_log" 2>&1 &
+    upload_pid="$!"
+
+    wait_for_upload() {
+      if wait "$upload_pid"; then
+        cat "$upload_log"
+      else
+        echo "ELF upload failed. s5cmd output:" >&2
+        cat "$upload_log" >&2
+        exit 1
+      fi
+    }
+
     if [[ "{{use_probe_rs}}" == "true" ]]; then
         probe-rs run --chip {{chip}} \
             --log-format '{t} {L:severity} {s}' "$elf"
+        wait_for_upload
     else
         arm-none-eabi-objcopy -O binary "$elf" "${elf}.bin"
         STM32_Programmer_CLI -c port=SWD -d "${elf}.bin" 0x08000000 -rst
         probe-rs attach --chip {{chip}} "$elf"
+        # Mirror probe-rs behavior: defer upload wait until the interactive phase ends.
+        wait_for_upload
     fi
+
 
 # Attach to the target with probe-rs, using the most recently built ELF as the specified binary.
 attach:
