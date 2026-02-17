@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "embedded_utils",
+    "wire-types",
     "sensor_carrier",
     "recovery_board",
     "power_board",
@@ -27,6 +28,7 @@ exclude = [
     # Necessary, so that --all-features does not include the default features of hermes-can,
     # because those include std, and we can't have that.
     "hermes-can",
+    "asteria-tool",
 ]
 
 [workspace.dependencies]

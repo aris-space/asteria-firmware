@@ -1,0 +1,16 @@
+[package]
+name = "wire-types"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+postcard-rpc = { version = "0.12", default-features = false }
+postcard-schema = { version = "0.2", default-features = false, features = [
+    "derive",
+    "heapless-v0_9",
+] }
+serde = { version = "1", default-features = false, features = ["derive"] }
+heapless = { version = "0.9", default-features = false, features = ["serde"] }
+
+[features]
+use-std = []
