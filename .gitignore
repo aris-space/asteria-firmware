@@ -4,3 +4,5 @@
 **/.DS_Store
 **/Embed.local.toml
 *.log
+
+crates/Cargo.lock

@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = ["app"]
+
+[patch.crates-io]
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+
+[profile.dev]
+debug = 2
+debug-assertions = true
+incremental = true
+opt-level = 1
+overflow-checks = true
+
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false

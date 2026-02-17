@@ -1,0 +1,18 @@
+[package]
+name = "embedded-utils"
+version = "0.1.0"
+edition = "2024"
+authors = ["Louis Schell <louis.schell1@gmx.de>"]
+
+[dependencies]
+embassy-time = { workspace = true, features = ["tick-hz-32_768"] }
+defmt = { version = "0.3.10", optional = true }
+
+[features]
+defmt = ["dep:defmt"]
+
+[lib]
+name = "embedded_utils"
+test = false
+doctest = false
+bench = false
