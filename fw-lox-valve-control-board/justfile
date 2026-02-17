@@ -1,0 +1,5 @@
+chip    := "STM32G4A1KETx"
+bin     := "fw-lox-valve-control-board"
+flasher := "probe-rs"
+
+import '../just/fw-common.just'

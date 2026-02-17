@@ -1,0 +1,5 @@
+chip    := "STM32G473RCTx"
+bin     := "fw-power-board"
+flasher := "probe-rs"
+
+import '../just/fw-common.just'

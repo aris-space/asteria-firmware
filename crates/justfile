@@ -1,0 +1,13 @@
+target := "thumbv7em-none-eabihf"
+
+fmt:
+    cargo fmt --all
+
+build *args:
+    cargo build \
+        --workspace \
+        --target {{target}} \
+        {{args}}
+
+ci-checks:
+    cargo clippy --workspace --target {{target}} -- -D warnings

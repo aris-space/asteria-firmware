@@ -1,0 +1,5 @@
+chip    := "STM32G473RCTx"
+bin     := "fw-recovery-board"
+flasher := "probe-rs"
+
+import '../just/fw-common.just'

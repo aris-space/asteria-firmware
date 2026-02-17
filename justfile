@@ -2,4 +2,12 @@ workspaces := "fw-engine-board fw-sensor-carrier fw-power-board fw-communication
 
 # Format all workspaces
 fmt:
-    for ws in {{workspaces}}; do cargo fmt --manifest-path $ws/Cargo.toml --all; done
+    for ws in {{workspaces}}; do (cd $ws && just fmt); done
+
+# Build all workspaces, transparently pass any args
+build *args:
+    for ws in {{workspaces}}; do (cd $ws && just build {{args}}); done
+
+# Run CI checks across all workspaces
+ci-checks:
+    for ws in {{workspaces}}; do (cd $ws && just ci-checks); done

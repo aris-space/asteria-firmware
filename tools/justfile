@@ -1,0 +1,8 @@
+fmt:
+    cargo fmt --all
+
+build *args:
+    cargo build {{args}}
+
+ci-checks:
+    cargo clippy --workspace --all-targets -- -D warnings
