@@ -1,7 +1,7 @@
 target := "thumbv7em-none-eabihf"
 
-fmt:
-    cargo fmt --all
+fmt *args:
+    cargo fmt {{args}}
 
 build *args:
     cargo build \
@@ -11,3 +11,22 @@ build *args:
 
 ci-checks:
     cargo clippy --workspace --target {{target}} -- -D warnings
+
+# Run clippy with optional extra args
+clippy *args:
+    cargo clippy --workspace --target {{target}} -- {{args}}
+
+# Run host-side tests for shared crates
+# note: it is important that we test on an std-supported target, else
+# CI might complain about pulling in std.
+test *args:
+    cargo test --locked --workspace --all-features -- --skip skipci {{args}}
+
+# Build docs for shared crates
+doc *args:
+    cargo doc --no-deps --all-features --workspace \
+    --document-private-items -Zrustdoc-map {{args}}
+
+# Clean rust build artifacts
+clean:
+    cargo clean

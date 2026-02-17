@@ -27,14 +27,13 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - name: cargo generate-lockfile
-        # enable this ci template to run regardless of whether the lockfile is checked in or not
-        if: hashFiles('Cargo.lock') == ''
-        run: cargo generate-lockfile
+      - name: Install just
+        uses: extractions/setup-just@v1
+      - name: Install cargo-hack
+        run: cargo install cargo-hack --locked
       - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
-      - name: cargo test --locked
-        # Not using `--all-targets`, to get doctests everywhere.
-        run: cargo test --locked --workspace --all-features -- --skip skipci
+      - name: just test
+        run: just test
 
   fmt:
     runs-on: self-hosted
@@ -49,9 +48,11 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt
+      - name: Install just
+        uses: extractions/setup-just@v1
       - name: cargo fmt --check
         # Check code formatting using rustfmt.
-        run: cargo fmt --check
+        run: just fmt --check
 
   clippy:
     runs-on: self-hosted
@@ -72,9 +73,11 @@ jobs:
           targets: thumbv7em-none-eabihf
       - name: Install cargo-hack
         run: cargo install cargo-hack --locked
+      - name: Install just
+        uses: extractions/setup-just@v1
       - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
-      - name: cargo hack clippy (all feature-sets, embedded)
-        run: cargo hack clippy --workspace --feature-powerset --target thumbv7em-none-eabihf -- -D warnings
+      - name: just ci-checks
+        run: just ci-checks
 
   doc:
     # run docs generation on nightly rather than stable. This enables features like
@@ -91,13 +94,13 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
       - name: Install cargo-hack
         run: cargo install cargo-hack --locked
+      - name: Install just
+        uses: extractions/setup-just@v1
+      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
       - name: Build docs
         # Not quite sure anymore about these flags. But --workspace is important.
-        run: >
-          cargo hack doc --no-deps --all-features --workspace
-          --document-private-items -Zrustdoc-map --target thumbv7em-none-eabihf
+        run: just doc
         env:
           RUSTDOCFLAGS: -Zunstable-options --cfg docsrs -D warnings

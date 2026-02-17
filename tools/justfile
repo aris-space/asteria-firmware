@@ -1,8 +1,25 @@
-fmt:
-    cargo fmt --all
+fmt *args:
+    cargo fmt {{args}}
 
 build *args:
     cargo build {{args}}
 
 ci-checks:
     cargo clippy --workspace --all-targets -- -D warnings
+
+# Run clippy with optional extra args
+clippy *args:
+    cargo clippy --workspace --all-targets -- -D warnings {{args}}
+
+# Run host-side tests for tooling
+test *args:
+    cargo test --locked --workspace --all-features -- --skip skipci {{args}}
+
+# Build docs for tooling
+# Note: no target override needed for host tooling.
+doc *args:
+    cargo doc --no-deps --all-features --workspace --document-private-items {{args}}
+
+# clean rust build artifacts
+clean:
+    cargo clean

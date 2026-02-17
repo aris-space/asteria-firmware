@@ -5,15 +5,17 @@ target := "thumbv7em-none-eabihf"
 # `bin` : The name of the binary being built, e.g. `fw-engine-board` or `fw-sensor-carrier`.
 # `use_probe_rs` : Whether to use probe-rs for flashing (true/false).
 
-fmt:
-    cargo fmt --manifest-path app/Cargo.toml --all
+fmt *args:
+    cargo fmt {{args}}
 
+# Alias for cargo build to transparently pass args
 build *args:
     cargo build \
-        --manifest-path app/Cargo.toml \
         --target {{target}} \
         {{args}}
 
+# Build the firmware and flash it to the device. Attaches to the target after flashing
+# either with probe-rs (if use_probe_rs=true) or with the STM32 Programmer utility otherwise.
 run *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -77,7 +79,7 @@ run *args:
         probe-rs attach --chip {{chip}} "$elf"
     fi
 
-
+# Attach to the target with probe-rs, using the most recently built ELF as the specified binary.
 attach:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -91,10 +93,26 @@ attach:
 
     exec probe-rs attach --chip {{chip}} "$elf"
 
-
-
+# Run checks that will be used in CI
 ci-checks:
     cargo clippy \
-        --manifest-path app/Cargo.toml \
         --target {{target}} \
         -- -D warnings
+
+# Run clippy with optional extra args
+clippy *args:
+    cargo clippy \
+        --target {{target}} \
+        -- -D warnings {{args}}
+
+# Embedded firmware does not run host tests; keep as a no-op for CI orchestration.
+test *args:
+    @echo "skipping tests (embedded firmware)"
+
+# Firmware docs are not generated in CI; keep as a no-op target.
+doc *args:
+    @echo "skipping docs (embedded firmware)"
+
+# Clean rust build artifacts
+clean:
+    cargo clean
