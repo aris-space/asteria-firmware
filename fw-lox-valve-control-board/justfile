@@ -1,5 +1,5 @@
 chip    := "STM32G4A1KETx"
 bin     := "fw-lox-valve-control-board"
-flasher := "probe-rs"
+use_probe_rs := "true"
 
 import '../just/fw-common.just'

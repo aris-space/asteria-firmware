@@ -1,5 +1,5 @@
 chip    := "STM32H723ZG"
 bin     := "fw-sensor-carrier"
-flasher := "stm32cube"
+use_probe_rs := "false"
 
 import '../just/fw-common.just'

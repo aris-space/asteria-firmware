@@ -3,7 +3,7 @@ target := "thumbv7em-none-eabihf"
 # The following variables must be set by the caller of this justfile
 # `chip`: The STM32 chip being targeted, e.g. `STM32G473RCTx` or `STM32H723ZG`.
 # `bin` : The name of the binary being built, e.g. `fw-engine-board` or `fw-sensor-carrier`.
-# `flasher` : The tool used to flash the board. Either `stm32cube` or `probe-rs`.
+# `use_probe_rs` : Whether to use probe-rs for flashing (true/false).
 
 fmt:
     cargo fmt --manifest-path app/Cargo.toml --all
@@ -68,7 +68,7 @@ run *args:
     echo "Built with profile: $requested_profile => $chosen_dir"
     echo "Using ELF: $elf"
 
-    if [[ "{{flasher}}" == "probe-rs" ]]; then
+    if [[ "{{use_probe_rs}}" == "true" ]]; then
         probe-rs run --chip {{chip}} \
             --log-format '{t} {L:severity} {s}' "$elf"
     else
