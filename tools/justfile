@@ -9,7 +9,7 @@ ci-checks:
 
 # Run clippy with optional extra args
 clippy *args:
-    cargo clippy --workspace --all-targets -- -D warnings {{args}}
+    cargo clippy --workspace --all-targets {{args}} -- -D warnings
 
 # Run host-side tests for tooling
 test *args:
@@ -18,7 +18,7 @@ test *args:
 # Build docs for tooling
 # Note: no target override needed for host tooling.
 doc *args:
-    cargo doc --no-deps --all-features --workspace --document-private-items {{args}}
+    cargo  doc --no-deps --all-features --workspace --document-private-items {{args}}
 
 # clean rust build artifacts
 clean:

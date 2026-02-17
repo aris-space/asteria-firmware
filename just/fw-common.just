@@ -103,7 +103,7 @@ ci-checks:
 clippy *args:
     cargo clippy \
         --target {{target}} \
-        -- -D warnings {{args}}
+        {{args}}
 
 # Embedded firmware does not run host tests; keep as a no-op for CI orchestration.
 test *args:

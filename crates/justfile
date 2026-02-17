@@ -14,7 +14,7 @@ ci-checks:
 
 # Run clippy with optional extra args
 clippy *args:
-    cargo clippy --workspace --target {{target}} -- {{args}}
+    cargo clippy --workspace --target {{target}} {{args}}
 
 # Run host-side tests for shared crates
 # note: it is important that we test on an std-supported target, else
