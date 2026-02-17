@@ -235,7 +235,7 @@ async fn reconnect(
                 attempts = attempts.saturating_add(1);
                 if attempts == 1 {
                     eprintln!("status: waiting for board... ({})", compact_err(&e));
-                } else if attempts % 10 == 0 {
+                } else if attempts.is_multiple_of(10) {
                     eprintln!("status: still waiting for board...");
                 }
                 tokio::time::sleep(Duration::from_millis(600)).await;

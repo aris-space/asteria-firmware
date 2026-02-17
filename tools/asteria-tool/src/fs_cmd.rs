@@ -368,11 +368,11 @@ async fn pull_file_with_progress<B: RpcBackend + Sync>(
             if !is_tty {
                 return;
             }
-            let pct = if total == 0 {
-                100
-            } else {
-                ((done.saturating_mul(100)) / total).min(100) as u8
-            };
+            let pct = done
+                .saturating_mul(100)
+                .checked_div(total)
+                .unwrap_or(100)
+                .min(100) as u8;
             if pct >= last_percent.saturating_add(5) || pct == 100 {
                 last_percent = pct;
                 eprint!("\rpulling {remote_path} ... {:>3}% ", pct);

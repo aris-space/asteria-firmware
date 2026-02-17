@@ -158,7 +158,5 @@ pub fn setup_can<'a, T: can::Instance>(
     config.global_filter = GlobalFilter::accept_all();
     can.set_config(config);
      */
-    let can = can.start(OperatingMode::NormalOperationMode);
-
-    can
+    can.start(OperatingMode::NormalOperationMode)
 }

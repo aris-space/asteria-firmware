@@ -149,8 +149,5 @@ pub fn setup_can<'a, T: can::Instance>(
         };
     }
     can.properties().set_standard_filters(&filters);
-
-    let can = can.start(OperatingMode::NormalOperationMode);
-
-    can
+    can.start(OperatingMode::NormalOperationMode)
 }

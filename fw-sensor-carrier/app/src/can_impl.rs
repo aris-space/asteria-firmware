@@ -163,9 +163,7 @@ pub fn setup_can<'a, T: can::Instance>(
 
     // TODO: Do not EVER forget to change this back to `NormalOperationMode` again after testing
     //  See :defeated-louis: meme (╯°□°)╯︵ ┻━┻
-    let can = can.start(OperatingMode::NormalOperationMode);
-
-    can
+    can.start(OperatingMode::NormalOperationMode)
 }
 
 const THIS_BOARD_ID: hermes_can::messages::BoardId = hermes_can::messages::BoardId::SensorCarrier;
