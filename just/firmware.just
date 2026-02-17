@@ -6,6 +6,11 @@ import './artifacts.just'
 # `bin` : The name of the binary being built, e.g. `fw-engine-board` or `fw-sensor-carrier`.
 # `use_probe_rs` : Whether to use probe-rs for flashing (true/false).
 
+# Show available capabilities in a board workspace.
+[default]
+help:
+    @just --list
+
 fmt *args:
     cargo fmt {{args}}
 

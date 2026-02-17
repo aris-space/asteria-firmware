@@ -44,15 +44,8 @@ clean-artifacts:
     echo "Cleaned local artifacts: $artifacts_dir"
 
 # Upload local cached ELF artifacts that are missing in the bucket.
-sync-artifacts:
+sync-artifacts *args:
     #!/usr/bin/env bash
     set -euo pipefail
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    exec "$repo_root/just/scripts/upload-elf.sh" sync
-
-# Dry-run for syncing local cached ELF artifacts.
-sync-artifacts-dry-run:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    exec "$repo_root/just/scripts/upload-elf.sh" sync --dry-run
+    exec "$repo_root/just/scripts/upload-elf.sh" sync {{args}}

@@ -9,6 +9,11 @@ doc_workspaces := "crates tools"
 
 import 'just/artifacts.just'
 
+# Show available capabilities at repo root.
+[default]
+help:
+    @just --list
+
 # Format all workspaces
 fmt *args:
     for ws in {{workspaces}}; do \
