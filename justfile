@@ -7,6 +7,8 @@ test_workspaces := "tools"
 # Workspaces that have docs
 doc_workspaces := "crates tools"
 
+import 'just/artifacts.just'
+
 # Format all workspaces
 fmt *args:
     for ws in {{workspaces}}; do \

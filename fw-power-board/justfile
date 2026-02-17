@@ -2,4 +2,4 @@ chip    := "STM32G473RCTx"
 bin     := "fw-power-board"
 use_probe_rs := "true"
 
-import '../just/fw-common.just'
+import '../just/firmware.just'

@@ -6,10 +6,16 @@ die() {
   exit 1
 }
 
+get_repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+
 resolve_local_artifact_dir() {
-  local dir="${ASTERIA_LOCAL_ARTIFACT_DIR:-$REPO_ROOT/.artifacts}"
+  local repo_root dir
+  repo_root="$(get_repo_root)"
+  dir="${ASTERIA_LOCAL_ARTIFACT_DIR:-$repo_root/.artifacts}"
   if [[ "$dir" != /* ]]; then
-    dir="$REPO_ROOT/$dir"
+    dir="$repo_root/$dir"
   fi
   printf "%s\n" "$dir"
 }
@@ -28,7 +34,7 @@ load_b2_config() {
   command -v s5cmd >/dev/null 2>&1 || die "s5cmd is required for artifact upload. Install s5cmd and retry."
 
   local repo_root b2_env_file
-  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  repo_root="$(get_repo_root)"
   b2_env_file="${ASTERIA_B2_ENV_FILE:-$repo_root/.b2.env}"
   [[ -f "$b2_env_file" ]] || die "Missing B2 env file: $b2_env_file"$'\n'"Create it from $repo_root/.b2.env.example (or set ASTERIA_B2_ENV_FILE)."
 
@@ -63,12 +69,109 @@ save_local_artifact() {
   echo "Saved local artifact: $local_path"
 }
 
-main() {
-  [[ $# -ge 1 && $# -le 2 ]] || die "Usage: $0 <elf-path> [object-name]"
-  local elf_path="$1"
-  local object_name="${2:-}"
+upload_object() {
+  local local_path="$1"
+  local object_name="$2"
   local object_uri
-  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+  object_uri="s3://${B2_BUCKET}/${object_name}"
+  echo "Uploading ELF artifact to: $object_uri"
+  AWS_ACCESS_KEY_ID="$B2_KEY_ID" \
+    AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY" \
+    s5cmd --endpoint-url "$B2_ENDPOINT" cp "$local_path" "$object_uri"
+  echo "Uploaded ELF artifact."
+}
+
+sync_cached_artifacts() {
+  local dry_run="$1"
+  local artifacts_dir local_files_tmp remote_names_tmp batch_tmp
+  local missing present file name list_out
+
+  load_b2_config
+
+  artifacts_dir="$(resolve_local_artifact_dir)"
+  if [[ ! -d "$artifacts_dir" ]]; then
+    echo "No local artifacts directory found at: $artifacts_dir"
+    return 0
+  fi
+
+  local_files_tmp="$(mktemp)"
+  remote_names_tmp="$(mktemp)"
+  batch_tmp="$(mktemp)"
+  missing=0
+  present=0
+
+  find "$artifacts_dir" -maxdepth 1 -type f -name '*.elf' -print | sort >"$local_files_tmp"
+  if [[ ! -s "$local_files_tmp" ]]; then
+    echo "No local ELF artifacts to sync in: $artifacts_dir"
+    rm -f "$local_files_tmp" "$remote_names_tmp" "$batch_tmp"
+    return 0
+  fi
+
+  list_out="$(
+    AWS_ACCESS_KEY_ID="$B2_KEY_ID" \
+      AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY" \
+      s5cmd --endpoint-url "$B2_ENDPOINT" ls "s3://${B2_BUCKET}/*.elf" 2>&1 || true
+  )"
+  printf "%s\n" "$list_out" \
+    | awk '{print $NF}' \
+    | sed -E 's#^s3://[^/]*/##' \
+    | awk 'NF > 0' \
+    | sort -u >"$remote_names_tmp"
+
+  while IFS= read -r file; do
+    name="$(basename "$file")"
+    if grep -Fxq "$name" "$remote_names_tmp"; then
+      present=$((present + 1))
+      continue
+    fi
+
+    if [[ "$dry_run" -eq 1 ]]; then
+      echo "Would upload missing artifact: $file -> s3://${B2_BUCKET}/${name}"
+    else
+      printf 'cp %s s3://%s/%s\n' "$file" "$B2_BUCKET" "$name" >>"$batch_tmp"
+    fi
+    missing=$((missing + 1))
+  done <"$local_files_tmp"
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "Sync dry-run complete: missing=$missing present=$present"
+    rm -f "$local_files_tmp" "$remote_names_tmp" "$batch_tmp"
+    return 0
+  fi
+
+  if [[ "$missing" -eq 0 ]]; then
+    echo "Sync complete: uploaded=0 already_present=$present"
+    rm -f "$local_files_tmp" "$remote_names_tmp" "$batch_tmp"
+    return 0
+  fi
+
+  AWS_ACCESS_KEY_ID="$B2_KEY_ID" \
+    AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY" \
+    s5cmd --endpoint-url "$B2_ENDPOINT" run "$batch_tmp"
+  echo "Sync complete: uploaded=$missing already_present=$present"
+  rm -f "$local_files_tmp" "$remote_names_tmp" "$batch_tmp"
+}
+
+main() {
+  [[ $# -ge 1 ]] || die "Usage: $0 <elf-path> [object-name] | sync [--dry-run]"
+  local elf_path object_name dry_run
+
+  if [[ "$1" == "sync" ]]; then
+    shift
+    dry_run=0
+    if [[ "${1:-}" == "--dry-run" ]]; then
+      dry_run=1
+      shift
+    fi
+    [[ $# -eq 0 ]] || die "Usage: $0 sync [--dry-run]"
+    sync_cached_artifacts "$dry_run"
+    return 0
+  fi
+
+  [[ $# -le 2 ]] || die "Usage: $0 <elf-path> [object-name]"
+  elf_path="$1"
+  object_name="${2:-}"
 
   [[ -f "$elf_path" ]] || die "ELF file not found: $elf_path"
   [[ -r "$elf_path" ]] || die "ELF file not readable: $elf_path"
@@ -81,13 +184,9 @@ main() {
   [[ "$object_name" == */* ]] && die "Object name must not contain '/': $object_name"
 
   save_local_artifact "$elf_path" "$object_name"
-
-  object_uri="s3://${B2_BUCKET}/${object_name}"
-  echo "Uploading ELF artifact to: $object_uri"
-  AWS_ACCESS_KEY_ID="$B2_KEY_ID" \
-    AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY" \
-    s5cmd --endpoint-url "$B2_ENDPOINT" cp "$elf_path" "$object_uri"
-  echo "Uploaded ELF artifact."
+  upload_object "$elf_path" "$object_name"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
