@@ -19,7 +19,7 @@ use w25q256jv::W25q256jv;
 type FlashSpi = Spi<'static, Blocking, embassy_stm32::spi::mode::Master>;
 type FlashDevice = ExclusiveDevice<FlashSpi, Output<'static>, Delay>;
 type BoardFlash = W25q256jv<FlashDevice, Output<'static>, Output<'static>>;
-pub type FlashAdapter<'a> = w25q256jv::W25q256jvLfsStorage<
+pub type FlashAdapter<'a> = w25q256jv::LittlefsAdapter<
     'a,
     FlashDevice,
     Output<'static>,

@@ -1573,7 +1573,7 @@ dependencies = [
 [[package]]
 name = "w25q256jv"
 version = "0.1.1"
-source = "git+https://github.com/Rechenmaschine/w25q256jv.git?rev=53f1e65#53f1e65dc96ceb41b4df19acfee73df0020479ff"
+source = "git+https://github.com/Rechenmaschine/w25q256jv.git?rev=b19c5c7#b19c5c7b0f3432033af532366a74f98c2a1ae04f"
 dependencies = [
  "defmt 1.0.1",
  "embedded-hal 1.0.0",
