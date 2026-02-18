@@ -136,6 +136,13 @@ impl ConnectedTransport {
         }
     }
 
+    pub fn board_name(&self) -> Option<&str> {
+        match self {
+            Self::RawUsb { product, .. } => product.as_deref(),
+            Self::Serial(_) => None,
+        }
+    }
+
     pub fn device_name(&self) -> Option<String> {
         match self {
             Self::RawUsb {

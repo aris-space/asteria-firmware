@@ -35,10 +35,12 @@ const USB_PACKET_TX_BUF_CAP: usize = 4096;
 const USB_PACKET_RX_BUF_CAP: usize = 4096;
 const PANIC_REQ_CH_CAP: usize = 1;
 
+pub const BOARD_NAME: &str = "test-board";
+
 const USB_VENDOR_ID: u16 = 0x16c0;
 const USB_PRODUCT_ID: u16 = 0x27DD;
 const USB_MANUFACTURER: &str = "ARIS";
-const USB_PRODUCT: &str = "fw-test-board";
+const USB_PRODUCT: &str = BOARD_NAME;
 const USB_SERIAL_NUMBER: &str = "00000001";
 const USB_DEVICE_CLASS_MISC: u8 = 0xEF;
 const USB_DEVICE_SUB_CLASS_COMMON: u8 = 0x02;

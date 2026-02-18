@@ -18,6 +18,7 @@ pub struct SessionState {
     pub transport: TransportMode,
     pub connected_via: String,
     pub device_name: Option<String>,
+    pub board_name: Option<String>,
     pub stats: bool,
 }
 
@@ -36,13 +37,14 @@ impl UiStyle {
         Self { color }
     }
 
-    fn prompt(&self, cwd: &str, connected: &str) -> String {
+    fn prompt(&self, cwd: &str, connected: &str, board_name: Option<&str>) -> String {
+        let name = board_name.unwrap_or("asteria");
         if !self.color {
-            return format!("asteria:{} [{}]> ", cwd, connected);
+            return format!("{name}:{} [{}]> ", cwd, connected);
         }
         format!(
             "{}:{} [{}]> ",
-            self.wrap("asteria", "1;32"),
+            self.wrap(name, "1;32"),
             self.wrap(cwd, "1;34"),
             self.wrap(connected, "36")
         )
@@ -81,6 +83,7 @@ pub async fn run_shell(
         transport,
         connected_via: "disconnected".to_string(),
         device_name: None,
+        board_name: None,
         stats,
     };
 
@@ -103,7 +106,11 @@ pub async fn run_shell(
     }
 
     loop {
-        let prompt = style.prompt(&state.cwd, &state.connected_via);
+        let prompt = style.prompt(
+            &state.cwd,
+            &state.connected_via,
+            state.board_name.as_deref(),
+        );
         let line = match editor.readline(&prompt) {
             Ok(line) => line,
             Err(ReadlineError::Interrupted) => continue,
@@ -229,6 +236,7 @@ async fn reconnect(
             Ok((client, connected)) => {
                 state.connected_via = connected.label();
                 state.device_name = connected.device_name();
+                state.board_name = connected.board_name().map(str::to_string);
                 return Ok(client);
             }
             Err(e) => {
