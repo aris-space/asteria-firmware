@@ -20,8 +20,16 @@ use crate::board::FlashAdapter;
 // Large files are transferred across many fs/read requests; this value is per-response chunk size.
 // Keep it conservative for raw-usb transport robustness.
 const FS_MAX_CHUNK: usize = 512;
+const FS_REQ_CH_CAP: usize = 1;
+const FS_EPOCH_INITIAL: u32 = 1;
+const LOGGING_DROPPED_WRITE_WARN_EVERY: u32 = 128;
 const LOG_DIR_PREFIX: &[u8; 5] = b"/log_";
 const LOG_DIR_PATH_MAX_LEN: usize = 16;
+const LOG_DIR_NAME_PREFIX: &str = "log_";
+const PROTECTED_ROOT_PATH: &str = "/";
+const ROOT_DIR_PATH_NUL: &[u8] = b"/\0";
+const DEFMT_BIN_FILE_NUL: &[u8] = b"defmt.bin\0";
+const BUILD_INFO_FILE_NUL: &[u8] = b"build_info.txt\0";
 
 static LOG_STORAGE: StaticCell<FlashAdapter<'static>> = StaticCell::new();
 static LOG_ALLOC: StaticCell<Allocation<FlashAdapter<'static>>> = StaticCell::new();
@@ -35,7 +43,7 @@ static FS_STATE: ThreadModeMutex<RefCell<Option<FsState>>> =
     ThreadModeMutex::new(RefCell::new(None));
 
 struct FsMailbox {
-    req: Channel<CriticalSectionRawMutex, FsRequest, 1>,
+    req: Channel<CriticalSectionRawMutex, FsRequest, FS_REQ_CH_CAP>,
     resp: Signal<CriticalSectionRawMutex, FsResponse>,
     call_lock: Mutex<CriticalSectionRawMutex, ()>,
 }
@@ -66,7 +74,7 @@ impl FsMailbox {
 }
 
 static FS_MAILBOX: FsMailbox = FsMailbox::new();
-static FS_EPOCH: AtomicU32 = AtomicU32::new(1);
+static FS_EPOCH: AtomicU32 = AtomicU32::new(FS_EPOCH_INITIAL);
 
 pub enum FsRequest {
     Info(FsInfoReq),
@@ -126,7 +134,7 @@ pub async fn logging_task() -> ! {
                 }
                 None => {
                     dropped_writes = dropped_writes.wrapping_add(1);
-                    if dropped_writes % 128 == 0 {
+                    if dropped_writes % LOGGING_DROPPED_WRITE_WARN_EVERY == 0 {
                         embedded_utils::fmt::warn!(
                             "logging task: dropped {} writes (fs unavailable)",
                             dropped_writes
@@ -169,10 +177,8 @@ pub async fn fs_worker() -> ! {
         let req = FS_MAILBOX.wait_request().await;
         let resp = match req {
             FsRequest::EraseStorage(_req) => handle_erase_storage(),
-            req => match with_fs_req(req, |state, req| handle_fs_request(&mut state.fs, req)) {
-                Ok(resp) => resp,
-                Err(req) => degraded_fs_response(req),
-            },
+            req => with_fs_req(req, |state, req| handle_fs_request(&mut state.fs, req))
+                .unwrap_or_else(|req| degraded_fs_response(req)),
         };
         FS_MAILBOX.respond(resp);
     }
@@ -661,7 +667,7 @@ fn handle_remove<S: littlefs2::driver::Storage>(
         Err(err) => return fs_remove_err(err),
     };
 
-    if norm_path.as_str() == "/" {
+    if norm_path.as_str() == PROTECTED_ROOT_PATH {
         return fs_remove_err(FsError::Busy);
     }
 
@@ -713,7 +719,7 @@ fn prepare_log_session<S: Storage>(fs: &Filesystem<S>) -> Option<PathBuf> {
         return None;
     }
 
-    let defmt_file = Path::from_bytes_with_nul(b"defmt.bin\0").ok()?;
+    let defmt_file = Path::from_bytes_with_nul(DEFMT_BIN_FILE_NUL).ok()?;
     let mut defmt_path = PathBuf::from(log_dir.as_path());
     defmt_path.push(defmt_file);
     if fs.write(defmt_path.as_path(), &[]).is_err() {
@@ -721,7 +727,7 @@ fn prepare_log_session<S: Storage>(fs: &Filesystem<S>) -> Option<PathBuf> {
         return None;
     }
 
-    let build_info_file = Path::from_bytes_with_nul(b"build_info.txt\0").ok()?;
+    let build_info_file = Path::from_bytes_with_nul(BUILD_INFO_FILE_NUL).ok()?;
     let mut build_info_path = PathBuf::from(log_dir.as_path());
     build_info_path.push(build_info_file);
     if write_build_info(fs, build_info_path.as_path()).is_err() {
@@ -800,7 +806,7 @@ fn write_build_info<S: Storage>(fs: &Filesystem<S>, path: &Path) -> littlefs2::i
 }
 
 fn select_next_log_index<S: Storage>(fs: &Filesystem<S>) -> Result<u32, ()> {
-    let root = Path::from_bytes_with_nul(b"/\0").map_err(|_| ())?;
+    let root = Path::from_bytes_with_nul(ROOT_DIR_PATH_NUL).map_err(|_| ())?;
     let mut max_index: Option<u32> = None;
 
     if fs
@@ -830,7 +836,7 @@ fn select_next_log_index<S: Storage>(fs: &Filesystem<S>) -> Result<u32, ()> {
 }
 
 fn parse_log_dir_index(name: &str) -> Option<u32> {
-    let digits = name.strip_prefix("log_")?;
+    let digits = name.strip_prefix(LOG_DIR_NAME_PREFIX)?;
     if digits.is_empty() {
         return None;
     }

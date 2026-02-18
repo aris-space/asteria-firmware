@@ -52,6 +52,7 @@ async fn main(blocking_executor: Spawner) -> ! {
 
     blocking_executor.spawn(logging::logging_task().expect("failed to create logging task"));
     blocking_executor.spawn(logging::fs_worker().expect("failed to create fs_worker task"));
+
     #[cfg(feature = "log-stress")]
     blocking_executor.spawn(defmt_stress_task().expect("failed to create defmt_stress_task"));
 

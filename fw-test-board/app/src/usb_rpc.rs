@@ -25,8 +25,37 @@ use wire_types::*;
 
 type UsbRpcRawMutex = CriticalSectionRawMutex;
 type AppDriver = UsbDriver;
-type AppStorage = WireStorage<UsbRpcRawMutex, AppDriver, 1024, 1024, 1024, 1024>;
-type BufStorage = PacketBuffers<4096, 4096>;
+
+const USB_CONFIG_DESC_CAP: usize = 1024;
+const USB_BOS_DESC_CAP: usize = 1024;
+const USB_CONTROL_BUF_CAP: usize = 1024;
+const USB_MSOS_DESC_CAP: usize = 1024;
+const USB_PACKET_TX_BUF_CAP: usize = 4096;
+const USB_PACKET_RX_BUF_CAP: usize = 4096;
+const PANIC_REQ_CH_CAP: usize = 1;
+
+const USB_VENDOR_ID: u16 = 0x16c0;
+const USB_PRODUCT_ID: u16 = 0x27DD;
+const USB_MANUFACTURER: &str = "ARIS";
+const USB_PRODUCT: &str = "fw-test-board";
+const USB_SERIAL_NUMBER: &str = "00000001";
+const USB_DEVICE_CLASS_MISC: u8 = 0xEF;
+const USB_DEVICE_SUB_CLASS_COMMON: u8 = 0x02;
+const USB_DEVICE_PROTOCOL_IAD: u8 = 0x01;
+
+const REBOOT_DELAY_MS: u64 = 500;
+const PANIC_DELAY_MS: u64 = 100;
+const USB_TX_TIMEOUT_MS_PER_FRAME: usize = 8;
+
+type AppStorage = WireStorage<
+    UsbRpcRawMutex,
+    AppDriver,
+    USB_CONFIG_DESC_CAP,
+    USB_BOS_DESC_CAP,
+    USB_CONTROL_BUF_CAP,
+    USB_MSOS_DESC_CAP,
+>;
+type BufStorage = PacketBuffers<USB_PACKET_TX_BUF_CAP, USB_PACKET_RX_BUF_CAP>;
 type AppTx = WireTxImpl<UsbRpcRawMutex, AppDriver>;
 type AppRx = WireRxImpl<AppDriver>;
 type AppServer = Server<AppTx, AppRx, WireRxBuf, App>;
@@ -39,7 +68,7 @@ static PBUFS: ConstStaticCell<BufStorage> = ConstStaticCell::new(BufStorage::new
 static STORAGE: AppStorage = AppStorage::new();
 
 static REBOOT_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-static PANIC_REQ_CH: Channel<CriticalSectionRawMutex, PanicReq, 1> = Channel::new();
+static PANIC_REQ_CH: Channel<CriticalSectionRawMutex, PanicReq, PANIC_REQ_CH_CAP> = Channel::new();
 
 // ---------------------------------------------------------------------------
 // Application context
@@ -87,14 +116,14 @@ define_dispatch! {
 // ---------------------------------------------------------------------------
 
 fn usb_config() -> embassy_usb::Config<'static> {
-    let mut config = embassy_usb::Config::new(0x16c0, 0x27DD);
-    config.manufacturer = Some("ARIS");
-    config.product = Some("fw-test-board");
-    config.serial_number = Some("00000001");
+    let mut config = embassy_usb::Config::new(USB_VENDOR_ID, USB_PRODUCT_ID);
+    config.manufacturer = Some(USB_MANUFACTURER);
+    config.product = Some(USB_PRODUCT);
+    config.serial_number = Some(USB_SERIAL_NUMBER);
 
-    config.device_class = 0xEF;
-    config.device_sub_class = 0x02;
-    config.device_protocol = 0x01;
+    config.device_class = USB_DEVICE_CLASS_MISC;
+    config.device_sub_class = USB_DEVICE_SUB_CLASS_COMMON;
+    config.device_protocol = USB_DEVICE_PROTOCOL_IAD;
     config.composite_with_iads = true;
 
     config
@@ -236,14 +265,14 @@ pub async fn usb_device_task(mut usb: UsbDevice<'static, AppDriver>) {
 #[embassy_executor::task]
 pub async fn reboot_task() -> ! {
     REBOOT_SIGNAL.wait().await;
-    Timer::after_millis(500).await;
+    Timer::after_millis(REBOOT_DELAY_MS).await;
     cortex_m::peripheral::SCB::sys_reset();
 }
 
 #[embassy_executor::task]
 pub async fn panic_task() -> ! {
     let req = PANIC_REQ_CH.receive().await;
-    Timer::after_millis(100).await;
+    Timer::after_millis(PANIC_DELAY_MS).await;
     panic!("{}", req.message.as_str());
 }
 
@@ -274,7 +303,9 @@ async fn usb_rpc_task_inner(usb_driver: AppDriver, spawner: embassy_executor::Sp
         pbufs.tx_buf.as_mut_slice(),
         USB_FS_MAX_PACKET_SIZE,
     );
-    tx_impl.set_timeout_ms_per_frame(8).await;
+    tx_impl
+        .set_timeout_ms_per_frame(USB_TX_TIMEOUT_MS_PER_FRAME)
+        .await;
 
     let context = AppContext;
     let dispatcher = App::new(context, spawner.into());
