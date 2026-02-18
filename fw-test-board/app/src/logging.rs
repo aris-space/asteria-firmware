@@ -393,24 +393,20 @@ fn handle_erase_storage() -> FsEraseStorageResp {
             return fs_err(FsError::Io);
         };
 
-        let (alloc, storage) = state.fs.into_inner();
-        if Filesystem::format(storage).is_err() {
-            embedded_utils::fmt::warn!("fs worker: erase format failed");
+        let (_alloc, storage) = state.fs.into_inner();
+
+        // Issue a hardware chip-erase command and busy-poll until complete.
+        // Takes ~80 s (typ.) / ~400 s (max).  The board reboots immediately
+        // after, so littlefs is re-initialised fresh on next boot.
+        embedded_utils::info!("fs worker: starting chip erase (~80 s)");
+        if unsafe { storage.inner_mut() }
+            .blocking_erase_chip()
+            .is_err()
+        {
+            embedded_utils::fmt::warn!("fs worker: chip erase failed");
             return fs_err(FsError::Io);
         }
-
-        let Ok(fs) = Filesystem::mount(alloc, storage) else {
-            embedded_utils::fmt::warn!("fs worker: remount failed after erase");
-            return fs_err(FsError::Io);
-        };
-
-        let Some((defmt_path, current_log_dir)) = prepare_log_session(&fs) else {
-            embedded_utils::fmt::warn!("fs worker: session setup failed after erase");
-            return fs_err(FsError::Io);
-        };
-
-        runtime_set_last_session_dir(&current_log_dir);
-        *slot = Some(FsState { fs, defmt_path });
+        embedded_utils::info!("fs worker: chip erase complete");
 
         FsEraseStorageResp {
             err: FsError::Ok,
