@@ -1,20 +1,22 @@
 use core::fmt::Debug;
 use defmt_brtt::DefmtConsumer;
 use embassy_executor::InterruptExecutor;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
-use embassy_sync::once_lock::OnceLock;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::interrupt;
 use embassy_stm32::mode::Blocking;
+use embassy_stm32::peripherals::USB;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::mhz;
+use embassy_stm32::{bind_interrupts, usb};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
+use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Delay, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use static_cell::StaticCell;
 use w25q256jv::W25q256jv;
 
-type FlashSpi = Spi<'static, Blocking>;
+type FlashSpi = Spi<'static, Blocking, embassy_stm32::spi::mode::Master>;
 type FlashDevice = ExclusiveDevice<FlashSpi, Output<'static>, Delay>;
 pub type BoardFlash = W25q256jv<FlashDevice, Output<'static>, Output<'static>>;
 pub type FlashAdapter<'a> = w25q256jv::W25q256jvLfsStorage<
@@ -25,6 +27,11 @@ pub type FlashAdapter<'a> = w25q256jv::W25q256jvLfsStorage<
     typenum::U4096,
     typenum::U512,
 >;
+pub type UsbDriver = embassy_stm32::usb::Driver<'static, USB>;
+
+bind_interrupts!(pub struct UsbIrqs {
+    USB_LP => usb::InterruptHandler<USB>;
+});
 
 pub static INTERRUPT_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 pub static BOARD: OnceLock<Mutex<CriticalSectionRawMutex, Board>> = OnceLock::new();
@@ -42,6 +49,7 @@ pub struct Board {
     pub red: Option<Output<'static>>,
     pub flash: Option<FlashAdapter<'static>>,
     pub defmt_log: Option<DefmtConsumer>,
+    pub usb_driver: Option<UsbDriver>,
 }
 
 impl Debug for Board {
@@ -52,6 +60,7 @@ impl Debug for Board {
             .field("red", &self.red.is_some())
             .field("flash", &self.flash.is_some())
             .field("defmt_log", &self.defmt_log.is_some())
+            .field("usb_driver", &self.usb_driver.is_some())
             .finish()
     }
 }
@@ -68,7 +77,7 @@ impl Board {
         // SPI2 for W25Q256JV flash (SCK=PB13, MISO=PB14, MOSI=PB15, CS=PC7)
         let mut spi_config = embassy_stm32::spi::Config::default();
         spi_config.frequency = mhz(50);
-        spi_config.rise_fall_speed = Speed::VeryHigh;
+        spi_config.gpio_speed = Speed::VeryHigh;
         let spi = Spi::new_blocking(p.SPI2, p.PB13, p.PB15, p.PB14, spi_config);
         let cs = Output::new(p.PC7, Level::High, Speed::VeryHigh);
         let device = ExclusiveDevice::new(spi, cs, Delay).expect("spi exclusive");
@@ -77,6 +86,7 @@ impl Board {
         let flash = W25q256jv::new(device, hold, wp).expect("w25q256jv init");
         let flash = BOARD_FLASH.init(flash);
         let flash_adapter = FlashAdapter::new(flash);
+        let usb_driver = embassy_stm32::usb::Driver::new(p.USB, UsbIrqs, p.PA12, p.PA11);
 
         Self {
             yellow: Some(yellow),
@@ -84,6 +94,7 @@ impl Board {
             green: Some(green),
             red: Some(red),
             defmt_log: Some(defmt_consumer),
+            usb_driver: Some(usb_driver),
         }
     }
 }

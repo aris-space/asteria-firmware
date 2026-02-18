@@ -10,6 +10,7 @@ cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-sing
 cortex-m-rt = "0.7.5"
 embassy-stm32 = { version = "*", features = [
     "stm32g473rc",
+    "single-bank",
     "time-driver-any",
     "memory-x",
     "unstable-pac",
@@ -23,6 +24,7 @@ embassy-executor = { version = "*", features = [
 ] }
 embassy-futures = "*"
 embassy-sync = "*"
+embassy-usb = "*"
 embedded-can = "0.4.1"
 embedded-hal-async = "1.0.0"
 embedded-hal-bus = "0.3.0"
@@ -38,6 +40,9 @@ generic-array = "1.3.5"
 littlefs2 = { version = "0.6.1", features = ["c-stubs"] }
 typenum = "1.19.0"
 itoa = { version = "1.0.15", default-features = false }
+heapless = { version = "0.9", default-features = false }
+postcard-rpc = { version = "0.12", default-features = false, features = ["embassy-usb-0_5-server"] }
+wire-types = { path = "../../crates/wire-types" }
 
 defmt-brtt = { version = "0.1.1", features = ["async-await", "bbq"] }
 
@@ -47,6 +52,7 @@ built = { version = "0.7.7", features = ["git2"] }
 [features]
 default = ["debug"]
 debug = ["defmt", "dep:panic-probe"]
+log-stress = []
 defmt = [
     "dep:defmt",
     "panic-probe/defmt",

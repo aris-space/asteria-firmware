@@ -30,6 +30,16 @@ now_utc_ms() {
   printf "%s\n" "$ts"
 }
 
+artifact_timestamp_ms() {
+  local ts
+  ts="${ASTERIA_ARTIFACT_TIMESTAMP_MS:-}"
+  if [[ -z "$ts" ]]; then
+    ts="$(now_utc_ms)"
+  fi
+  [[ "$ts" =~ ^[0-9]{13}$ ]] || die "Invalid ASTERIA_ARTIFACT_TIMESTAMP_MS (expected 13-digit UTC epoch ms): $ts"
+  printf "%s\n" "$ts"
+}
+
 load_b2_config() {
   command -v s5cmd >/dev/null 2>&1 || die "s5cmd is required for artifact upload. Install s5cmd and retry."
 
@@ -179,7 +189,7 @@ main() {
   load_b2_config
 
   if [[ -z "$object_name" ]]; then
-    object_name="$(now_utc_ms).elf"
+    object_name="$(artifact_timestamp_ms).elf"
   fi
   [[ "$object_name" == */* ]] && die "Object name must not contain '/': $object_name"
 

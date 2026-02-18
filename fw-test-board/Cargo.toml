@@ -3,12 +3,15 @@ resolver = "2"
 members = ["app"]
 
 [patch.crates-io]
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
-embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "0ac791e" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "0ac791e" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "0ac791e" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "0ac791e" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "0ac791e" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "0ac791e" }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", rev = "0ac791e" }
+embassy-usb-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "0ac791e" }
+postcard-rpc = { path = "../../asteria-firmware-test/vendor/postcard-rpc/source/postcard-rpc" }
 
 [profile.dev]
 debug = 2

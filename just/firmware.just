@@ -34,6 +34,19 @@ run *args:
 
     args_str=" {{args}} "
 
+    artifact_timestamp_ms="${ASTERIA_ARTIFACT_TIMESTAMP_MS:-}"
+    if [[ -z "$artifact_timestamp_ms" ]]; then
+      artifact_timestamp_ms="$(date -u +%s%3N 2>/dev/null || true)"
+      if [[ ! "$artifact_timestamp_ms" =~ ^[0-9]{13}$ ]]; then
+        artifact_timestamp_ms="$(perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)')"
+      fi
+    fi
+    if [[ ! "$artifact_timestamp_ms" =~ ^[0-9]{13}$ ]]; then
+      echo "Failed to determine UTC timestamp in milliseconds." >&2
+      exit 1
+    fi
+    export ASTERIA_ARTIFACT_TIMESTAMP_MS="$artifact_timestamp_ms"
+
     # Determine requested profile from args (best-effort).
     requested_profile="dev (default)"
     if [[ "$args_str" == *" --release "* ]]; then
@@ -76,6 +89,7 @@ run *args:
 
     echo "Built with profile: $requested_profile => $chosen_dir"
     echo "Using ELF: $elf"
+    echo "Artifact/build timestamp ms: $ASTERIA_ARTIFACT_TIMESTAMP_MS"
 
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
     upload_script="$repo_root/just/scripts/upload-elf.sh"
@@ -92,7 +106,7 @@ run *args:
 
     echo "Starting ELF upload in background."
     (
-      "$upload_script" "$elf"
+      "$upload_script" "$elf" "${ASTERIA_ARTIFACT_TIMESTAMP_MS}.elf"
     ) >"$upload_log" 2>&1 &
     upload_pid="$!"
 
