@@ -1,0 +1,69 @@
+[package]
+name = "fw-test-board"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-utils = { path = "../../crates/embedded-utils" }
+hermes-can = { path = "../../hermes-can", version = "=0.3", features = ["defmt"] }
+cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+embassy-stm32 = { version = "*", features = [
+    "stm32g473rc",
+    "time-driver-any",
+    "memory-x",
+    "unstable-pac",
+    "exti",
+] }
+embassy-time = { version = "*", features = ["tick-hz-32_768"] }
+embassy-executor = { version = "*", features = [
+    "arch-cortex-m",
+    "executor-thread",
+    "executor-interrupt",
+] }
+embassy-futures = "*"
+embassy-sync = "*"
+embedded-can = "0.4.1"
+embedded-hal-async = "1.0.0"
+embedded-hal-bus = "0.3.0"
+defmt = { version = "1.0.1", optional = true }
+panic-probe = { version = "1.0.0", optional = true }
+panic-reset = "0.1.1"
+
+static_cell = "2.1.1"
+
+#w25q256jv = { git = "https://github.com/Rechenmaschine/w25q256jv.git", rev = "53f1e65", features = ["defmt", "littlefs2"] }
+w25q256jv = { path = "../../w25q256jv", features = ["defmt", "littlefs2"] }
+generic-array = "1.3.5"
+littlefs2 = { version = "0.6.1", features = ["c-stubs"] }
+typenum = "1.19.0"
+itoa = { version = "1.0.15", default-features = false }
+
+defmt-brtt = { version = "0.1.1", features = ["async-await", "bbq"] }
+
+[build-dependencies]
+built = { version = "0.7.7", features = ["git2"] }
+
+[features]
+default = ["debug"]
+debug = ["defmt", "dep:panic-probe"]
+defmt = [
+    "dep:defmt",
+    "panic-probe/defmt",
+    "panic-probe/defmt-error",
+    "panic-probe/print-defmt",
+    "embassy-executor/defmt",
+    "embassy-sync/defmt",
+    "embassy-futures/defmt",
+    "embassy-time/defmt",
+    "embassy-time/defmt-timestamp-uptime",
+    "embassy-stm32/defmt",
+    "embedded-hal-async/defmt-03",
+    "embedded-hal-bus/defmt-03",
+]
+
+[[bin]]
+name = "fw-test-board"
+test = false
+doctest = false
+bench = false
