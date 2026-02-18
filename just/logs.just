@@ -6,7 +6,8 @@ connect *args:
     if pids="$(pgrep -x asteria-tool 2>/dev/null || true)" && [[ -n "$pids" ]]; then
         echo "Warning: asteria-tool is already running (PID(s): $pids) — close open connections first." >&2
     fi
-    cargo run --manifest-path "$repo_root/tools/Cargo.toml" --bin asteria-tool --release -- shell {{args}}
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    cargo run --manifest-path "$repo_root/tools/Cargo.toml" --target "$host" --bin asteria-tool --release -- shell {{args}}
 
 # Build asteria-tool and run a non-interactive CLI command (script-friendly).
 # Usage: just cli fs ls /
@@ -19,7 +20,8 @@ cli *args:
     if pids="$(pgrep -x asteria-tool 2>/dev/null || true)" && [[ -n "$pids" ]]; then
         echo "Warning: asteria-tool is already running (PID(s): $pids) — close open connections first." >&2
     fi
-    cargo run --manifest-path "$repo_root/tools/Cargo.toml" --bin asteria-tool --release -- {{args}}
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    cargo run --manifest-path "$repo_root/tools/Cargo.toml" --target "$host" --bin asteria-tool --release -- {{args}}
 
 # Fetch log(s) from the connected device and decode with defmt-print.
 # Selector: (empty) = all | latest | N = specific log index

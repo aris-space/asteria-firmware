@@ -27,11 +27,12 @@ warn_existing_connections() {
 # ---------------------------------------------------------------------------
 
 build_asteria_tool() {
-  local repo_root
+  local repo_root host
   repo_root="$(get_repo_root)"
+  host="$(rustc -vV | sed -n 's/^host: //p')"
   cargo build --manifest-path "$repo_root/tools/Cargo.toml" \
-    --bin asteria-tool --release
-  printf "%s\n" "$repo_root/tools/target/release/asteria-tool"
+    --target "$host" --bin asteria-tool --release
+  printf "%s\n" "$repo_root/tools/target/$host/release/asteria-tool"
 }
 
 # ---------------------------------------------------------------------------
