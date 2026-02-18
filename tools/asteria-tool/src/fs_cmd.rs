@@ -61,7 +61,7 @@ pub enum FsAction {
     /// Erase external flash storage on device and reboot.
     #[command(name = "erase-storage")]
     EraseStorage,
-    /// Show filesystem protocol info.
+    /// Show runtime + filesystem status info.
     Info,
 }
 

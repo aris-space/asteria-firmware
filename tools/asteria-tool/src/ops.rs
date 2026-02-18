@@ -34,9 +34,14 @@ pub struct FsNodeMeta {
 
 #[derive(Debug, Clone)]
 pub struct StorageReport {
+    pub err: FsError,
     pub epoch: u32,
     pub max_chunk: u16,
     pub max_dir_entries: u16,
+    pub uptime_ms: u64,
+    pub fs_ready: bool,
+    pub current_log_dir: Option<String>,
+    pub artifact_timestamp_ms: Option<u64>,
 }
 
 #[async_trait]
@@ -485,17 +490,35 @@ where
 }
 
 pub async fn build_storage_report<B: RpcBackend + Sync>(backend: &B) -> Result<StorageReport> {
-    let info = fs_info(backend).await?;
+    let info = backend.fs_info().await?;
     Ok(StorageReport {
+        err: info.err,
         epoch: info.epoch,
         max_chunk: info.max_chunk,
         max_dir_entries: info.max_dir_entries,
+        uptime_ms: info.uptime_ms,
+        fs_ready: info.fs_ready,
+        current_log_dir: info.current_log_dir.map(|path| path.to_string()),
+        artifact_timestamp_ms: info.artifact_timestamp_ms,
     })
 }
 
 pub fn format_storage_report(report: &StorageReport) -> String {
+    let fs_health = if report.fs_ready { "ready" } else { "degraded" };
+    let current_log_dir = report.current_log_dir.as_deref().unwrap_or("none");
+    let artifact_timestamp_ms = report
+        .artifact_timestamp_ms
+        .map_or_else(|| "none".to_string(), |ts| ts.to_string());
+
     format!(
-        "Filesystem info:\n  Epoch: {}\n  Max chunk: {} bytes\n  Max dir entries/page: {}",
-        report.epoch, report.max_chunk, report.max_dir_entries
+        "System info:\n  Uptime: {} ms\n  FS health: {} ({:?})\n  Current log dir: {}\n  Artifact timestamp ms: {}\n  Epoch: {}\n  Max chunk: {} bytes\n  Max dir entries/page: {}",
+        report.uptime_ms,
+        fs_health,
+        report.err,
+        current_log_dir,
+        artifact_timestamp_ms,
+        report.epoch,
+        report.max_chunk,
+        report.max_dir_entries
     )
 }

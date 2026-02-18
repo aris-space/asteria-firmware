@@ -93,7 +93,7 @@ enum Commands {
         /// Optional panic message (max 64 chars).
         message: Option<String>,
     },
-    /// Get filesystem protocol info (epoch + transfer caps).
+    /// Get runtime + filesystem status info.
     Info,
 }
 

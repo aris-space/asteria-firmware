@@ -39,6 +39,10 @@ pub struct FsInfoResp {
     pub epoch: FsEpoch,
     pub max_chunk: u16,
     pub max_dir_entries: u16,
+    pub uptime_ms: u64,
+    pub fs_ready: bool,
+    pub current_log_dir: Option<String<FS_PATH_CAP>>,
+    pub artifact_timestamp_ms: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Schema, Debug, Clone, Copy, PartialEq, Eq)]

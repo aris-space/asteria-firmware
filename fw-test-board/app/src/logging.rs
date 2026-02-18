@@ -9,6 +9,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
+use embassy_time::Instant;
 use heapless::{String as HString, Vec as HVec};
 use littlefs2::driver::Storage;
 use littlefs2::fs::{Allocation, FileType, Filesystem};
@@ -22,7 +23,6 @@ use crate::board::FlashAdapter;
 // Large files are transferred across many fs/read requests; this value is per-response chunk size.
 // Keep it conservative for raw-usb transport robustness.
 const FS_MAX_CHUNK: usize = 512;
-const FS_MAX_CHUNK_U16: u16 = 512;
 const FS_REQ_CH_CAP: usize = 1;
 const FS_EPOCH_INITIAL: u32 = 1;
 const LOGGING_DROPPED_WRITE_WARN_EVERY: u32 = 128;
@@ -42,8 +42,17 @@ struct FsState {
     defmt_path: PathBuf,
 }
 
+#[derive(Default)]
+struct RuntimeState {
+    last_session_dir: Option<HString<FS_PATH_CAP>>,
+}
+
 static FS_STATE: ThreadModeMutex<RefCell<Option<FsState>>> =
     ThreadModeMutex::new(RefCell::new(None));
+static RUNTIME_STATE: ThreadModeMutex<RefCell<RuntimeState>> =
+    ThreadModeMutex::new(RefCell::new(RuntimeState {
+        last_session_dir: None,
+    }));
 
 pub(crate) struct FsMailbox {
     req: Channel<CriticalSectionRawMutex, FsRequest, FS_REQ_CH_CAP>,
@@ -142,17 +151,6 @@ trait FsErrorResponse {
 
 fn fs_err<R: FsErrorResponse>(err: FsError) -> R {
     R::from_err(err, fs_epoch())
-}
-
-impl FsErrorResponse for FsInfoResp {
-    fn from_err(err: FsError, epoch: FsEpoch) -> Self {
-        Self {
-            err,
-            epoch,
-            max_chunk: FS_MAX_CHUNK_U16,
-            max_dir_entries: u16::try_from(FS_DIR_PAGE_CAP).unwrap_or(u16::MAX),
-        }
-    }
 }
 
 impl FsErrorResponse for FsListDirResp {
@@ -271,12 +269,7 @@ pub async fn fs_worker_task() -> ! {
         let req = FS_MAILBOX.wait_request().await;
         match req {
             FsRequest::Info(_req) => {
-                let resp = if fs_available() {
-                    handle_fs_info()
-                } else {
-                    fs_err(FsError::Io)
-                };
-                FS_MAILBOX.info_resp.signal(resp);
+                FS_MAILBOX.info_resp.signal(handle_fs_info());
             }
             FsRequest::ListDir(req) => {
                 let resp = with_fs_req(req, |state, req| {
@@ -329,6 +322,22 @@ fn fs_available() -> bool {
     FS_STATE.lock(|cell| cell.borrow().is_some())
 }
 
+fn runtime_last_session_dir() -> Option<HString<FS_PATH_CAP>> {
+    RUNTIME_STATE.lock(|cell| cell.borrow().last_session_dir.clone())
+}
+
+fn runtime_set_last_session_dir(path: &HString<FS_PATH_CAP>) {
+    RUNTIME_STATE.lock(|cell| {
+        cell.borrow_mut().last_session_dir = Some(path.clone());
+    });
+}
+
+fn artifact_timestamp_ms() -> Option<u64> {
+    crate::built_info::ASTERIA_ARTIFACT_TIMESTAMP_MS?
+        .parse::<u64>()
+        .ok()
+}
+
 fn with_fs_mut<R>(f: impl FnOnce(&mut FsState) -> R) -> Option<R> {
     FS_STATE.lock(|cell| {
         let mut borrow = cell.borrow_mut();
@@ -368,11 +377,12 @@ fn init_filesystem(flash: FlashAdapter<'static>) -> Option<FsState> {
 
     embedded_utils::info!("fs worker: littlefs mounted successfully");
 
-    let Some(defmt_path) = prepare_log_session(&fs) else {
+    let Some((defmt_path, current_log_dir)) = prepare_log_session(&fs) else {
         embedded_utils::fmt::warn!("fs worker: session setup failed");
         return None;
     };
 
+    runtime_set_last_session_dir(&current_log_dir);
     Some(FsState { fs, defmt_path })
 }
 
@@ -394,11 +404,12 @@ fn handle_erase_storage() -> FsEraseStorageResp {
             return fs_err(FsError::Io);
         };
 
-        let Some(defmt_path) = prepare_log_session(&fs) else {
+        let Some((defmt_path, current_log_dir)) = prepare_log_session(&fs) else {
             embedded_utils::fmt::warn!("fs worker: session setup failed after erase");
             return fs_err(FsError::Io);
         };
 
+        runtime_set_last_session_dir(&current_log_dir);
         *slot = Some(FsState { fs, defmt_path });
 
         FsEraseStorageResp {
@@ -481,7 +492,16 @@ fn file_size_bytes<S: Storage>(fs: &Filesystem<'_, S>, path: &Path) -> Option<u3
 }
 
 fn handle_fs_info() -> FsInfoResp {
-    fs_err(FsError::Ok)
+    FsInfoResp {
+        err: FsError::Ok,
+        epoch: fs_epoch(),
+        max_chunk: u16::try_from(FS_MAX_CHUNK).unwrap_or(u16::MAX),
+        max_dir_entries: u16::try_from(FS_DIR_PAGE_CAP).unwrap_or(u16::MAX),
+        uptime_ms: Instant::now().as_millis(),
+        fs_ready: fs_available(),
+        current_log_dir: runtime_last_session_dir(),
+        artifact_timestamp_ms: artifact_timestamp_ms(),
+    }
 }
 
 fn handle_list_dir<S: Storage>(
@@ -734,10 +754,14 @@ fn handle_remove<S: Storage>(
     }
 }
 
-fn prepare_log_session<S: Storage>(fs: &Filesystem<S>) -> Option<PathBuf> {
+fn prepare_log_session<S: Storage>(fs: &Filesystem<S>) -> Option<(PathBuf, HString<FS_PATH_CAP>)> {
     let log_index = select_next_log_index(fs).ok()?;
     let mut index_buf = itoa::Buffer::new();
     let log_dir = log_dir_path(log_index, &mut index_buf)?;
+    let mut session_dir = HString::<FS_PATH_CAP>::new();
+    session_dir.push('/').ok()?;
+    session_dir.push_str(LOG_DIR_NAME_PREFIX).ok()?;
+    session_dir.push_str(index_buf.format(log_index)).ok()?;
 
     embedded_utils::info!("fs worker: logging to session dir /log_{}", log_index);
 
@@ -771,7 +795,7 @@ fn prepare_log_session<S: Storage>(fs: &Filesystem<S>) -> Option<PathBuf> {
     }
 
     note_fs_mutation();
-    Some(defmt_path)
+    Some((defmt_path, session_dir))
 }
 
 fn append_to_file<S: Storage>(

@@ -99,7 +99,7 @@ Important:
 - If local target is an existing directory and remote is a file, filename is appended automatically.
 - If shell detects disconnect, it waits and reconnects automatically.
 - On connect/reconnect, shell prints board USB identity (manufacturer/product/serial) when available.
-- `info` prints filesystem protocol capabilities (epoch, max chunk, page size).
+- `info` prints runtime + filesystem status (uptime, fs health, current log dir, caps).
 
 Examples:
 

@@ -392,7 +392,7 @@ fn print_help() {
     println!("  erase-storage --yes     (erase entire external flash + reboot)");
     println!("  reset                   (reboot board)");
     println!("  panic [message]         (intentional panic + reboot, max 64 chars)");
-    println!("  info");
+    println!("  info                    (runtime + filesystem status)");
     println!("  exit");
 }
 
