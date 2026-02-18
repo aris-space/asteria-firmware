@@ -85,6 +85,7 @@ pub enum FsRequest {
     EraseStorage(FsEraseStorageReq),
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum FsResponse {
     Info(FsInfoResp),
     ListDir(FsListDirResp),
@@ -134,7 +135,7 @@ pub async fn logging_task() -> ! {
                 }
                 None => {
                     dropped_writes = dropped_writes.wrapping_add(1);
-                    if dropped_writes % LOGGING_DROPPED_WRITE_WARN_EVERY == 0 {
+                    if dropped_writes.is_multiple_of(LOGGING_DROPPED_WRITE_WARN_EVERY) {
                         embedded_utils::fmt::warn!(
                             "logging task: dropped {} writes (fs unavailable)",
                             dropped_writes
@@ -178,7 +179,7 @@ pub async fn fs_worker() -> ! {
         let resp = match req {
             FsRequest::EraseStorage(_req) => handle_erase_storage(),
             req => with_fs_req(req, |state, req| handle_fs_request(&mut state.fs, req))
-                .unwrap_or_else(|req| degraded_fs_response(req)),
+                .unwrap_or_else(degraded_fs_response),
         };
         FS_MAILBOX.respond(resp);
     }
