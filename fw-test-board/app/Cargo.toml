@@ -34,7 +34,7 @@ panic-reset = "0.1.1"
 
 static_cell = "2.1.1"
 
-w25q256jv = { git = "https://github.com/Rechenmaschine/w25q256jv.git", rev = "b19c5c7", features = [
+w25q256jv = { git = "https://github.com/Rechenmaschine/w25q256jv.git", rev = "d8f37f7", features = [
     "defmt",
     "littlefs2",
 ] }
