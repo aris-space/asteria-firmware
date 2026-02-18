@@ -9,5 +9,7 @@
 .b2.env
 # Cached ELF artifacts
 .artifacts/
+# Fetched device logs
+.fetched-logs/
 
 crates/Cargo.lock

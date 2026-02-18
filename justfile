@@ -8,6 +8,7 @@ test_workspaces := "tools"
 doc_workspaces := "crates tools"
 
 import 'just/artifacts.just'
+import 'just/logs.just'
 
 # Show available capabilities at repo root.
 [default]

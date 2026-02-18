@@ -1,5 +1,6 @@
 target := "thumbv7em-none-eabihf"
 import './artifacts.just'
+import './logs.just'
 
 # The following variables must be set by the caller of this justfile
 # `chip`: The STM32 chip being targeted, e.g. `STM32G473RCTx` or `STM32H723ZG`.
