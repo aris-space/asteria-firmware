@@ -1929,7 +1929,8 @@ dependencies = [
 [[package]]
 name = "w25q256jv"
 version = "0.1.1"
-source = "git+https://github.com/Rechenmaschine/w25q256jv.git?rev=d8f37f7#d8f37f716521f8c24c454d71adce9a380c4b2af0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "292bcc108d77d86b0e765a32bcb00a299c920b90e76ca7f1d7d2b52bfc2c3344"
 dependencies = [
  "defmt 1.0.1",
  "embedded-hal 1.0.0",

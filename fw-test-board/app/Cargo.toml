@@ -34,10 +34,7 @@ panic-reset = "0.1.1"
 
 static_cell = "2.1.1"
 
-w25q256jv = { git = "https://github.com/Rechenmaschine/w25q256jv.git", rev = "d8f37f7", features = [
-    "defmt",
-    "littlefs2",
-] }
+w25q256jv = { version = "0.1.1", features = ["defmt", "littlefs2"] }
 generic-array = "1.3.5"
 littlefs2 = { version = "0.6.1", features = ["c-stubs"] }
 typenum = "1.19.0"
