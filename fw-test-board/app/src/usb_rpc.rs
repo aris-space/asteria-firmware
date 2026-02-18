@@ -1,7 +1,8 @@
 //! USB postcard-rpc server: transport and endpoint dispatch.
 
+#![allow(clippy::wildcard_imports)]
+
 use crate::board::UsbDriver;
-use crate::logging::{FsRequest, FsResponse};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
@@ -74,6 +75,7 @@ static PANIC_REQ_CH: Channel<CriticalSectionRawMutex, PanicReq, PANIC_REQ_CH_CAP
 // Application context
 // ---------------------------------------------------------------------------
 
+/// RPC handler context. Kept as a unit struct for now because endpoints are stateless.
 pub struct AppContext;
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,9 @@ fn usb_config() -> embassy_usb::Config<'static> {
     config.device_sub_class = USB_DEVICE_SUB_CLASS_COMMON;
     config.device_protocol = USB_DEVICE_PROTOCOL_IAD;
     config.composite_with_iads = true;
+    // docs say this should be set even if only sometimes powered,
+    // which is the case when board is inside stack.
+    config.self_powered = true;
 
     config
 }
@@ -138,15 +143,7 @@ async fn fs_info_handler(
     _header: VarHeader,
     req: FsInfoReq,
 ) -> FsInfoResp {
-    let FsResponse::Info(resp) = crate::logging::fs_request(FsRequest::Info(req)).await else {
-        return FsInfoResp {
-            err: FsError::Io,
-            epoch: crate::logging::fs_epoch(),
-            max_chunk: 0,
-            max_dir_entries: 0,
-        };
-    };
-    resp
+    crate::logging::FS_MAILBOX.request(req).await
 }
 
 async fn fs_list_dir_handler(
@@ -154,16 +151,7 @@ async fn fs_list_dir_handler(
     _header: VarHeader,
     req: FsListDirReq,
 ) -> FsListDirResp {
-    let FsResponse::ListDir(resp) = crate::logging::fs_request(FsRequest::ListDir(req)).await
-    else {
-        return FsListDirResp {
-            err: FsError::Io,
-            epoch: crate::logging::fs_epoch(),
-            entries: heapless::Vec::new(),
-            next_cursor: 0,
-        };
-    };
-    resp
+    crate::logging::FS_MAILBOX.request(req).await
 }
 
 async fn fs_stat_handler(
@@ -171,15 +159,7 @@ async fn fs_stat_handler(
     _header: VarHeader,
     req: FsStatReq,
 ) -> FsStatResp {
-    let FsResponse::Stat(resp) = crate::logging::fs_request(FsRequest::Stat(req)).await else {
-        return FsStatResp {
-            err: FsError::Io,
-            epoch: crate::logging::fs_epoch(),
-            kind: FsNodeKind::File,
-            size_bytes: 0,
-        };
-    };
-    resp
+    crate::logging::FS_MAILBOX.request(req).await
 }
 
 async fn fs_read_file_handler(
@@ -187,18 +167,7 @@ async fn fs_read_file_handler(
     _header: VarHeader,
     req: FsReadFileReq,
 ) -> FsReadFileResp {
-    let offset = req.offset;
-    let FsResponse::ReadFile(resp) = crate::logging::fs_request(FsRequest::ReadFile(req)).await
-    else {
-        return FsReadFileResp {
-            err: FsError::Io,
-            epoch: crate::logging::fs_epoch(),
-            offset,
-            data: heapless::Vec::new(),
-            done: false,
-        };
-    };
-    resp
+    crate::logging::FS_MAILBOX.request(req).await
 }
 
 async fn fs_remove_handler(
@@ -206,13 +175,7 @@ async fn fs_remove_handler(
     _header: VarHeader,
     req: FsRemoveReq,
 ) -> FsRemoveResp {
-    let FsResponse::Remove(resp) = crate::logging::fs_request(FsRequest::Remove(req)).await else {
-        return FsRemoveResp {
-            err: FsError::Io,
-            epoch: crate::logging::fs_epoch(),
-        };
-    };
-    resp
+    crate::logging::FS_MAILBOX.request(req).await
 }
 
 async fn fs_erase_storage_handler(
@@ -220,14 +183,7 @@ async fn fs_erase_storage_handler(
     _header: VarHeader,
     req: FsEraseStorageReq,
 ) -> FsEraseStorageResp {
-    let FsResponse::EraseStorage(resp) =
-        crate::logging::fs_request(FsRequest::EraseStorage(req)).await
-    else {
-        return FsEraseStorageResp {
-            err: FsError::Io,
-            epoch: crate::logging::fs_epoch(),
-        };
-    };
+    let resp = crate::logging::FS_MAILBOX.request(req).await;
 
     if resp.err == FsError::Ok {
         embedded_utils::info!("erase_storage complete; board will now restart");
@@ -258,11 +214,13 @@ async fn panic_handler(_context: &mut AppContext, _header: VarHeader, req: Panic
 // ---------------------------------------------------------------------------
 
 #[embassy_executor::task]
+/// Runs the raw USB device state machine forever.
 pub async fn usb_device_task(mut usb: UsbDevice<'static, AppDriver>) {
     usb.run().await;
 }
 
 #[embassy_executor::task]
+/// Waits for a reboot signal, then resets the MCU after a short grace period.
 pub async fn reboot_task() -> ! {
     REBOOT_SIGNAL.wait().await;
     Timer::after_millis(REBOOT_DELAY_MS).await;
@@ -270,6 +228,7 @@ pub async fn reboot_task() -> ! {
 }
 
 #[embassy_executor::task]
+/// Waits for a panic request and triggers a deliberate panic for testing.
 pub async fn panic_task() -> ! {
     let req = PANIC_REQ_CH.receive().await;
     Timer::after_millis(PANIC_DELAY_MS).await;
@@ -277,6 +236,7 @@ pub async fn panic_task() -> ! {
 }
 
 #[embassy_executor::task]
+/// Starts the USB RPC server on the async executor.
 pub async fn usb_rpc_task() {
     let usb_driver: AppDriver = {
         let mut board = crate::board::BOARD
@@ -293,6 +253,7 @@ pub async fn usb_rpc_task() {
 }
 
 #[embassy_executor::task]
+/// Initializes USB transport/server internals and serves RPC requests forever.
 async fn usb_rpc_task_inner(usb_driver: AppDriver, spawner: embassy_executor::Spawner) {
     let pbufs = PBUFS.take();
     let config = usb_config();

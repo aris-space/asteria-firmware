@@ -1,3 +1,5 @@
+#![allow(clippy::wildcard_imports)]
+
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -20,6 +22,7 @@ use crate::board::FlashAdapter;
 // Large files are transferred across many fs/read requests; this value is per-response chunk size.
 // Keep it conservative for raw-usb transport robustness.
 const FS_MAX_CHUNK: usize = 512;
+const FS_MAX_CHUNK_U16: u16 = 512;
 const FS_REQ_CH_CAP: usize = 1;
 const FS_EPOCH_INITIAL: u32 = 1;
 const LOGGING_DROPPED_WRITE_WARN_EVERY: u32 = 128;
@@ -42,9 +45,17 @@ struct FsState {
 static FS_STATE: ThreadModeMutex<RefCell<Option<FsState>>> =
     ThreadModeMutex::new(RefCell::new(None));
 
-struct FsMailbox {
+pub(crate) struct FsMailbox {
     req: Channel<CriticalSectionRawMutex, FsRequest, FS_REQ_CH_CAP>,
-    resp: Signal<CriticalSectionRawMutex, FsResponse>,
+    // One response signal per request type keeps responses type-safe
+    // and avoids runtime request/response mismatch handling.
+    info_resp: Signal<CriticalSectionRawMutex, FsInfoResp>,
+    list_dir_resp: Signal<CriticalSectionRawMutex, FsListDirResp>,
+    stat_resp: Signal<CriticalSectionRawMutex, FsStatResp>,
+    read_file_resp: Signal<CriticalSectionRawMutex, FsReadFileResp>,
+    remove_resp: Signal<CriticalSectionRawMutex, FsRemoveResp>,
+    erase_storage_resp: Signal<CriticalSectionRawMutex, FsEraseStorageResp>,
+    // We allow only one in-flight RPC at a time so each signal can be reused safely.
     call_lock: Mutex<CriticalSectionRawMutex, ()>,
 }
 
@@ -52,28 +63,31 @@ impl FsMailbox {
     const fn new() -> Self {
         Self {
             req: Channel::new(),
-            resp: Signal::new(),
+            info_resp: Signal::new(),
+            list_dir_resp: Signal::new(),
+            stat_resp: Signal::new(),
+            read_file_resp: Signal::new(),
+            remove_resp: Signal::new(),
+            erase_storage_resp: Signal::new(),
             call_lock: Mutex::new(()),
         }
     }
 
-    async fn request(&self, req: FsRequest) -> FsResponse {
+    /// Send a filesystem request and wait for its typed response.
+    pub(crate) async fn request<R: FsMailboxCall>(&self, req: R) -> R::Response {
         let _guard = self.call_lock.lock().await;
-        self.resp.reset();
-        self.req.send(req).await;
-        self.resp.wait().await
+        let signal = R::response_signal(self);
+        signal.reset();
+        self.req.send(req.into_request()).await;
+        signal.wait().await
     }
 
     async fn wait_request(&self) -> FsRequest {
         self.req.receive().await
     }
-
-    fn respond(&self, resp: FsResponse) {
-        self.resp.signal(resp);
-    }
 }
 
-static FS_MAILBOX: FsMailbox = FsMailbox::new();
+pub(crate) static FS_MAILBOX: FsMailbox = FsMailbox::new();
 static FS_EPOCH: AtomicU32 = AtomicU32::new(FS_EPOCH_INITIAL);
 
 pub enum FsRequest {
@@ -85,24 +99,102 @@ pub enum FsRequest {
     EraseStorage(FsEraseStorageReq),
 }
 
-#[allow(clippy::large_enum_variant)]
-pub enum FsResponse {
-    Info(FsInfoResp),
-    ListDir(FsListDirResp),
-    Stat(FsStatResp),
-    ReadFile(FsReadFileResp),
-    Remove(FsRemoveResp),
-    EraseStorage(FsEraseStorageResp),
+pub(crate) trait FsMailboxCall {
+    type Response;
+
+    fn into_request(self) -> FsRequest;
+    fn response_signal(mailbox: &FsMailbox) -> &Signal<CriticalSectionRawMutex, Self::Response>;
 }
 
+macro_rules! impl_fs_mailbox_call {
+    ($req_ty:ty, $resp_ty:ty, $req_variant:ident, $signal_field:ident) => {
+        impl FsMailboxCall for $req_ty {
+            type Response = $resp_ty;
+
+            fn into_request(self) -> FsRequest {
+                FsRequest::$req_variant(self)
+            }
+
+            fn response_signal(
+                mailbox: &FsMailbox,
+            ) -> &Signal<CriticalSectionRawMutex, Self::Response> {
+                &mailbox.$signal_field
+            }
+        }
+    };
+}
+
+impl_fs_mailbox_call!(FsInfoReq, FsInfoResp, Info, info_resp);
+impl_fs_mailbox_call!(FsListDirReq, FsListDirResp, ListDir, list_dir_resp);
+impl_fs_mailbox_call!(FsStatReq, FsStatResp, Stat, stat_resp);
+impl_fs_mailbox_call!(FsReadFileReq, FsReadFileResp, ReadFile, read_file_resp);
+impl_fs_mailbox_call!(FsRemoveReq, FsRemoveResp, Remove, remove_resp);
+impl_fs_mailbox_call!(
+    FsEraseStorageReq,
+    FsEraseStorageResp,
+    EraseStorage,
+    erase_storage_resp
+);
+
+trait FsErrorResponse {
+    fn from_err(err: FsError, epoch: FsEpoch) -> Self;
+}
+
+fn fs_err<R: FsErrorResponse>(err: FsError) -> R {
+    R::from_err(err, fs_epoch())
+}
+
+impl FsErrorResponse for FsInfoResp {
+    fn from_err(err: FsError, epoch: FsEpoch) -> Self {
+        Self {
+            err,
+            epoch,
+            max_chunk: FS_MAX_CHUNK_U16,
+            max_dir_entries: u16::try_from(FS_DIR_PAGE_CAP).unwrap_or(u16::MAX),
+        }
+    }
+}
+
+impl FsErrorResponse for FsListDirResp {
+    fn from_err(err: FsError, epoch: FsEpoch) -> Self {
+        Self {
+            err,
+            epoch,
+            entries: HVec::new(),
+            next_cursor: 0,
+        }
+    }
+}
+
+impl FsErrorResponse for FsStatResp {
+    fn from_err(err: FsError, epoch: FsEpoch) -> Self {
+        Self {
+            err,
+            epoch,
+            kind: FsNodeKind::File,
+            size_bytes: 0,
+        }
+    }
+}
+
+impl FsErrorResponse for FsRemoveResp {
+    fn from_err(err: FsError, epoch: FsEpoch) -> Self {
+        Self { err, epoch }
+    }
+}
+
+impl FsErrorResponse for FsEraseStorageResp {
+    fn from_err(err: FsError, epoch: FsEpoch) -> Self {
+        Self { err, epoch }
+    }
+}
+
+/// Returns the current FS mutation epoch used for optimistic client caching.
 pub fn fs_epoch() -> u32 {
     FS_EPOCH.load(Ordering::Relaxed)
 }
 
-pub async fn fs_request(req: FsRequest) -> FsResponse {
-    FS_MAILBOX.request(req).await
-}
-
+/// Consumes defmt frames and appends raw bytes into the active session file.
 #[embassy_executor::task]
 pub async fn logging_task() -> ! {
     embedded_utils::info!("logging task: startup");
@@ -149,8 +241,9 @@ pub async fn logging_task() -> ! {
     }
 }
 
+/// Owns the littlefs instance and handles filesystem RPC requests sequentially
 #[embassy_executor::task]
-pub async fn fs_worker() -> ! {
+pub async fn fs_worker_task() -> ! {
     embedded_utils::info!("fs worker: startup");
     let flash: FlashAdapter<'static> = {
         let mut board = crate::board::BOARD
@@ -176,12 +269,59 @@ pub async fn fs_worker() -> ! {
 
     loop {
         let req = FS_MAILBOX.wait_request().await;
-        let resp = match req {
-            FsRequest::EraseStorage(_req) => handle_erase_storage(),
-            req => with_fs_req(req, |state, req| handle_fs_request(&mut state.fs, req))
-                .unwrap_or_else(degraded_fs_response),
-        };
-        FS_MAILBOX.respond(resp);
+        match req {
+            FsRequest::Info(_req) => {
+                let resp = if fs_available() {
+                    handle_fs_info()
+                } else {
+                    fs_err(FsError::Io)
+                };
+                FS_MAILBOX.info_resp.signal(resp);
+            }
+            FsRequest::ListDir(req) => {
+                let resp = with_fs_req(req, |state, req| {
+                    handle_list_dir(
+                        &state.fs,
+                        req.path.as_str(),
+                        req.cursor,
+                        req.max_entries,
+                        req.expected_epoch,
+                    )
+                })
+                .unwrap_or_else(|_| fs_err(FsError::Io));
+                FS_MAILBOX.list_dir_resp.signal(resp);
+            }
+            FsRequest::Stat(req) => {
+                let resp = with_fs_req(req, |state, req| {
+                    handle_stat(&state.fs, req.path.as_str(), req.expected_epoch)
+                })
+                .unwrap_or_else(|_| fs_err(FsError::Io));
+                FS_MAILBOX.stat_resp.signal(resp);
+            }
+            FsRequest::ReadFile(req) => {
+                let resp = with_fs_req(req, |state, req| {
+                    handle_read_file(
+                        &state.fs,
+                        req.path.as_str(),
+                        req.offset,
+                        req.len,
+                        req.expected_epoch,
+                    )
+                })
+                .unwrap_or_else(|req| fs_read_file_err(FsError::Io, req.offset));
+                FS_MAILBOX.read_file_resp.signal(resp);
+            }
+            FsRequest::Remove(req) => {
+                let resp = with_fs_req(req, |state, req| {
+                    handle_remove(&state.fs, req.path.as_str(), req.expected_epoch)
+                })
+                .unwrap_or_else(|_| fs_err(FsError::Io));
+                FS_MAILBOX.remove_resp.signal(resp);
+            }
+            FsRequest::EraseStorage(_req) => {
+                FS_MAILBOX.erase_storage_resp.signal(handle_erase_storage());
+            }
+        }
     }
 }
 
@@ -221,94 +361,42 @@ fn init_filesystem(flash: FlashAdapter<'static>) -> Option<FsState> {
     }
 
     let alloc = LOG_ALLOC.init(Allocation::new());
-    let fs = match Filesystem::mount(alloc, storage) {
-        Ok(fs) => fs,
-        Err(_) => {
-            embedded_utils::fmt::warn!("fs worker: mount failed after format");
-            return None;
-        }
+    let Ok(fs) = Filesystem::mount(alloc, storage) else {
+        embedded_utils::fmt::warn!("fs worker: mount failed after format");
+        return None;
     };
 
     embedded_utils::info!("fs worker: littlefs mounted successfully");
 
-    let defmt_path = match prepare_log_session(&fs) {
-        Some(path) => path,
-        None => {
-            embedded_utils::fmt::warn!("fs worker: session setup failed");
-            return None;
-        }
+    let Some(defmt_path) = prepare_log_session(&fs) else {
+        embedded_utils::fmt::warn!("fs worker: session setup failed");
+        return None;
     };
 
     Some(FsState { fs, defmt_path })
 }
 
-fn degraded_fs_response(req: FsRequest) -> FsResponse {
-    match req {
-        FsRequest::Info(_req) => FsResponse::Info(fs_info_err(FsError::Io)),
-        FsRequest::ListDir(_req) => FsResponse::ListDir(fs_list_dir_err(FsError::Io)),
-        FsRequest::Stat(_req) => FsResponse::Stat(fs_stat_err(FsError::Io)),
-        FsRequest::ReadFile(req) => FsResponse::ReadFile(fs_read_file_err(FsError::Io, req.offset)),
-        FsRequest::Remove(_req) => FsResponse::Remove(fs_remove_err(FsError::Io)),
-        FsRequest::EraseStorage(_req) => {
-            FsResponse::EraseStorage(fs_erase_storage_err(FsError::Io))
-        }
-    }
-}
-
-fn handle_fs_request<S: Storage>(fs: &mut Filesystem<'_, S>, req: FsRequest) -> FsResponse {
-    match req {
-        FsRequest::Info(_req) => FsResponse::Info(handle_fs_info()),
-        FsRequest::ListDir(req) => FsResponse::ListDir(handle_list_dir(
-            fs,
-            req.path,
-            req.cursor,
-            req.max_entries,
-            req.expected_epoch,
-        )),
-        FsRequest::Stat(req) => FsResponse::Stat(handle_stat(fs, req.path, req.expected_epoch)),
-        FsRequest::ReadFile(req) => FsResponse::ReadFile(handle_read_file(
-            fs,
-            req.path,
-            req.offset,
-            req.len,
-            req.expected_epoch,
-        )),
-        FsRequest::Remove(req) => {
-            FsResponse::Remove(handle_remove(fs, req.path, req.expected_epoch))
-        }
-        FsRequest::EraseStorage(_req) => {
-            FsResponse::EraseStorage(fs_erase_storage_err(FsError::Io))
-        }
-    }
-}
-
-fn handle_erase_storage() -> FsResponse {
-    let resp = FS_STATE.lock(|cell| {
+fn handle_erase_storage() -> FsEraseStorageResp {
+    FS_STATE.lock(|cell| {
         let mut slot = cell.borrow_mut();
         let Some(state) = slot.take() else {
-            return fs_erase_storage_err(FsError::Io);
+            return fs_err(FsError::Io);
         };
 
         let (alloc, storage) = state.fs.into_inner();
         if Filesystem::format(storage).is_err() {
             embedded_utils::fmt::warn!("fs worker: erase format failed");
-            return fs_erase_storage_err(FsError::Io);
+            return fs_err(FsError::Io);
         }
 
-        let fs = match Filesystem::mount(alloc, storage) {
-            Ok(fs) => fs,
-            Err(_) => {
-                embedded_utils::fmt::warn!("fs worker: remount failed after erase");
-                return fs_erase_storage_err(FsError::Io);
-            }
+        let Ok(fs) = Filesystem::mount(alloc, storage) else {
+            embedded_utils::fmt::warn!("fs worker: remount failed after erase");
+            return fs_err(FsError::Io);
         };
 
-        let defmt_path = match prepare_log_session(&fs) {
-            Some(path) => path,
-            None => {
-                embedded_utils::fmt::warn!("fs worker: session setup failed after erase");
-                return fs_erase_storage_err(FsError::Io);
-            }
+        let Some(defmt_path) = prepare_log_session(&fs) else {
+            embedded_utils::fmt::warn!("fs worker: session setup failed after erase");
+            return fs_err(FsError::Io);
         };
 
         *slot = Some(FsState { fs, defmt_path });
@@ -317,9 +405,7 @@ fn handle_erase_storage() -> FsResponse {
             err: FsError::Ok,
             epoch: fs_epoch(),
         }
-    });
-
-    FsResponse::EraseStorage(resp)
+    })
 }
 
 fn note_fs_mutation() {
@@ -333,63 +419,13 @@ fn epoch_matches(expected: Option<FsEpoch>) -> bool {
     }
 }
 
-fn fs_info_ok() -> FsInfoResp {
-    FsInfoResp {
-        err: FsError::Ok,
-        epoch: fs_epoch(),
-        max_chunk: FS_MAX_CHUNK as u16,
-        max_dir_entries: FS_DIR_PAGE_CAP as u16,
-    }
-}
-
-fn fs_info_err(err: FsError) -> FsInfoResp {
-    FsInfoResp {
-        err,
-        epoch: fs_epoch(),
-        max_chunk: FS_MAX_CHUNK as u16,
-        max_dir_entries: FS_DIR_PAGE_CAP as u16,
-    }
-}
-
-fn fs_list_dir_err(err: FsError) -> FsListDirResp {
-    FsListDirResp {
-        err,
-        epoch: fs_epoch(),
-        entries: HVec::new(),
-        next_cursor: 0,
-    }
-}
-
-fn fs_stat_err(err: FsError) -> FsStatResp {
-    FsStatResp {
-        err,
-        epoch: fs_epoch(),
-        kind: FsNodeKind::File,
-        size_bytes: 0,
-    }
-}
-
 fn fs_read_file_err(err: FsError, offset: u32) -> FsReadFileResp {
     FsReadFileResp {
         err,
         epoch: fs_epoch(),
         offset,
         data: HVec::new(),
-        done: false,
-    }
-}
-
-fn fs_remove_err(err: FsError) -> FsRemoveResp {
-    FsRemoveResp {
-        err,
-        epoch: fs_epoch(),
-    }
-}
-
-fn fs_erase_storage_err(err: FsError) -> FsEraseStorageResp {
-    FsEraseStorageResp {
-        err,
-        epoch: fs_epoch(),
+        done: true,
     }
 }
 
@@ -413,14 +449,11 @@ fn normalize_req_path(input: &str) -> Result<HString<FS_PATH_CAP>, FsError> {
     Ok(out)
 }
 
-fn to_lfs_path(path: &HString<FS_PATH_CAP>) -> Result<littlefs2::path::PathBuf, FsError> {
-    littlefs2::path::PathBuf::try_from(path.as_str()).map_err(|_| FsError::NotFound)
+fn to_lfs_path(path: &HString<FS_PATH_CAP>) -> Result<PathBuf, FsError> {
+    PathBuf::try_from(path.as_str()).map_err(|_| FsError::NotFound)
 }
 
-fn path_exists_as_file<S: littlefs2::driver::Storage>(
-    fs: &Filesystem<'_, S>,
-    path: &littlefs2::path::Path,
-) -> bool {
+fn path_exists_as_file<S: Storage>(fs: &Filesystem<'_, S>, path: &Path) -> bool {
     fs.open_file_with_options_and_then(
         |opts| opts.read(true),
         path,
@@ -429,18 +462,12 @@ fn path_exists_as_file<S: littlefs2::driver::Storage>(
     .is_ok()
 }
 
-fn path_exists_as_dir<S: littlefs2::driver::Storage>(
-    fs: &Filesystem<'_, S>,
-    path: &littlefs2::path::Path,
-) -> bool {
+fn path_exists_as_dir<S: Storage>(fs: &Filesystem<'_, S>, path: &Path) -> bool {
     fs.read_dir_and_then(path, |_dir| -> littlefs2::io::Result<()> { Ok(()) })
         .is_ok()
 }
 
-fn file_size_bytes<S: littlefs2::driver::Storage>(
-    fs: &Filesystem<'_, S>,
-    path: &littlefs2::path::Path,
-) -> Option<u32> {
+fn file_size_bytes<S: Storage>(fs: &Filesystem<'_, S>, path: &Path) -> Option<u32> {
     let mut size = None;
     let _ = fs.open_file_with_options_and_then(
         |opts| opts.read(true),
@@ -450,38 +477,39 @@ fn file_size_bytes<S: littlefs2::driver::Storage>(
             Ok(())
         },
     );
-    size.map(|n| n.min(u32::MAX as usize) as u32)
+    size.map(|n| u32::try_from(n).unwrap_or(u32::MAX))
 }
 
 fn handle_fs_info() -> FsInfoResp {
-    fs_info_ok()
+    fs_err(FsError::Ok)
 }
 
-fn handle_list_dir<S: littlefs2::driver::Storage>(
+fn handle_list_dir<S: Storage>(
     fs: &Filesystem<'_, S>,
-    req_path: HString<FS_PATH_CAP>,
+    req_path: &str,
     cursor: u32,
     max_entries: u16,
     expected_epoch: Option<FsEpoch>,
 ) -> FsListDirResp {
     if !epoch_matches(expected_epoch) {
-        return fs_list_dir_err(FsError::EpochMismatch);
+        return fs_err(FsError::EpochMismatch);
     }
 
-    let norm_path = match normalize_req_path(req_path.as_str()) {
+    let norm_path = match normalize_req_path(req_path) {
         Ok(p) => p,
-        Err(err) => return fs_list_dir_err(err),
+        Err(err) => return fs_err(err),
     };
 
     let lfs_path = match to_lfs_path(&norm_path) {
         Ok(p) => p,
-        Err(err) => return fs_list_dir_err(err),
+        Err(err) => return fs_err(err),
     };
 
-    let page_cap = core::cmp::min(max_entries.max(1) as usize, FS_DIR_PAGE_CAP);
+    let page_cap = core::cmp::min(usize::from(max_entries.max(1)), FS_DIR_PAGE_CAP);
     let mut entries: HVec<FsDirEntry, FS_DIR_PAGE_CAP> = HVec::new();
     let mut total_entries = 0usize;
     let mut page_scanned = 0usize;
+    let cursor_usize = usize::try_from(cursor).unwrap_or(usize::MAX);
 
     let list_res = fs.read_dir_and_then(lfs_path.as_path(), |dir| -> littlefs2::io::Result<()> {
         for entry in dir {
@@ -491,7 +519,7 @@ fn handle_list_dir<S: littlefs2::driver::Storage>(
                 continue;
             }
 
-            if total_entries >= cursor as usize && page_scanned < page_cap {
+            if total_entries >= cursor_usize && page_scanned < page_cap {
                 page_scanned = page_scanned.saturating_add(1);
 
                 let mut name = HString::<FS_NAME_CAP>::new();
@@ -512,13 +540,14 @@ fn handle_list_dir<S: littlefs2::driver::Storage>(
 
     if list_res.is_err() {
         if path_exists_as_file(fs, lfs_path.as_path()) {
-            return fs_list_dir_err(FsError::NotDir);
+            return fs_err(FsError::NotDir);
         }
-        return fs_list_dir_err(FsError::NotFound);
+        return fs_err(FsError::NotFound);
     }
 
-    let consumed = page_scanned as u32;
-    let next_cursor = if total_entries as u32 > cursor.saturating_add(consumed) {
+    let consumed = u32::try_from(page_scanned).unwrap_or(u32::MAX);
+    let total_entries_u32 = u32::try_from(total_entries).unwrap_or(u32::MAX);
+    let next_cursor = if total_entries_u32 > cursor.saturating_add(consumed) {
         cursor.saturating_add(consumed)
     } else {
         0
@@ -532,23 +561,23 @@ fn handle_list_dir<S: littlefs2::driver::Storage>(
     }
 }
 
-fn handle_stat<S: littlefs2::driver::Storage>(
+fn handle_stat<S: Storage>(
     fs: &Filesystem<'_, S>,
-    req_path: HString<FS_PATH_CAP>,
+    req_path: &str,
     expected_epoch: Option<FsEpoch>,
 ) -> FsStatResp {
     if !epoch_matches(expected_epoch) {
-        return fs_stat_err(FsError::EpochMismatch);
+        return fs_err(FsError::EpochMismatch);
     }
 
-    let norm_path = match normalize_req_path(req_path.as_str()) {
+    let norm_path = match normalize_req_path(req_path) {
         Ok(p) => p,
-        Err(err) => return fs_stat_err(err),
+        Err(err) => return fs_err(err),
     };
 
     let lfs_path = match to_lfs_path(&norm_path) {
         Ok(p) => p,
-        Err(err) => return fs_stat_err(err),
+        Err(err) => return fs_err(err),
     };
 
     if path_exists_as_dir(fs, lfs_path.as_path()) {
@@ -569,12 +598,12 @@ fn handle_stat<S: littlefs2::driver::Storage>(
         };
     }
 
-    fs_stat_err(FsError::NotFound)
+    fs_err(FsError::NotFound)
 }
 
-fn handle_read_file<S: littlefs2::driver::Storage>(
+fn handle_read_file<S: Storage>(
     fs: &Filesystem<'_, S>,
-    req_path: HString<FS_PATH_CAP>,
+    req_path: &str,
     offset: u32,
     len: u16,
     expected_epoch: Option<FsEpoch>,
@@ -583,7 +612,7 @@ fn handle_read_file<S: littlefs2::driver::Storage>(
         return fs_read_file_err(FsError::EpochMismatch, offset);
     }
 
-    let norm_path = match normalize_req_path(req_path.as_str()) {
+    let norm_path = match normalize_req_path(req_path) {
         Ok(p) => p,
         Err(err) => return fs_read_file_err(err, offset),
     };
@@ -605,8 +634,12 @@ fn handle_read_file<S: littlefs2::driver::Storage>(
         return fs_read_file_err(FsError::OffsetOutOfRange, offset);
     }
 
-    let remaining = size_bytes.saturating_sub(offset) as usize;
-    let req_len = if len == 0 { FS_MAX_CHUNK } else { len as usize };
+    let remaining = usize::try_from(size_bytes.saturating_sub(offset)).unwrap_or(usize::MAX);
+    let req_len = if len == 0 {
+        FS_MAX_CHUNK
+    } else {
+        usize::from(len)
+    };
     let to_read = core::cmp::min(
         remaining,
         core::cmp::min(req_len, core::cmp::min(FS_MAX_CHUNK, FS_READ_DATA_CAP)),
@@ -642,8 +675,9 @@ fn handle_read_file<S: littlefs2::driver::Storage>(
     let mut data: HVec<u8, FS_READ_DATA_CAP> = HVec::new();
     let _ = data.extend_from_slice(&chunk[..fetched]);
 
-    let done =
-        (offset as usize).saturating_add(fetched) >= size_bytes as usize || fetched < to_read;
+    let offset_usize = usize::try_from(offset).unwrap_or(usize::MAX);
+    let size_usize = usize::try_from(size_bytes).unwrap_or(usize::MAX);
+    let done = offset_usize.saturating_add(fetched) >= size_usize || fetched < to_read;
 
     FsReadFileResp {
         err: FsError::Ok,
@@ -654,27 +688,27 @@ fn handle_read_file<S: littlefs2::driver::Storage>(
     }
 }
 
-fn handle_remove<S: littlefs2::driver::Storage>(
+fn handle_remove<S: Storage>(
     fs: &Filesystem<'_, S>,
-    req_path: HString<FS_PATH_CAP>,
+    req_path: &str,
     expected_epoch: Option<FsEpoch>,
 ) -> FsRemoveResp {
     if !epoch_matches(expected_epoch) {
-        return fs_remove_err(FsError::EpochMismatch);
+        return fs_err(FsError::EpochMismatch);
     }
 
-    let norm_path = match normalize_req_path(req_path.as_str()) {
+    let norm_path = match normalize_req_path(req_path) {
         Ok(p) => p,
-        Err(err) => return fs_remove_err(err),
+        Err(err) => return fs_err(err),
     };
 
     if norm_path.as_str() == PROTECTED_ROOT_PATH {
-        return fs_remove_err(FsError::Busy);
+        return fs_err(FsError::Busy);
     }
 
     let lfs_path = match to_lfs_path(&norm_path) {
         Ok(p) => p,
-        Err(err) => return fs_remove_err(err),
+        Err(err) => return fs_err(err),
     };
 
     let existed_as_dir = path_exists_as_dir(fs, lfs_path.as_path());
@@ -685,7 +719,7 @@ fn handle_remove<S: littlefs2::driver::Storage>(
     };
 
     if !existed_as_dir && !existed_as_file {
-        return fs_remove_err(FsError::NotFound);
+        return fs_err(FsError::NotFound);
     }
 
     match fs.remove(lfs_path.as_path()) {
@@ -696,7 +730,7 @@ fn handle_remove<S: littlefs2::driver::Storage>(
                 epoch: fs_epoch(),
             }
         }
-        Err(_) => fs_remove_err(FsError::Busy),
+        Err(_) => fs_err(FsError::Busy),
     }
 }
 
@@ -705,18 +739,18 @@ fn prepare_log_session<S: Storage>(fs: &Filesystem<S>) -> Option<PathBuf> {
     let mut index_buf = itoa::Buffer::new();
     let log_dir = log_dir_path(log_index, &mut index_buf)?;
 
-    embedded_utils::info!("logging task: logging to session dir /log_{}", log_index);
+    embedded_utils::info!("fs worker: logging to session dir /log_{}", log_index);
 
     if fs.exists(log_dir.as_path()) {
-        embedded_utils::debug!("logging task: clearing existing session directory");
+        embedded_utils::debug!("fs worker: clearing existing session directory");
         if fs.remove_dir_all(log_dir.as_path()).is_err() {
-            embedded_utils::fmt::warn!("logging task: failed to clear session directory");
+            embedded_utils::fmt::warn!("fs worker: failed to clear session directory");
             return None;
         }
     }
 
     if fs.create_dir(log_dir.as_path()).is_err() {
-        embedded_utils::fmt::warn!("logging task: failed to create session directory");
+        embedded_utils::fmt::warn!("fs worker: failed to create session directory");
         return None;
     }
 
@@ -724,7 +758,7 @@ fn prepare_log_session<S: Storage>(fs: &Filesystem<S>) -> Option<PathBuf> {
     let mut defmt_path = PathBuf::from(log_dir.as_path());
     defmt_path.push(defmt_file);
     if fs.write(defmt_path.as_path(), &[]).is_err() {
-        embedded_utils::fmt::warn!("logging task: failed to create defmt.bin");
+        embedded_utils::fmt::warn!("fs worker: failed to create defmt.bin");
         return None;
     }
 
@@ -732,7 +766,7 @@ fn prepare_log_session<S: Storage>(fs: &Filesystem<S>) -> Option<PathBuf> {
     let mut build_info_path = PathBuf::from(log_dir.as_path());
     build_info_path.push(build_info_file);
     if write_build_info(fs, build_info_path.as_path()).is_err() {
-        embedded_utils::fmt::warn!("logging task: failed to write build_info.txt");
+        embedded_utils::fmt::warn!("fs worker: failed to write build_info.txt");
         return None;
     }
 
@@ -829,7 +863,7 @@ fn select_next_log_index<S: Storage>(fs: &Filesystem<S>) -> Result<u32, ()> {
         })
         .is_err()
     {
-        embedded_utils::fmt::warn!("logging task: failed to scan root directory");
+        embedded_utils::fmt::warn!("fs worker: failed to scan root directory");
         return Err(());
     }
 
@@ -848,7 +882,7 @@ fn parse_log_dir_index(name: &str) -> Option<u32> {
             return None;
         }
         value = value.checked_mul(10)?;
-        value = value.checked_add((ch - b'0') as u32)?;
+        value = value.checked_add(u32::from(ch - b'0'))?;
     }
 
     Some(value)

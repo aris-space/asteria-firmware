@@ -11,14 +11,14 @@ use embassy_stm32::{bind_interrupts, usb};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
-use embassy_time::{Delay, Timer};
+use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use static_cell::StaticCell;
 use w25q256jv::W25q256jv;
 
 type FlashSpi = Spi<'static, Blocking, embassy_stm32::spi::mode::Master>;
 type FlashDevice = ExclusiveDevice<FlashSpi, Output<'static>, Delay>;
-pub type BoardFlash = W25q256jv<FlashDevice, Output<'static>, Output<'static>>;
+type BoardFlash = W25q256jv<FlashDevice, Output<'static>, Output<'static>>;
 pub type FlashAdapter<'a> = w25q256jv::W25q256jvLfsStorage<
     'a,
     FlashDevice,
@@ -34,6 +34,8 @@ bind_interrupts!(pub struct UsbIrqs {
 });
 
 pub static INTERRUPT_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
+
+/// Global board resource container, initialized once during startup.
 pub static BOARD: OnceLock<Mutex<CriticalSectionRawMutex, Board>> = OnceLock::new();
 static BOARD_FLASH: StaticCell<BoardFlash> = StaticCell::new();
 
@@ -44,6 +46,7 @@ unsafe fn TIM2() {
 }
 
 pub struct Board {
+    // Each peripheral is wrapped in `Option` so tasks can `take()` ownership at runtime.
     pub yellow: Option<Output<'static>>,
     pub green: Option<Output<'static>>,
     pub red: Option<Output<'static>>,
@@ -66,6 +69,7 @@ impl Debug for Board {
 }
 
 impl Board {
+    /// Build the board abstraction and initialize all shared peripherals.
     pub fn new(p: embassy_stm32::Peripherals) -> Self {
         let defmt_consumer = defmt_brtt::init().expect("failed to initialize logger");
 
@@ -96,15 +100,5 @@ impl Board {
             defmt_log: Some(defmt_consumer),
             usb_driver: Some(usb_driver),
         }
-    }
-}
-
-#[embassy_executor::task]
-pub async fn blink(mut led: Output<'static>) {
-    loop {
-        led.set_high();
-        Timer::after_millis(100).await;
-        led.set_low();
-        Timer::after_millis(900).await;
     }
 }

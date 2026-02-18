@@ -5,6 +5,7 @@ use core::future::pending;
 
 mod board;
 mod logging;
+mod misc;
 mod usb_rpc;
 
 use embassy_executor::Spawner;
@@ -23,6 +24,10 @@ mod clocks {
 use clocks::clocks_config;
 
 mod built_info {
+    #![allow(clippy::all)]
+    #![allow(clippy::pedantic)]
+    #![allow(clippy::doc_markdown)]
+    #![allow(clippy::needless_raw_string_hashes)]
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
     pub const ASTERIA_ARTIFACT_TIMESTAMP_MS: Option<&str> =
         option_env!("ASTERIA_ARTIFACT_TIMESTAMP_MS");
@@ -33,7 +38,7 @@ mod built_info {
 use panic_probe as _;
 
 use crate::board::Board;
-use embedded_utils::fmt::*;
+use embedded_utils::fmt::info;
 
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
@@ -51,13 +56,12 @@ async fn main(blocking_executor: Spawner) -> ! {
     let async_executor = board::INTERRUPT_EXECUTOR.start(interrupt::TIM2);
 
     blocking_executor.spawn(logging::logging_task().expect("failed to create logging task"));
-    blocking_executor.spawn(logging::fs_worker().expect("failed to create fs_worker task"));
+    blocking_executor.spawn(logging::fs_worker_task().expect("failed to create fs_worker task"));
+    async_executor.spawn(usb_rpc::usb_rpc_task().expect("failed to create usb_rpc task"));
 
     #[cfg(feature = "log-stress")]
     blocking_executor.spawn(defmt_stress_task().expect("failed to create defmt_stress_task"));
-
     async_executor.spawn(blink_yellow().expect("failed to create blink_yellow task"));
-    async_executor.spawn(usb_rpc::usb_rpc_task().expect("failed to create usb_rpc task"));
 
     loop {
         pending::<()>().await;
@@ -65,6 +69,7 @@ async fn main(blocking_executor: Spawner) -> ! {
 }
 
 #[embassy_executor::task]
+/// Board-local LED task used as a liveness heartbeat on the async executor.
 async fn blink_yellow() -> ! {
     info!("blink task: startup");
     let mut yellow = {
@@ -88,12 +93,13 @@ async fn blink_yellow() -> ! {
 
 #[cfg(feature = "log-stress")]
 #[embassy_executor::task]
+/// Optional stress generator that emits large, hard-to-compress defmt frames.
 async fn defmt_stress_task() -> ! {
-    info!("defmt stress task: startup");
-    info!("defmt stress task: acquired all resources");
-
     const STRESS_PAYLOAD_BYTES: usize = 96;
     const STRESS_PERIOD_MS: u64 = 8;
+
+    info!("defmt stress task: startup");
+    info!("defmt stress task: acquired all resources");
 
     let mut seq: u32 = 0;
     let mut payload = [0u8; STRESS_PAYLOAD_BYTES];
@@ -104,7 +110,7 @@ async fn defmt_stress_task() -> ! {
             x ^= x << 13;
             x ^= x >> 17;
             x ^= x << 5;
-            *byte = x as u8;
+            *byte = x.to_le_bytes()[0];
         }
 
         info!("defmt stress: seq={=u32} p={=[u8]}", seq, &payload[..]);
