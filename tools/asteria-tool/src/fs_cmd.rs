@@ -60,7 +60,11 @@ pub enum FsAction {
     },
     /// Erase external flash storage on device and reboot.
     #[command(name = "erase-storage")]
-    EraseStorage,
+    EraseStorage {
+        /// Confirm destructive erase (required).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Show runtime + filesystem status info.
     Info,
 }
@@ -126,7 +130,11 @@ pub async fn run_fs_action<B: RpcBackend + Sync>(
             let result = remove_remote_path(backend, cwd, &path, recursive).await?;
             print_remove_result(&result);
         }
-        FsAction::EraseStorage => {
+        FsAction::EraseStorage { yes } => {
+            if !yes {
+                bail!("confirmation required: fs erase-storage --yes");
+            }
+            warn_erase_storage();
             let _ = ops::erase_storage(backend).await?;
             println!("external flash erase complete; board will now restart");
         }
@@ -150,7 +158,7 @@ fn action_label(action: &FsAction) -> String {
         FsAction::Cat { .. } => "fs cat".to_string(),
         FsAction::Pull { .. } => "fs pull".to_string(),
         FsAction::Rm { .. } => "fs rm".to_string(),
-        FsAction::EraseStorage => "fs erase-storage".to_string(),
+        FsAction::EraseStorage { .. } => "fs erase-storage".to_string(),
         FsAction::Info => "fs info".to_string(),
     }
 }
@@ -166,6 +174,16 @@ fn print_stats_line(msg: &str) {
 fn use_color_for_stats() -> bool {
     let term_ok = std::env::var("TERM").map(|v| v != "dumb").unwrap_or(true);
     io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none() && term_ok
+}
+
+fn warn_erase_storage() {
+    if use_color_for_stats() {
+        eprintln!(
+            "\x1b[1;31mwarning:\x1b[0m \x1b[31mthis erases the entire external flash and reboots the board\x1b[0m"
+        );
+    } else {
+        eprintln!("warning: this erases the entire external flash and reboots the board");
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
