@@ -366,6 +366,16 @@ async fn pull_directory_tree<B: RpcBackend + Sync>(
     Ok((files, bytes, failures))
 }
 
+fn fmt_bytes(bytes: usize) -> String {
+    if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1_024 {
+        format!("{:.1} KB", bytes as f64 / 1_024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 async fn pull_file_with_progress<B: RpcBackend + Sync>(
     backend: &B,
     remote_path: &str,
@@ -373,9 +383,10 @@ async fn pull_file_with_progress<B: RpcBackend + Sync>(
 ) -> Result<usize> {
     let is_tty = io::stderr().is_terminal();
     let mut last_percent = 0u8;
+    let start = Instant::now();
 
     if is_tty {
-        eprint!("pulling {remote_path} ...   0%");
+        eprint!("pulling {remote_path} ...");
         let _ = io::stderr().flush();
     } else {
         eprintln!("pulling {remote_path}");
@@ -393,7 +404,16 @@ async fn pull_file_with_progress<B: RpcBackend + Sync>(
                 .min(100) as u8;
             if pct >= last_percent.saturating_add(5) || pct == 100 {
                 last_percent = pct;
-                eprint!("\rpulling {remote_path} ... {:>3}% ", pct);
+                let elapsed = start.elapsed().as_secs_f64().max(1e-6);
+                let rate = done as f64 / elapsed;
+                let rate_str = fmt_bytes(rate as usize);
+                eprint!(
+                    "\rpulling {remote_path} ... {:>3}%  {} / {}  {}/s  ",
+                    pct,
+                    fmt_bytes(done),
+                    fmt_bytes(total),
+                    rate_str,
+                );
                 let _ = io::stderr().flush();
             }
         })
