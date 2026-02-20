@@ -1,0 +1,79 @@
+# CONTRIBUTING
+
+Thanks for contributing.
+
+This file covers collaboration rules and best practices. For environment setup and workflows, use:
+
+- [DOCS INDEX](docs/README.md)
+- [SETUP](docs/SETUP.md)
+- [DEVELOPMENT](docs/DEVELOPMENT.md)
+- [ARCHITECTURE](docs/ARCHITECTURE.md)
+
+## 1) Branching rules
+
+- Do not push directly to `main`.
+- Create a topic branch for every change.
+- Use branch names in this format: `type/topic-short-description`.
+  - `type` should be one of:
+    - `feature`: new functionality or meaningful behavior expansion
+    - `fix`: bug fix or regression fix
+    - `docs`: documentation-only changes
+    - `chore`: maintenance work (tooling, dependencies, CI, cleanup)
+    - `spike`: short exploratory work to validate an approach
+  - Example: `fix/log-decode-timeout`, `docs/setup-b2-clarification`
+
+## 2) Commit and history hygiene
+
+- Keep commits small and focused.
+- Prefer clear, descriptive commit messages.
+- Once a branch is pushed, avoid history rewrites.
+- Do not force-push shared branch history.
+
+## 3) Keep your branch current
+
+Merge `main` into your branch regularly:
+
+```bash
+git fetch origin
+git merge origin/main
+```
+
+After resolving conflicts, rerun local checks before pushing.
+
+## 4) Pull request expectations
+
+- Open a PR as soon as the change is reviewable.
+- Keep PRs scoped to one logical change.
+- Link the related issue/task when available.
+- Describe:
+  - what changed
+  - why it changed
+  - how you validated it
+- Request at least one reviewer.
+- Do not merge with failing required checks.
+- Use **Squash and merge**.
+
+## 5) Required local checks before push
+
+From repo root:
+
+```bash
+pre-commit run --all-files
+just fmt --check
+just ci-checks
+just test
+```
+
+Note that these checks will also be enforced by the CI.
+
+## 6) Review quality guidelines
+
+- Prefer small PRs over large batches.
+- Call out breaking changes explicitly.
+- Include tests when adding/changing behavior.
+- If something cannot be tested locally, state that clearly in the PR.
+
+## 7) After merge
+
+- Delete the remote branch.
+- Delete your local branch.
