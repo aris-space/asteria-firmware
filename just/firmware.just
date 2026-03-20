@@ -35,19 +35,6 @@ run *args:
 
     args_str=" {{args}} "
 
-    artifact_timestamp_ms="${ASTERIA_ARTIFACT_TIMESTAMP_MS:-}"
-    if [[ -z "$artifact_timestamp_ms" ]]; then
-      artifact_timestamp_ms="$(date -u +%s%3N 2>/dev/null || true)"
-      if [[ ! "$artifact_timestamp_ms" =~ ^[0-9]{13}$ ]]; then
-        artifact_timestamp_ms="$(perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)')"
-      fi
-    fi
-    if [[ ! "$artifact_timestamp_ms" =~ ^[0-9]{13}$ ]]; then
-      echo "Failed to determine UTC timestamp in milliseconds." >&2
-      exit 1
-    fi
-    export ASTERIA_ARTIFACT_TIMESTAMP_MS="$artifact_timestamp_ms"
-
     # Determine requested profile from args (best-effort).
     requested_profile="dev (default)"
     if [[ "$args_str" == *" --release "* ]]; then
@@ -63,27 +50,10 @@ run *args:
       requested_profile="$p"
     fi
 
-    tmp="$(mktemp)"
-    cargo build --manifest-path app/Cargo.toml \
-        --bin "{{bin}}" \
-        --target "{{target}}" \
-        --message-format=json-render-diagnostics \
-        {{args}} \
-      | tee "$tmp" >/dev/null
-
-    elf="$(
-      jq -r '
-        select(.reason=="compiler-artifact")
-        | select(.target.name=="{{bin}}")
-        | (.executable // empty)
-      ' "$tmp" | tail -n1
-    )"
-    rm -f "$tmp"
-
-    if [[ -z "$elf" || ! -f "$elf" ]]; then
-      echo "Could not determine built ELF path from cargo JSON output." >&2
-      exit 1
-    fi
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    build_out="$("$repo_root/just/scripts/build-elf.sh" "{{bin}}" "{{target}}" {{args}})"
+    ASTERIA_ARTIFACT_TIMESTAMP_MS="${build_out%%:*}"
+    elf="${build_out#*:}"
 
     # Derive the output dir segment (debug/release/<custom>) from the resolved ELF path.
     chosen_dir="$(basename "$(dirname "$elf")")"
@@ -92,7 +62,6 @@ run *args:
     echo "Using ELF: $elf"
     echo "Artifact/build timestamp ms: $ASTERIA_ARTIFACT_TIMESTAMP_MS"
 
-    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
     upload_script="$repo_root/just/scripts/upload-elf.sh"
     if [[ ! -x "$upload_script" ]]; then
       echo "Missing executable upload script: $upload_script" >&2
@@ -133,6 +102,52 @@ run *args:
         wait_for_upload
     fi
 
+
+# Build the firmware, upload its ELF artifact to B2, and flash it to the device with probe-rs download (no attach).
+flash *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ " {{args}} " == *" --message-format "* ]] || [[ " {{args}} " == *" --message-format="* ]]; then
+      echo "Do not pass --message-format; recipe needs JSON output." >&2
+      exit 2
+    fi
+
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    build_out="$("$repo_root/just/scripts/build-elf.sh" "{{bin}}" "{{target}}" {{args}})"
+    ASTERIA_ARTIFACT_TIMESTAMP_MS="${build_out%%:*}"
+    elf="${build_out#*:}"
+
+    echo "Using ELF: $elf"
+    echo "Artifact/build timestamp ms: $ASTERIA_ARTIFACT_TIMESTAMP_MS"
+
+    upload_script="$repo_root/just/scripts/upload-elf.sh"
+    if [[ ! -x "$upload_script" ]]; then
+      echo "Missing executable upload script: $upload_script" >&2
+      exit 1
+    fi
+
+    upload_log="$(mktemp)"
+    cleanup_upload() {
+      rm -f "$upload_log"
+    }
+    trap cleanup_upload EXIT
+
+    echo "Starting ELF upload in background."
+    (
+      "$upload_script" "$elf" "${ASTERIA_ARTIFACT_TIMESTAMP_MS}.elf"
+    ) >"$upload_log" 2>&1 &
+    upload_pid="$!"
+
+    probe-rs download --chip {{chip}} "$elf"
+
+    if wait "$upload_pid"; then
+      cat "$upload_log"
+    else
+      echo "ELF upload failed. s5cmd output:" >&2
+      cat "$upload_log" >&2
+      exit 1
+    fi
 
 # Attach to the target with probe-rs, using the most recently built ELF as the specified binary.
 attach:

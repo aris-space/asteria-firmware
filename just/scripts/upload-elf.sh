@@ -186,15 +186,25 @@ main() {
   [[ -f "$elf_path" ]] || die "ELF file not found: $elf_path"
   [[ -r "$elf_path" ]] || die "ELF file not readable: $elf_path"
 
-  load_b2_config
-
   if [[ -z "$object_name" ]]; then
     object_name="$(artifact_timestamp_ms).elf"
   fi
   [[ "$object_name" == */* ]] && die "Object name must not contain '/': $object_name"
 
+  # Always cache locally, regardless of B2 configuration.
   save_local_artifact "$elf_path" "$object_name"
-  upload_object "$elf_path" "$object_name"
+
+  # Upload to B2 only if configured.
+  local repo_root b2_env_file
+  repo_root="$(get_repo_root)"
+  b2_env_file="${ASTERIA_B2_ENV_FILE:-$repo_root/.b2.env}"
+  if [[ -f "$b2_env_file" ]] && command -v s5cmd >/dev/null 2>&1; then
+    load_b2_config
+    upload_object "$elf_path" "$object_name"
+  else
+    echo "WARNING: B2 not configured — skipping remote upload." >&2
+    echo "WARNING: ELF artifact saved locally only. Set up .b2.env for remote backup." >&2
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
