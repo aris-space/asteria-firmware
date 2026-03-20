@@ -48,10 +48,9 @@ We store every flashed firmware ELF in object storage and cache it locally in `.
 cp .b2.env.example .b2.env
 ```
 
-Request credentials from **Louis Schell** on Slack, then set:
-
-- `ASTERIA_B2_KEY_ID`
-- `ASTERIA_B2_APPLICATION_KEY`
+Object storage is private, so you need credentials to access it. You can find them in the ARIS password manager under the `AV ASTERIA` collection. Copy the following fields into your `.b2.env` file:
+* `ASTERIA_B2_KEY_ID`
+* `ASTERIA_B2_APPLICATION_KEY`
 
 ## 5) Validate setup
 
