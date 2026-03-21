@@ -1,9 +1,12 @@
 **/target/
 **/*.rs.bk
-**/.idea
 **/.DS_Store
 **/Embed.local.toml
 *.log
+
+# I don't want your configs, and you don't want mine
+**/.claude/
+**/.idea/
 
 # Don't upload credentials
 .b2.env
