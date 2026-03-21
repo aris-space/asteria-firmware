@@ -163,6 +163,55 @@ attach:
 
     exec probe-rs attach --chip {{chip}} "$elf"
 
+# Replay flash logs then attach live via probe-rs.
+replay-attach:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # --- Find ELF (same as attach) ---
+    elf="$(find "target/{{target}}" -type f -name "{{bin}}" -print0 \
+         | xargs -0 ls -t 2>/dev/null | head -n1 || true)"
+    [[ -n "$elf" ]] || { echo "No built {{bin}} found under target/{{target}}." >&2; exit 1; }
+    echo "using profile: $(basename "$(dirname "$elf")")"
+    echo "elf: $elf"
+
+    # --- Build asteria-tool ---
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    cargo build --manifest-path "$repo_root/tools/Cargo.toml" \
+      --target "$host" --bin asteria-tool --release 2>&1
+    tool="$repo_root/tools/target/$host/release/asteria-tool"
+
+    # --- Fetch latest flash log to temp dir ---
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+
+    if raw="$("$tool" fs ls /)"; then
+      latest="$(printf "%s\n" "$raw" | grep -oE 'log_[0-9]+' | sort -t_ -k2 -n | tail -n1)"
+      if [[ -n "$latest" ]]; then
+        echo "Fetching $latest from flash..."
+        "$tool" fs pull -r "/$latest" "$tmp"
+        defmt_bin="$tmp/$latest/defmt.bin"
+        if [[ -f "$defmt_bin" ]]; then
+          echo ""
+          echo "=== flash log: $latest ==="
+          defmt-print -e "$elf" stdin < "$defmt_bin" || true
+        else
+          echo "No defmt.bin in $latest — skipping replay."
+        fi
+      else
+        echo "No flash logs found — skipping replay."
+      fi
+    else
+      echo "Could not list flash logs (USB not available?) — skipping replay." >&2
+    fi
+
+    # --- Transition to live ---
+    echo ""
+    echo "--- live (probe-rs attach) ---"
+    echo ""
+    exec probe-rs attach --chip {{chip}} --no-catch-reset "$elf"
+
 # Run checks that will be used in CI
 ci-checks:
     cargo clippy \
