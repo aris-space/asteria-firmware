@@ -1,6 +1,6 @@
 [submodule "hermes-can"]
 	path = hermes-can
 	url = git@github.com:aris-space/hermes-can.git
-[submodule "asteria-data-definitions"]
-	path = asteria-data-definitions
-	url = git@github.com:aris-space/asteria-data-definitions.git
+[submodule "data-definitions"]
+	path = data-definitions
+	url = ../asteria-data-definitions
