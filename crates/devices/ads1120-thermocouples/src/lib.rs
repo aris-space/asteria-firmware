@@ -10,8 +10,8 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::mode::Async;
-use embassy_stm32::spi::{BitOrder, Error, MisoPin, MosiPin, RxDma, SckPin, Spi, TxDma};
 use embassy_stm32::spi::mode::Master;
+use embassy_stm32::spi::{BitOrder, Error, MisoPin, MosiPin, RxDma, SckPin, Spi, TxDma};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::{Peri, spi};
 use embassy_time::{Duration, Timer, with_timeout};
@@ -101,8 +101,8 @@ impl<'a> ADSThermocouples<'a> {
         tx_dma: Peri<'a, D1>,
         rx_dma: Peri<'a, D2>,
         irq: impl Binding<D1::Interrupt, dma::InterruptHandler<D1>>
-            + Binding<D2::Interrupt, dma::InterruptHandler<D2>>
-            + 'a,
+        + Binding<D2::Interrupt, dma::InterruptHandler<D2>>
+        + 'a,
         cs: Peri<'a, impl Pin>,
         ext_irq: ExtiInput<'a, Async>,
         pga_gain: PGAGain,

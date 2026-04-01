@@ -67,9 +67,9 @@ impl<'d> KellerSensRS485<'d> {
         tx_dma: Peri<'d, D1>,
         rx_dma: Peri<'d, D2>,
         irq: impl Binding<UART::Interrupt, InterruptHandler<UART>>
-            + Binding<D1::Interrupt, dma::InterruptHandler<D1>>
-            + Binding<D2::Interrupt, dma::InterruptHandler<D2>>
-            + 'd,
+        + Binding<D1::Interrupt, dma::InterruptHandler<D1>>
+        + Binding<D2::Interrupt, dma::InterruptHandler<D2>>
+        + 'd,
         de_pin: Peri<'d, impl Pin>,
     ) -> Result<Self, ConfigError> {
         let mut cfg = usart::Config::default();

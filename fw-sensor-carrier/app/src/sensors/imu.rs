@@ -25,7 +25,11 @@ use lsm6dso32::{
 
 type Interface = lsm6dso32::spi::Lsm6Dso32SpiInterface<
     embedded_hal_bus::spi::ExclusiveDevice<
-        embassy_stm32::spi::Spi<'static, embassy_stm32::mode::Async, embassy_stm32::spi::mode::Master>,
+        embassy_stm32::spi::Spi<
+            'static,
+            embassy_stm32::mode::Async,
+            embassy_stm32::spi::mode::Master,
+        >,
         embassy_stm32::gpio::Output<'static>,
         Delay,
     >,

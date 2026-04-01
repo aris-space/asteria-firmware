@@ -440,7 +440,9 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // External Valve Command Task (non-periodic)
     #[embassy_executor::task]
-    async fn external_valve_command_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn external_valve_command_task(
+        can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
+    ) {
         let mut general_valve_watcher = EXTERNAL_VALVE_CONTROL.subscriber().unwrap();
 
         loop {

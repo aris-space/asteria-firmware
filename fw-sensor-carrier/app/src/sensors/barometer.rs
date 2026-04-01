@@ -263,7 +263,11 @@ impl<'a> PressureSensorNode<'a> {
 #[embassy_executor::task(pool_size = 2)]
 pub async fn barometer_task(
     ms5607: Ms5607<
-        I2cDevice<'static, ThreadModeRawMutex, I2c<'static, Async, embassy_stm32::i2c::mode::Master>>,
+        I2cDevice<
+            'static,
+            ThreadModeRawMutex,
+            I2c<'static, Async, embassy_stm32::i2c::mode::Master>,
+        >,
         ms5607::Uninitialized,
     >,
     pressure_driver: &'static PressureDriver<'static>,

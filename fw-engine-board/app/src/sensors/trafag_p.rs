@@ -1,6 +1,6 @@
+use crate::Irqs;
 use crate::drivers::pressure::{AnalogPressureDriver, AnalogPressureMeasurementRaw};
 use crate::sensors::{ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES};
-use crate::Irqs;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH3, DMA1_CH4, DMA2_CH3};
 use embassy_time::{Duration, Ticker};
 use trafag_pressure::ADCPressure;
@@ -19,7 +19,9 @@ pub async fn engine_pressure_acquisition(pressure_handles: EnginePressureHandles
     let mut oss_inj_p_handle = pressure_handles.oss_inj_p_handle;
     let mut fss_inj_p_handle = pressure_handles.fss_inj_p_handle;
     // Note: ADC3 does not support VrefInt calibration on G4; calibrate on ADC1 instead
-    fss_inj_p_handle.calibrate(ADC_CALIBRATION_SAMPLES, Irqs).await;
+    fss_inj_p_handle
+        .calibrate(ADC_CALIBRATION_SAMPLES, Irqs)
+        .await;
 
     // Share the calibration values between all pressure sensors because some of the ADC peripherals
     // are not connected to VREFINT and cannot read it out themselves

@@ -32,7 +32,11 @@ where
     ADC: Instance<Regs = embassy_stm32::pac::adc::Adc>,
     DMA_CH: RxDma<ADC>,
 {
-    pub async fn new(adc: Peri<'a, ADC>, dma: Peri<'a, DMA_CH>, sensor: TrafagPSens<'a, ADC>) -> Self {
+    pub async fn new(
+        adc: Peri<'a, ADC>,
+        dma: Peri<'a, DMA_CH>,
+        sensor: TrafagPSens<'a, ADC>,
+    ) -> Self {
         let adc = Adc::new(adc, AdcConfig::default());
 
         Self {
@@ -43,8 +47,11 @@ where
         }
     }
 
-    pub async fn calibrate(&mut self, n_samples: u64, irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy)
-    where
+    pub async fn calibrate(
+        &mut self,
+        n_samples: u64,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy,
+    ) where
         ADC: SpecialConverter<VrefInt>,
     {
         let mut vref = 0.0;
@@ -57,7 +64,10 @@ where
         info!("[ADC] VREF used: {}", self.vref_calib);
     }
 
-    pub async fn read_internal_temperature(&mut self, irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy) -> f32
+    pub async fn read_internal_temperature(
+        &mut self,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy,
+    ) -> f32
     where
         ADC: SpecialConverter<Temperature>,
     {
@@ -70,7 +80,10 @@ where
         (130.0 - 30.0) / (ts_cal2 - ts_cal1) * (raw as i16 as f32 * self.vref_calib / 3.0)
     }
 
-    pub async fn read_vref_int(&mut self, irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy) -> f32
+    pub async fn read_vref_int(
+        &mut self,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy,
+    ) -> f32
     where
         ADC: SpecialConverter<VrefInt>,
     {
@@ -83,8 +96,17 @@ where
         VREFBUF_CALIB * vref_cal as i16 as f32 / raw as i16 as f32
     }
 
-    pub async fn read_pressure(&mut self, irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy) -> f32 {
-        let raw = Self::read_raw_static(&mut self.adc, self.dma.reborrow(), &mut self.sensor.pin, irq).await;
+    pub async fn read_pressure(
+        &mut self,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy,
+    ) -> f32 {
+        let raw = Self::read_raw_static(
+            &mut self.adc,
+            self.dma.reborrow(),
+            &mut self.sensor.pin,
+            irq,
+        )
+        .await;
         let voltage = (raw as i16 as f32) * self.vref_calib / 4095.0;
 
         self.sensor.si_range[0]
@@ -93,15 +115,20 @@ where
                 * (voltage - VOLTAGE_RANGE[0])
     }
 
-    async fn read_raw_static(adc: &mut Adc<'_, ADC>, dma: Peri<'_, DMA_CH>, pin: &mut AnyAdcChannel<'_, ADC>, irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>>) -> u16 {
+    async fn read_raw_static(
+        adc: &mut Adc<'_, ADC>,
+        dma: Peri<'_, DMA_CH>,
+        pin: &mut AnyAdcChannel<'_, ADC>,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>>,
+    ) -> u16 {
         let mut read_buf = [0; 1];
         adc.read(
-                dma,
-                irq,
-                [(pin, SampleTime::CYCLES247_5)].into_iter(),
-                &mut read_buf,
-            )
-            .await;
+            dma,
+            irq,
+            [(pin, SampleTime::CYCLES247_5)].into_iter(),
+            &mut read_buf,
+        )
+        .await;
 
         read_buf[0]
     }

@@ -205,7 +205,14 @@ impl<'a> DhtSensorNode<'a> {
 
 #[embassy_executor::task(pool_size = 2)]
 pub async fn dht_task(
-    sht4x: Sht4xAsync<I2cDevice<'static, ThreadModeRawMutex, I2c<'static, Async, embassy_stm32::i2c::mode::Master>>, Delay>,
+    sht4x: Sht4xAsync<
+        I2cDevice<
+            'static,
+            ThreadModeRawMutex,
+            I2c<'static, Async, embassy_stm32::i2c::mode::Master>,
+        >,
+        Delay,
+    >,
     driver: &'static EnvironmentalDriver<'static>,
     sensor_id: SensorId,
 ) -> ! {

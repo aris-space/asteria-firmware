@@ -14,11 +14,17 @@ pub mod gnss;
 pub mod imu;
 pub mod magnetometer;
 
-pub static SHARED_BUS1: OnceLock<Mutex<ThreadModeRawMutex, I2c<'static, Async, i2c::mode::Master>>> = OnceLock::new();
-pub static SHARED_BUS2: OnceLock<Mutex<ThreadModeRawMutex, I2c<'static, Async, i2c::mode::Master>>> = OnceLock::new();
+pub static SHARED_BUS1: OnceLock<
+    Mutex<ThreadModeRawMutex, I2c<'static, Async, i2c::mode::Master>>,
+> = OnceLock::new();
+pub static SHARED_BUS2: OnceLock<
+    Mutex<ThreadModeRawMutex, I2c<'static, Async, i2c::mode::Master>>,
+> = OnceLock::new();
 
-pub static SPI_BUS1: OnceLock<Mutex<ThreadModeRawMutex, Spi<'static, Async, spi::mode::Master>>> = OnceLock::new();
-pub static SPI_BUS3: OnceLock<Mutex<ThreadModeRawMutex, Spi<'static, Async, spi::mode::Master>>> = OnceLock::new();
+pub static SPI_BUS1: OnceLock<Mutex<ThreadModeRawMutex, Spi<'static, Async, spi::mode::Master>>> =
+    OnceLock::new();
+pub static SPI_BUS3: OnceLock<Mutex<ThreadModeRawMutex, Spi<'static, Async, spi::mode::Master>>> =
+    OnceLock::new();
 
 pub static USART1: OnceLock<Mutex<ThreadModeRawMutex, Uart<'static, Async>>> = OnceLock::new();
 pub static USART3: OnceLock<Mutex<ThreadModeRawMutex, Uart<'static, Async>>> = OnceLock::new();
