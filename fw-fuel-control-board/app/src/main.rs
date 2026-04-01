@@ -13,7 +13,7 @@ use embassy_stm32::gpio::{Level, Output, OutputType, Speed};
 use embassy_stm32::peripherals::{FDCAN1, USART3};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embassy_stm32::{bind_interrupts, can, i2c, peripherals, usart};
+use embassy_stm32::{bind_interrupts, can, dma, i2c, peripherals, usart};
 use embassy_time::Timer;
 use embedded_utils::fmt::*;
 
@@ -54,6 +54,10 @@ bind_interrupts!(struct Irqs {
     FDCAN1_IT1 => can::IT1InterruptHandler<FDCAN1>;
 
     USART3 => usart::InterruptHandler<USART3>;
+
+    // DMA channel interrupts
+    DMA1_CHANNEL1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA2_CHANNEL1 => dma::InterruptHandler<peripherals::DMA2_CH1>;
 });
 
 #[embassy_executor::main]
@@ -90,7 +94,7 @@ async fn main(spawner: Spawner) -> ! {
     .await
     .unwrap();
 
-    let buzzer_pwm_pin = PwmPin::new_ch3(p.PB10, OutputType::PushPull);
+    let buzzer_pwm_pin = PwmPin::new(p.PB10, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
         p.TIM2,
         None,

@@ -1,6 +1,6 @@
 use crate::filters::{Filter, MovingAverage};
 use crate::sensors::barometer;
-use embassy_sync::blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex};
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel};
@@ -28,7 +28,7 @@ pub type PressureEstimate = f32;
 
 pub struct PressureDriver<'a> {
     /// Data shared between references to the `PressureDriver`.
-    shared: Mutex<NoopRawMutex, MovingAverage<f32, MOVING_AVERAGE_COUNT>>,
+    shared: Mutex<CriticalSectionRawMutex, MovingAverage<f32, MOVING_AVERAGE_COUNT>>,
     /// On this channel, we publish all pressure estimates. This may be used for lossless logging
     publisher: ImmediatePublisher<'a, ThreadModeRawMutex, PressureEstimate, CAP, SUB, PUB>,
     /// This channel is used to publish the latest pressure estimate, which can be used to wait

@@ -28,7 +28,7 @@ use embassy_stm32::peripherals::FDCAN3;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::{khz, mhz};
 use embassy_stm32::usart::Uart;
-use embassy_stm32::{bind_interrupts, can, i2c, peripherals, spi, usart};
+use embassy_stm32::{bind_interrupts, can, dma, exti, i2c, peripherals, spi, usart};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Duration, Timer};
@@ -68,20 +68,37 @@ bind_interrupts!(struct Irqs {
     // GPS2 data on UART7 (PE7 RX, PE8 TX)
     UART7 => usart::InterruptHandler<peripherals::UART7>;
 
-    // I2C5 (bus 2)
+    // I2C5 (bus 1)
     I2C5_EV => i2c::EventInterruptHandler<peripherals::I2C5>;
     I2C5_ER => i2c::ErrorInterruptHandler<peripherals::I2C5>;
 
+    // I2C2 (bus 2)
     I2C2_EV => i2c::EventInterruptHandler<peripherals::I2C2>;
     I2C2_ER => i2c::ErrorInterruptHandler<peripherals::I2C2>;
-    // I2C4 (bus 1)
-    //I2C4_EV => i2c::EventInterruptHandler<peripherals::I2C4>;
-    //I2C4_ER => i2c::ErrorInterruptHandler<peripherals::I2C4>;
-
 
     // CAN on FDCAN3 (PF6 RX, PF7 TX)
     FDCAN3_IT0 => can::IT0InterruptHandler<FDCAN3>;
     FDCAN3_IT1 => can::IT1InterruptHandler<FDCAN3>;
+
+    // DMA channel interrupts
+    DMA1_STREAM0 => dma::InterruptHandler<peripherals::DMA1_CH0>;
+    DMA1_STREAM1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_STREAM2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
+    DMA1_STREAM3 => dma::InterruptHandler<peripherals::DMA1_CH3>;
+    DMA1_STREAM4 => dma::InterruptHandler<peripherals::DMA1_CH4>;
+    DMA1_STREAM5 => dma::InterruptHandler<peripherals::DMA1_CH5>;
+    DMA1_STREAM6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
+    DMA1_STREAM7 => dma::InterruptHandler<peripherals::DMA1_CH7>;
+    DMA2_STREAM0 => dma::InterruptHandler<peripherals::DMA2_CH0>;
+    DMA2_STREAM1 => dma::InterruptHandler<peripherals::DMA2_CH1>;
+    DMA2_STREAM2 => dma::InterruptHandler<peripherals::DMA2_CH2>;
+    DMA2_STREAM7 => dma::InterruptHandler<peripherals::DMA2_CH7>;
+
+    // EXTI interrupts
+    EXTI0 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI0>;
+    EXTI2 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI2>;
+    EXTI4 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI4>;
+    EXTI15_10 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI15_10>;
 });
 
 #[embassy_executor::main]
@@ -116,12 +133,12 @@ async fn main(spawner: Spawner) -> ! {
         p.UART8,
         p.PE0, // RX
         p.PE1, // TX
-        Irqs,
         p.DMA1_CH0,
         p.DMA1_CH1,
+        Irqs,
         uart_config,
     )
-    .expect("Failed to create GPS1 data UART");
+    .unwrap();
     let (_gps1_tx, gps1_rx) = gps1_data.split();
 
     // GPS2 data: UART7 (RX=PE7, TX=PE8)
@@ -129,12 +146,12 @@ async fn main(spawner: Spawner) -> ! {
         p.UART7,
         p.PE7, // RX
         p.PE8, // TX
-        Irqs,
         p.DMA1_CH2,
         p.DMA1_CH3,
+        Irqs,
         uart_config,
     )
-    .expect("Failed to initialize GPS2 data UART");
+    .unwrap();
     let (_gps2_tx, gps2_rx) = gps2_data.split();
 
     // === IMU SPI buses/pins ===
@@ -149,11 +166,12 @@ async fn main(spawner: Spawner) -> ! {
         p.PG9,  // MISO
         p.DMA1_CH4,
         p.DMA1_CH5,
+        Irqs,
         imu_spi_config,
     );
     let imu1_cs = Output::new(p.PG10, Level::High, Speed::VeryHigh);
     // INT must be left floating or pulled low during power-up.
-    let imu1_int1 = ExtiInput::new(p.PE4, p.EXTI4, Pull::None);
+    let imu1_int1 = ExtiInput::new(p.PE4, p.EXTI4, Pull::None, Irqs);
 
     let imu1_spi = embedded_hal_bus::spi::ExclusiveDevice::new(imu1_spi, imu1_cs, Delay).expect(
         "Error while creating exclusive device. CS Pin set failed, which should never fail.",
@@ -167,10 +185,11 @@ async fn main(spawner: Spawner) -> ! {
         p.PE13, // MISO
         p.DMA1_CH6,
         p.DMA1_CH7,
+        Irqs,
         imu_spi_config,
     );
     let imu2_cs = Output::new(p.PE11, Level::High, Speed::VeryHigh);
-    let imu2_int1 = ExtiInput::new(p.PE15, p.EXTI15, Pull::None);
+    let imu2_int1 = ExtiInput::new(p.PE15, p.EXTI15, Pull::None, Irqs);
 
     let imu2_spi = embedded_hal_bus::spi::ExclusiveDevice::new(imu2_spi_hw, imu2_cs, Delay).expect(
         "Error while creating exclusive device. CS Pin set failed, which should never fail.",
@@ -187,17 +206,16 @@ async fn main(spawner: Spawner) -> ! {
     // I2C buses: use I2C4 (PF14=SCL, PF15=SDA) and I2C5 (PF1=SCL, PF0=SDA)
     let mut i2c_bus_config: i2c::Config = i2c::Config::default();
     i2c_bus_config.timeout = Duration::from_millis(50);
-    let i2c_bus_freq = khz(100);
+    i2c_bus_config.frequency = khz(100);
 
     // Bus1 -> I2C5
     let bus1 = i2c::I2c::new(
         p.I2C5,
         p.PF1, // SCL
         p.PF0, // SDA
-        Irqs,
         p.DMA2_CH2,
         p.DMA2_CH7,
-        i2c_bus_freq,
+        Irqs,
         i2c_bus_config,
     );
 
@@ -206,10 +224,9 @@ async fn main(spawner: Spawner) -> ! {
         p.I2C2,
         p.PB10,
         p.PB11,
-        Irqs,
         p.DMA2_CH0,
         p.DMA2_CH1,
-        i2c_bus_freq,
+        Irqs,
         i2c_bus_config,
     );
 
@@ -229,9 +246,9 @@ async fn main(spawner: Spawner) -> ! {
 
     // === External Interrupts (compass DRDY/INT) ===
     // Magnetometer 1 -> PF2 (EXTI2)
-    let _compass_interrupt_bus1 = ExtiInput::new(p.PF2, p.EXTI2, Pull::None);
+    let _compass_interrupt_bus1 = ExtiInput::new(p.PF2, p.EXTI2, Pull::None, Irqs);
     // Magnetometer 2 -> PG0 (EXTI0)
-    let _compass_interrupt_bus2 = ExtiInput::new(p.PG0, p.EXTI0, Pull::None);
+    let _compass_interrupt_bus2 = ExtiInput::new(p.PG0, p.EXTI0, Pull::None, Irqs);
 
     // === Drivers Initialization ===
 

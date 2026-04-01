@@ -11,7 +11,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::pac;
 use embassy_stm32::usart::{self, DataBits, Parity, StopBits, Uart};
-use embassy_stm32::{Config, bind_interrupts, peripherals};
+use embassy_stm32::{Config, bind_interrupts, dma, exti, peripherals};
 use embedded_utils::fmt::*;
 
 use crate::modbus_server::{
@@ -42,6 +42,15 @@ use {defmt_rtt as _, panic_probe as _};
 bind_interrupts!(struct Irqs {
     USART1 => usart::InterruptHandler<peripherals::USART1>;
     USART2 => usart::InterruptHandler<peripherals::USART2>;
+
+    // DMA channel interrupts
+    DMA1_CHANNEL4 => dma::InterruptHandler<peripherals::DMA1_CH4>;
+    DMA1_CHANNEL5 => dma::InterruptHandler<peripherals::DMA1_CH5>;
+    DMA1_CHANNEL6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
+    DMA1_CHANNEL7 => dma::InterruptHandler<peripherals::DMA1_CH7>;
+
+    // EXTI interrupt
+    EXTI0 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI0>;
 });
 
 #[embassy_executor::main]
@@ -69,7 +78,7 @@ async fn main(spawner: Spawner) -> ! {
     let red = Output::new(p.PB7, Level::Low, Speed::Low);
 
     // Endstop is active, when valve is fully closed.
-    let endstop = ExtiInput::new(p.PA0, p.EXTI0, Pull::Up);
+    let endstop = ExtiInput::new(p.PA0, p.EXTI0, Pull::Up, Irqs);
 
     // --- Modbus UART Setup ---
     let mut cfg = usart::Config::default();
@@ -81,17 +90,17 @@ async fn main(spawner: Spawner) -> ! {
     cfg.invert_tx = true;
 
     let modbus_usart = Uart::new_with_de(
-        p.USART1, p.PA10, p.PA9, Irqs, p.PA12, // DE (Driver Enable for RS485)
-        p.DMA1_CH5, p.DMA1_CH4, cfg,
+        p.USART1, p.PA10, p.PA9, p.PA12, // DE (Driver Enable for RS485)
+        p.DMA1_CH5, p.DMA1_CH4, Irqs, cfg,
     )
-    .expect("Failed to initialize Modbus UART");
+    .unwrap();
 
     let mut motor_cfg = usart::Config::default();
     motor_cfg.baudrate = 115_200;
     let motor_usart = Uart::new(
-        p.USART2, p.PA3, p.PA2, Irqs, p.DMA1_CH6, p.DMA1_CH7, motor_cfg,
+        p.USART2, p.PA3, p.PA2, p.DMA1_CH6, p.DMA1_CH7, Irqs, motor_cfg,
     )
-    .expect("Failed to initialize Motor UART");
+    .unwrap();
 
     spawner.must_spawn(status_blinky(green, red));
     spawner.must_spawn(modbus_server_task(modbus_usart));

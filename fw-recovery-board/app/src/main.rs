@@ -28,7 +28,7 @@ use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel::{Ch1, Ch2};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::Uart;
-use embassy_stm32::{bind_interrupts, can, peripherals, usart};
+use embassy_stm32::{bind_interrupts, can, dma, peripherals, usart};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant};
@@ -88,6 +88,11 @@ bind_interrupts!(struct Irqs {
 
     FDCAN1_IT0 => can::IT0InterruptHandler<FDCAN1>; // can bus
     FDCAN1_IT1 => can::IT1InterruptHandler<FDCAN1>; // can bus
+
+    DMA1_CHANNEL1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_CHANNEL2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
+    DMA2_CHANNEL5 => dma::InterruptHandler<peripherals::DMA2_CH5>;
+    DMA2_CHANNEL6 => dma::InterruptHandler<peripherals::DMA2_CH6>;
 });
 
 #[embassy_executor::main]
@@ -107,7 +112,7 @@ async fn main(spawner: Spawner) -> ! {
     // Separation 1 control
     // setup PWM for SEP1
     // idk if this works as in the datasheet PA4 is on timer channel 2, but embassy wants it on channel 1
-    let sep1_ch2_pin = PwmPin::new_ch2(p.PA4, OutputType::PushPull);
+    let sep1_ch2_pin = PwmPin::new(p.PA4, OutputType::PushPull);
     let sep1_pwm_temp = SimplePwm::new(
         p.TIM3,
         None,
@@ -121,7 +126,7 @@ async fn main(spawner: Spawner) -> ! {
     let sep1 = Servo::new(sep1_pwm_temp, Ch2, Input::new(p.PC6, Pull::None));
 
     // Separation 2 control
-    let sep2_ch1_pin = PwmPin::new_ch1(p.PA5, OutputType::PushPull);
+    let sep2_ch1_pin = PwmPin::new(p.PA5, OutputType::PushPull);
     let sep2_pwm_temp = SimplePwm::new(
         p.TIM2,
         Some(sep2_ch1_pin),
@@ -142,7 +147,7 @@ async fn main(spawner: Spawner) -> ! {
     let depl_pwr = Output::new(p.PA2, Level::Low, Speed::Low);
 
     //Deployment 1 control
-    let depl1_ch1_pin = PwmPin::new_ch1(p.PA6, OutputType::PushPull);
+    let depl1_ch1_pin = PwmPin::new(p.PA6, OutputType::PushPull);
     let depl1_pwm_temp = SimplePwm::new(
         p.TIM16,
         Some(depl1_ch1_pin),
@@ -157,7 +162,7 @@ async fn main(spawner: Spawner) -> ! {
     let depl1 = Servo::new(depl1_pwm_temp, Ch1, Input::new(p.PC8, Pull::None));
 
     //Deployment 2 control
-    let depl2_ch1_pin = PwmPin::new_ch1(p.PA7, OutputType::PushPull);
+    let depl2_ch1_pin = PwmPin::new(p.PA7, OutputType::PushPull);
     let depl2_pwm_temp = SimplePwm::new(
         p.TIM17,
         Some(depl2_ch1_pin),
@@ -200,12 +205,12 @@ async fn main(spawner: Spawner) -> ! {
         p.USART1,
         p.PC5,
         p.PC4,
-        Irqs,
         p.DMA1_CH1,
         p.DMA1_CH2,
+        Irqs,
         usart_config,
     )
-    .expect("Error while configuring steering motors");
+    .unwrap();
 
     let steering = rsbl_servo::RsblServo::new(steering_temp, steering_dir, steering_buffer);
     let steering_watchdog = Watchdog::new(AUTOMATIC_SAFETY_SPIRAL_TIMER);
@@ -224,6 +229,7 @@ async fn main(spawner: Spawner) -> ! {
         p.PB14,
         p.DMA2_CH5,
         p.DMA2_CH6,
+        Irqs,
         Default::default(),
     );
 

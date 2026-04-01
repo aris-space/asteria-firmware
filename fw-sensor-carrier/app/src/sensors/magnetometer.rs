@@ -315,7 +315,7 @@ fn mag_calibration_for(sensor: SensorId) -> (nalgebra::Vector3<f32>, nalgebra::M
     }
 }
 
-type Interface = I2cDevice<'static, ThreadModeRawMutex, I2c<'static, Async>>;
+type Interface = I2cDevice<'static, ThreadModeRawMutex, I2c<'static, Async, embassy_stm32::i2c::mode::Master>>;
 
 #[embassy_executor::task(pool_size = 2)]
 pub async fn magnetometer_task(

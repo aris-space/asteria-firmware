@@ -1,7 +1,6 @@
 use crate::{filters::ExponentialMovingAverage, sensors::dht};
-use core::cell::Cell;
 use embassy_sync::{
-    blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex},
+    blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
     mutex::Mutex,
     once_lock::OnceLock,
     pubsub::{ImmediatePublisher, PubSubChannel},
@@ -35,11 +34,11 @@ pub struct EnvironmentalDriver<'a> {
     publisher: ImmediatePublisher<'a, ThreadModeRawMutex, EnvironmentalData, CAP, SUB, PUB>,
     watch: Sender<'a, ThreadModeRawMutex, EnvironmentalData, WATCH>,
 
-    th_filter: Mutex<NoopRawMutex, ExponentialMovingAverage<Vector2<f32>>>,
-    pressure_filter: Mutex<NoopRawMutex, ExponentialMovingAverage<f32>>,
+    th_filter: Mutex<CriticalSectionRawMutex, ExponentialMovingAverage<Vector2<f32>>>,
+    pressure_filter: Mutex<CriticalSectionRawMutex, ExponentialMovingAverage<f32>>,
 
-    last_pressure_ts: Cell<Option<Instant>>,
-    last_th_ts: Cell<Option<Instant>>,
+    last_pressure_ts: Mutex<CriticalSectionRawMutex, Option<Instant>>,
+    last_th_ts: Mutex<CriticalSectionRawMutex, Option<Instant>>,
 }
 
 impl<'a> EnvironmentalDriver<'a> {
@@ -56,18 +55,22 @@ impl<'a> EnvironmentalDriver<'a> {
             watch,
             th_filter: Mutex::new(ExponentialMovingAverage::new(th_alpha)),
             pressure_filter: Mutex::new(ExponentialMovingAverage::new(pressure_alpha)),
-            last_pressure_ts: Cell::new(None),
-            last_th_ts: Cell::new(None),
+            last_pressure_ts: Mutex::new(None),
+            last_th_ts: Mutex::new(None),
         }
     }
 
     pub async fn update_pressure_data(&self, pressure_mbar: f32, ts: Instant) {
-        let dt_s = if let Some(prev) = self.last_pressure_ts.get() {
-            ts.duration_since(prev).as_secs_f32()
-        } else {
-            1.0 / dht::SAMPLE_FREQUENCY_HZ as f32
+        let dt_s = {
+            let mut guard = self.last_pressure_ts.lock().await;
+            let dt = if let Some(prev) = *guard {
+                ts.duration_since(prev).as_secs_f32()
+            } else {
+                1.0 / dht::SAMPLE_FREQUENCY_HZ as f32
+            };
+            *guard = Some(ts);
+            dt
         };
-        self.last_pressure_ts.set(Some(ts));
 
         let alpha = dt_s / (PRESSURE_TAU_S + dt_s);
 
@@ -81,12 +84,16 @@ impl<'a> EnvironmentalDriver<'a> {
     }
 
     pub async fn update_temp_hum_data(&self, temperature_c: f32, humidity_rh: f32, ts: Instant) {
-        let dt_s = if let Some(prev) = self.last_th_ts.get() {
-            ts.duration_since(prev).as_secs_f32()
-        } else {
-            1.0 / dht::SAMPLE_FREQUENCY_HZ as f32
+        let dt_s = {
+            let mut guard = self.last_th_ts.lock().await;
+            let dt = if let Some(prev) = *guard {
+                ts.duration_since(prev).as_secs_f32()
+            } else {
+                1.0 / dht::SAMPLE_FREQUENCY_HZ as f32
+            };
+            *guard = Some(ts);
+            dt
         };
-        self.last_th_ts.set(Some(ts));
 
         let alpha = dt_s / (TH_TAU_S + dt_s);
 

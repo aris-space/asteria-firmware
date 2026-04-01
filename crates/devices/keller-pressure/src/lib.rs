@@ -2,6 +2,7 @@
 
 pub mod sensor_def;
 
+use embassy_stm32::dma;
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::usart::{
@@ -59,19 +60,22 @@ pub struct KellerSensRS485<'d> {
 }
 
 impl<'d> KellerSensRS485<'d> {
-    pub async fn new<UART: Instance>(
+    pub async fn new<UART: Instance, D1: TxDma<UART>, D2: RxDma<UART>>(
         peri: Peri<'d, UART>,
         rx: Peri<'d, impl RxPin<UART>>,
         tx: Peri<'d, impl TxPin<UART>>,
-        tx_dma: Peri<'d, impl TxDma<UART>>,
-        rx_dma: Peri<'d, impl RxDma<UART>>,
-        irq: impl Binding<UART::Interrupt, InterruptHandler<UART>> + 'd,
+        tx_dma: Peri<'d, D1>,
+        rx_dma: Peri<'d, D2>,
+        irq: impl Binding<UART::Interrupt, InterruptHandler<UART>>
+            + Binding<D1::Interrupt, dma::InterruptHandler<D1>>
+            + Binding<D2::Interrupt, dma::InterruptHandler<D2>>
+            + 'd,
         de_pin: Peri<'d, impl Pin>,
     ) -> Result<Self, ConfigError> {
         let mut cfg = usart::Config::default();
         cfg.baudrate = 115_200;
 
-        let uart = Uart::new(peri, rx, tx, irq, tx_dma, rx_dma, cfg)?;
+        let uart = Uart::new(peri, rx, tx, tx_dma, rx_dma, irq, cfg)?;
         let (tx, rx) = uart.split();
 
         let de = Output::new(de_pin, Level::Low, Speed::VeryHigh);

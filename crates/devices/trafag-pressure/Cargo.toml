@@ -7,7 +7,7 @@ description = "Driver for Trafag Pressure Sensors using Analog Inputs"
 keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
 
 [dependencies]
-embassy-stm32 = { workspace = true, features = ["stm32g473rc", "unstable-pac"] }
+embassy-stm32 = { workspace = true, features = ["stm32g473rc", "unstable-pac", "single-bank"] }
 cortex-m = { workspace = true }
 
 defmt = { version = "0.3", optional = true }

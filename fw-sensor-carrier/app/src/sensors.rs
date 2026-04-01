@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 use core::sync::atomic::Ordering;
-use embassy_stm32::i2c::I2c;
+use embassy_stm32::i2c::{self, I2c};
 use embassy_stm32::mode::Async;
-use embassy_stm32::spi::Spi;
+use embassy_stm32::spi::{self, Spi};
 use embassy_stm32::usart::Uart;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -14,14 +14,14 @@ pub mod gnss;
 pub mod imu;
 pub mod magnetometer;
 
-pub static SHARED_BUS1: OnceLock<Mutex<ThreadModeRawMutex, I2c<Async>>> = OnceLock::new();
-pub static SHARED_BUS2: OnceLock<Mutex<ThreadModeRawMutex, I2c<Async>>> = OnceLock::new();
+pub static SHARED_BUS1: OnceLock<Mutex<ThreadModeRawMutex, I2c<'static, Async, i2c::mode::Master>>> = OnceLock::new();
+pub static SHARED_BUS2: OnceLock<Mutex<ThreadModeRawMutex, I2c<'static, Async, i2c::mode::Master>>> = OnceLock::new();
 
-pub static SPI_BUS1: OnceLock<Mutex<ThreadModeRawMutex, Spi<Async>>> = OnceLock::new();
-pub static SPI_BUS3: OnceLock<Mutex<ThreadModeRawMutex, Spi<Async>>> = OnceLock::new();
+pub static SPI_BUS1: OnceLock<Mutex<ThreadModeRawMutex, Spi<'static, Async, spi::mode::Master>>> = OnceLock::new();
+pub static SPI_BUS3: OnceLock<Mutex<ThreadModeRawMutex, Spi<'static, Async, spi::mode::Master>>> = OnceLock::new();
 
-pub static USART1: OnceLock<Mutex<ThreadModeRawMutex, Uart<Async>>> = OnceLock::new();
-pub static USART3: OnceLock<Mutex<ThreadModeRawMutex, Uart<Async>>> = OnceLock::new();
+pub static USART1: OnceLock<Mutex<ThreadModeRawMutex, Uart<'static, Async>>> = OnceLock::new();
+pub static USART3: OnceLock<Mutex<ThreadModeRawMutex, Uart<'static, Async>>> = OnceLock::new();
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
