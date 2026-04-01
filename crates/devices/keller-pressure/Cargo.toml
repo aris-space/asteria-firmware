@@ -9,7 +9,7 @@ keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
 [dependencies]
 embedded-utils = { path = "../../embedded-utils" }
 
-embassy-stm32 = { workspace = true, features = ["stm32g473rc", "dual-bank"] }
+embassy-stm32 = { workspace = true, features = ["stm32g473rc", "single-bank"] }
 embassy-time = { workspace = true }
 
 embedded-io-async = "0.7"

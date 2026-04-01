@@ -32,7 +32,7 @@ embassy-stm32 = { version = "*", features = [
     "memory-x",
     "unstable-pac",
     "exti",
-    "dual-bank",
+    "single-bank",
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768"] }
 embassy-executor = { version = "*", features = ["arch-cortex-m", "executor-thread"] }
