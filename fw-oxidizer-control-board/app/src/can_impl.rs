@@ -20,7 +20,7 @@ use embassy_stm32::can::frame::{self, FdFrame, Header};
 use embassy_stm32::can::{Can, CanConfigurator, CanRx, CanTx, OperatingMode, RxPin, TxPin};
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::{Peri, can};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Duration, Instant, Ticker, TimeoutError, Timer, with_timeout};
@@ -291,7 +291,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
     // transmission. Otherwise, discard and wait for the next data.
 
     // we need to wrap CanTx in a something to allow multiple tasks to access it
-    static CAN_TX: OnceLock<Mutex<NoopRawMutex, CanTx<'static>>> = OnceLock::new();
+    static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
 
     CAN_TX
         .init(Mutex::new(can_tx))
@@ -310,7 +310,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // DigitalPressure (≈20 Hz)
     #[embassy_executor::task]
-    async fn pressure_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut pressure_watch = DIGITAL_PRESSURE_WATCH
             .receiver()
             .expect("[CAN Task] failed to get pressure watch");
@@ -358,7 +358,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // TankLevel (≈10 Hz)
     #[embassy_executor::task]
-    async fn tank_level_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn tank_level_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut tank_level_watch = TANK_LEVEL_WATCH
             .receiver()
             .expect("[CAN Task] failed to get tank level watch");
@@ -396,7 +396,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Valve States Task (≈5 Hz)
     #[embassy_executor::task]
-    async fn valve_states_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn valve_states_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut dpr_ctrl_watcher = DPR_CONTROL_LOOP_WATCH.receiver().unwrap();
         let mut oxd_vnt_watcher = OXD_VENT_CONTROL.receiver().unwrap();
 
@@ -447,7 +447,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Tank Temperature Task ( ≈10 Hz)
     #[embassy_executor::task]
-    async fn tank_temperature_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn tank_temperature_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut tank_temperature_watch = THERMOCOUPLE_WATCH
             .receiver()
             .expect("[CAN Task] failed to get tanker temperature watch");
@@ -485,7 +485,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Board Status Task (≈1 Hz)
     #[embassy_executor::task]
-    async fn board_status_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn board_status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut keller_watcher = KELLER_BUS_ERROR_WATCH.receiver().unwrap();
 
         let mut data = OxidizerControlBoardStatus {
@@ -530,7 +530,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Build Information Task (≈0.2 Hz)
     #[embassy_executor::task]
-    async fn build_information_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn build_information_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let build_info = crate::build_info::BUILD_INFO.get();
         let build_info_msg = OxidizerControlBoardBuildInfo {
             data: build_info.clone(),
@@ -565,7 +565,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
     }
 
     #[embassy_executor::task]
-    async fn pressurization_info_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn pressurization_info_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut pressurization_info_watcher = PRESSURIZATION_INFO_WATCH.receiver().unwrap();
 
         loop {

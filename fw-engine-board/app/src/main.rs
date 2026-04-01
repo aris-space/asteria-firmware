@@ -49,7 +49,7 @@ use embassy_stm32::i2c::I2c;
 use embassy_stm32::peripherals::{FDCAN1, USART3};
 use embassy_stm32::time::{Hertz, khz};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use keller_pressure::KellerSensRS485;
@@ -70,7 +70,7 @@ bind_interrupts!(struct Irqs {
     USART3 => usart::InterruptHandler<USART3>;
 });
 
-pub static CRICITAL_ERROR_INDICATOR: OnceLock<Mutex<NoopRawMutex, Output<'static>>> =
+pub static CRICITAL_ERROR_INDICATOR: OnceLock<Mutex<ThreadModeRawMutex, Output<'static>>> =
     OnceLock::new();
 
 #[embassy_executor::main]

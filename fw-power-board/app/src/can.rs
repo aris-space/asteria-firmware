@@ -7,7 +7,7 @@ use crate::unix_time::init_utc_clock;
 use core::sync::atomic::Ordering;
 use embassy_futures::select::select;
 use embassy_stm32::can::{CanRx, CanTx};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Duration, Instant, Ticker, Timer, with_timeout};
@@ -26,7 +26,7 @@ pub async fn spawn_can_tasks(
     can_rx: CanRx<'static>,
     can_tx: CanTx<'static>,
 ) {
-    static CAN_TX: OnceLock<Mutex<NoopRawMutex, CanTx<'static>>> = OnceLock::new();
+    static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
     CAN_TX
         .init(Mutex::new(can_tx))
         .ok()
@@ -62,7 +62,7 @@ pub async fn spawn_can_tasks(
 const CAN_TX_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[embassy_executor::task]
-async fn can_24v_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+async fn can_24v_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     info!("Starting CAN 24V can task");
     let can_target_hz = 10.0;
     let alpha = 0.2;
@@ -111,7 +111,7 @@ async fn can_24v_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
 }
 
 #[embassy_executor::task]
-async fn can_5v_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+async fn can_5v_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     info!("Starting CAN 5V can task");
     let can_target_hz = 10.0;
     let alpha = 0.2;
@@ -160,7 +160,7 @@ async fn can_5v_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
 }
 
 #[embassy_executor::task]
-async fn camera_status(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+async fn camera_status(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     // pin handles
     let recording_camera = RECORDING_CAMERA.get().await;
     let live_camera = LIVESTREAM_CAMERA.get().await;
@@ -195,7 +195,7 @@ async fn camera_status(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
 }
 
 #[embassy_executor::task]
-async fn board_status(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+async fn board_status(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     // send once per second
     let mut ticker = Ticker::every(Duration::from_millis(1000));
 
@@ -225,7 +225,7 @@ async fn board_status(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
 }
 
 #[embassy_executor::task]
-async fn build_information(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+async fn build_information(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     let build_info = crate::build_info::BUILD_INFO.get();
     let build_info_msg = hermes_can::messages::debug_info::PowerBoardBuildInfo {
         data: build_info.clone(),
