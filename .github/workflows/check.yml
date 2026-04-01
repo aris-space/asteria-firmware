@@ -29,9 +29,11 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
-      - name: Install cargo-hack
-        run: cargo install cargo-hack --locked
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools -> tools/target
+          cache-all-crates: "true"
+      - uses: taiki-e/install-action@cargo-hack
       - name: just test
         run: just test
 
@@ -65,17 +67,34 @@ jobs:
         with:
           token: ${{ secrets.ASTERIA_CI_TOKEN }}
           submodules: true
+      - name: Install system dependencies
+        run: |
+          if ! command -v arm-none-eabi-gcc &>/dev/null; then
+            sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+          fi
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy
           targets: thumbv7em-none-eabihf
-      - name: Install cargo-hack
-        run: cargo install cargo-hack --locked
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates -> crates/target
+            fw-engine-board -> fw-engine-board/target
+            fw-sensor-carrier -> fw-sensor-carrier/target
+            fw-power-board -> fw-power-board/target
+            fw-communication-board -> fw-communication-board/target
+            fw-fuel-control-board -> fw-fuel-control-board/target
+            fw-oxidizer-control-board -> fw-oxidizer-control-board/target
+            fw-lox-valve-control-board -> fw-lox-valve-control-board/target
+            fw-recovery-board -> fw-recovery-board/target
+            fw-test-board -> fw-test-board/target
+          cache-all-crates: "true"
+      - uses: taiki-e/install-action@cargo-hack
       - name: just ci-checks
         run: just ci-checks
 
@@ -94,11 +113,15 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - name: Install cargo-hack
-        run: cargo install cargo-hack --locked
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates -> crates/target
+            tools -> tools/target
+          cache-all-crates: "true"
+      - uses: taiki-e/install-action@cargo-hack
       - name: Build docs
         # Not quite sure anymore about these flags. But --workspace is important.
         run: just doc
