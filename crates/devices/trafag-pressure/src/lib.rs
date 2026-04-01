@@ -12,7 +12,7 @@ use embassy_stm32::dma;
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::pac::vrefbuf::vals::{Hiz, Vrs};
 use embassy_stm32::rcc::{Sysclk, mux};
-use embassy_stm32::{Config, Peri, PeripheralType};
+use embassy_stm32::{Config, Peri};
 use embedded_utils::info;
 
 // Voltage the VREFINT reg was calibrated at the factory
@@ -50,7 +50,7 @@ where
     pub async fn calibrate(
         &mut self,
         n_samples: u64,
-        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>>,
     ) where
         ADC: SpecialConverter<VrefInt>,
     {
@@ -66,7 +66,7 @@ where
 
     pub async fn read_internal_temperature(
         &mut self,
-        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>>,
     ) -> f32
     where
         ADC: SpecialConverter<Temperature>,
@@ -82,7 +82,7 @@ where
 
     pub async fn read_vref_int(
         &mut self,
-        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>>,
     ) -> f32
     where
         ADC: SpecialConverter<VrefInt>,
@@ -98,7 +98,7 @@ where
 
     pub async fn read_pressure(
         &mut self,
-        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>> + Copy,
+        irq: impl Binding<DMA_CH::Interrupt, dma::InterruptHandler<DMA_CH>>,
     ) -> f32 {
         let raw = Self::read_raw_static(
             &mut self.adc,
