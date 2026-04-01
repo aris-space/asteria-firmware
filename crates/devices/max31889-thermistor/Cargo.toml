@@ -8,7 +8,7 @@ keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
 
 [dependencies]
 embassy-time = { workspace = true }
-embassy-stm32 = { workspace = true, features = ["stm32g473rc"] }
+embassy-stm32 = { workspace = true, features = ["stm32g473rc", "dual-bank"] }
 
 defmt = { version = "0.3", optional = true }
 

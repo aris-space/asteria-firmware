@@ -108,7 +108,7 @@ impl<A: PeripheralType + GeneralInstance4Channel, B: PeripheralType + GeneralIns
 /// on the REC board.
 pub struct Servo<TIM: PeripheralType + GeneralInstance4Channel> {
     handle: SimplePwm<'static, TIM>,
-    max_duty: u16,
+    max_duty: u32,
     channel: Channel,
     actuator_presence: Input<'static>,
     active: bool,

@@ -63,19 +63,19 @@ async fn main(spawner: Spawner) -> ! {
         .ok()
         .expect("Failed to set livestream camera pin");
 
-    // Shared I2C configuration: 100 ms timeout, 400 kHz speed
+    // Shared I2C configuration: 5 ms timeout, 400 kHz speed
     let mut shared_i2c_config = i2c::Config::default();
     shared_i2c_config.timeout = Duration::from_millis(5);
+    shared_i2c_config.frequency = Hertz(400_000);
 
     // Initialize I2C3 (SDA = PC9, SCL = PC8) for the 5V sensor
     let i2c3 = I2c::new(
         p.I2C3,
         p.PC8, // SCL
         p.PC9, // SDA
-        Irqs,
         p.DMA2_CH3,
         p.DMA2_CH4,
-        Hertz(400_000),
+        Irqs,
         shared_i2c_config,
     );
     let ltc_rail_5v = Ltc2945::new_i2c(i2c3, LTC2945_I2C_ADDR);
@@ -85,16 +85,15 @@ async fn main(spawner: Spawner) -> ! {
         p.I2C2,
         p.PA9, // SCL
         p.PA8, // SDA
-        Irqs,
         p.DMA2_CH1,
         p.DMA2_CH2,
-        Hertz(400_000),
+        Irqs,
         shared_i2c_config,
     );
     let ltc_rail_24v = Ltc2945::new_i2c(i2c2, LTC2945_I2C_ADDR);
 
     // Initialize PWM (TIM2 CH3 on PB10) for buzzer (~3 kHz, 50% duty)
-    let buzzer_pin = PwmPin::new_ch3(p.PB10, OutputType::PushPull);
+    let buzzer_pin = PwmPin::new(p.PB10, OutputType::PushPull);
     let pwm = SimplePwm::new(
         p.TIM2,
         None,                        // CH1 unused

@@ -1,4 +1,4 @@
-use embassy_stm32::i2c::I2c;
+use embassy_stm32::i2c::{self, I2c};
 use embassy_stm32::mode::Async;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
@@ -13,7 +13,7 @@ pub static RAIL_24V_LAST: Watch<ThreadModeRawMutex, RailStatus24V, 2> = Watch::n
 /// 5 V rail readout task
 #[embassy_executor::task]
 pub async fn sensor_readout_5v_task(
-    mut rail: ltc2945::Ltc2945<I2cInterface<I2c<'static, Async>>>,
+    mut rail: ltc2945::Ltc2945<I2cInterface<I2c<'static, Async, i2c::mode::Master>>>,
 ) -> ! {
     let sender_5v = RAIL_5V_LAST.sender();
     let mut ticker = Ticker::every(Duration::from_millis(100));
@@ -59,7 +59,7 @@ pub async fn sensor_readout_5v_task(
 /// 24 V rail readout task
 #[embassy_executor::task]
 pub async fn sensor_readout_24v_task(
-    mut rail: ltc2945::Ltc2945<I2cInterface<I2c<'static, Async>>>,
+    mut rail: ltc2945::Ltc2945<I2cInterface<I2c<'static, Async, i2c::mode::Master>>>,
 ) -> ! {
     let sender_24v = RAIL_24V_LAST.sender();
     let mut ticker = Ticker::every(Duration::from_millis(100));

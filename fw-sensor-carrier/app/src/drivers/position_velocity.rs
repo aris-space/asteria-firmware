@@ -3,7 +3,7 @@ use crate::drivers::inertial::ORIENTATION_WATCH;
 use crate::sensors::SensorId;
 use crate::sensors::gnss::PvtData;
 use embassy_sync::{
-    blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex},
+    blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
     mutex::Mutex,
     once_lock::OnceLock,
     pubsub::{ImmediatePublisher, PubSubChannel},
@@ -39,7 +39,7 @@ pub struct PositionVelocityTimeDriver<'a> {
     vel_publisher: ImmediatePublisher<'a, ThreadModeRawMutex, VelocityData, CAP, SUB, PUB>,
     vel_watch: Sender<'a, ThreadModeRawMutex, VelocityData, WATCH>,
 
-    shared: Mutex<NoopRawMutex, TimeoutSelector>,
+    shared: Mutex<CriticalSectionRawMutex, TimeoutSelector>,
 }
 
 impl<'a> PositionVelocityTimeDriver<'a> {

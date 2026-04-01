@@ -9,6 +9,7 @@ use core::convert::Infallible;
 use core::future::pending;
 use embassy_executor::task;
 use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::mode::Async;
 use embassy_stm32::spi::Error;
 use embassy_stm32::time::mhz;
 use embassy_time::{Delay, Duration, Instant, TimeoutError, with_timeout};
@@ -24,7 +25,7 @@ use lsm6dso32::{
 
 type Interface = lsm6dso32::spi::Lsm6Dso32SpiInterface<
     embedded_hal_bus::spi::ExclusiveDevice<
-        embassy_stm32::spi::Spi<'static, embassy_stm32::mode::Async>,
+        embassy_stm32::spi::Spi<'static, embassy_stm32::mode::Async, embassy_stm32::spi::mode::Master>,
         embassy_stm32::gpio::Output<'static>,
         Delay,
     >,
@@ -44,7 +45,7 @@ const FIFO_WATERMARK: u16 = 26;
 struct InactiveImuSensor<'a> {
     driver: &'a InertialDriver<'a>,
     iface: Interface,
-    int: ExtiInput<'static>,
+    int: ExtiInput<'static, Async>,
     config: CommonSensorConfig,
     sensor_id: SensorId,
     attempt_count: u8,
@@ -54,7 +55,7 @@ impl<'a> InactiveImuSensor<'a> {
     pub fn new(
         driver: &'a InertialDriver<'a>,
         iface: Interface,
-        int: ExtiInput<'static>,
+        int: ExtiInput<'static, Async>,
         config: CommonSensorConfig,
         sensor_id: SensorId,
     ) -> Self {
@@ -143,7 +144,7 @@ const LOOP_WAIT_MS: u64 = 30;
 pub struct ActiveImuSensor<'a> {
     driver: &'a InertialDriver<'a>,
     sensor: Lsm6dso32<Interface, Initialised>,
-    int: ExtiInput<'static>,
+    int: ExtiInput<'static, Async>,
     config: CommonSensorConfig,
     sensor_id: SensorId,
     error_count: u8,
@@ -153,7 +154,7 @@ impl<'a> ActiveImuSensor<'a> {
     pub fn new(
         orientation_driver: &'a InertialDriver<'a>,
         sensor: Lsm6dso32<Interface, Initialised>,
-        int: ExtiInput<'static>,
+        int: ExtiInput<'static, Async>,
         config: CommonSensorConfig,
         sensor_id: SensorId,
     ) -> Self {
@@ -353,7 +354,7 @@ pub struct ImuSensorNode<'a> {
     driver: &'a InertialDriver<'a>,
     config: CommonSensorConfig,
     sensor_id: SensorId,
-    int: ExtiInput<'static>,
+    int: ExtiInput<'static, Async>,
 }
 
 impl<'a> ImuSensorNode<'a> {
@@ -361,7 +362,7 @@ impl<'a> ImuSensorNode<'a> {
         driver: &'a InertialDriver<'a>,
         config: CommonSensorConfig,
         sensor_id: SensorId,
-        int: ExtiInput<'static>,
+        int: ExtiInput<'static, Async>,
     ) -> Self {
         Self {
             driver,
@@ -388,7 +389,7 @@ pub async fn imu_task(
     sensor: Interface,
     driver: &'static InertialDriver<'static>,
     sensor_id: SensorId,
-    int: ExtiInput<'static>,
+    int: ExtiInput<'static, Async>,
 ) -> ! {
     let config = CommonSensorConfig {
         max_consecutive_errors: 5,

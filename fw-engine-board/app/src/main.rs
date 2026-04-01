@@ -14,7 +14,7 @@ mod valves;
 use core::future::pending;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Speed};
-use embassy_stm32::{bind_interrupts, can, i2c, peripherals, usart};
+use embassy_stm32::{bind_interrupts, can, dma, exti, i2c, peripherals, usart};
 use embassy_time::{Duration, Ticker};
 use embedded_utils::fmt::*;
 
@@ -47,7 +47,7 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::i2c::I2c;
 use embassy_stm32::peripherals::{FDCAN1, USART3};
-use embassy_stm32::time::{Hertz, khz};
+use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -68,6 +68,19 @@ bind_interrupts!(struct Irqs {
     FDCAN1_IT1 => can::IT1InterruptHandler<FDCAN1>;
 
     USART3 => usart::InterruptHandler<USART3>;
+
+    // DMA channel interrupts
+    DMA1_CHANNEL1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_CHANNEL2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
+    DMA1_CHANNEL3 => dma::InterruptHandler<peripherals::DMA1_CH3>;
+    DMA1_CHANNEL4 => dma::InterruptHandler<peripherals::DMA1_CH4>;
+    DMA1_CHANNEL6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
+    DMA1_CHANNEL7 => dma::InterruptHandler<peripherals::DMA1_CH7>;
+    DMA2_CHANNEL1 => dma::InterruptHandler<peripherals::DMA2_CH1>;
+    DMA2_CHANNEL3 => dma::InterruptHandler<peripherals::DMA2_CH3>;
+
+    // EXTI interrupt
+    EXTI4 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI4>;
 });
 
 pub static CRICITAL_ERROR_INDICATOR: OnceLock<Mutex<ThreadModeRawMutex, Output<'static>>> =
@@ -141,7 +154,7 @@ async fn main(spawner: Spawner) -> ! {
     };
     */
 
-    let ext_irq = ExtiInput::new(p.PC4, p.EXTI4, Pull::Up);
+    let ext_irq = ExtiInput::new(p.PC4, p.EXTI4, Pull::Up, Irqs);
     let tc = ADSThermocouples::new(
         p.SPI1,
         p.PA5,
@@ -149,6 +162,7 @@ async fn main(spawner: Spawner) -> ! {
         p.PA6,
         p.DMA1_CH3,
         p.DMA1_CH2,
+        Irqs,
         p.PA4,
         ext_irq,
         PGAGain::Gain32,
@@ -161,10 +175,9 @@ async fn main(spawner: Spawner) -> ! {
         p.I2C3,
         p.PC8,
         p.PC9,
-        Irqs,
         p.DMA1_CH6,
         p.DMA1_CH7,
-        khz(100),
+        Irqs,
         Default::default(),
     );
 
@@ -177,7 +190,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let main_arming_pin = Input::new(p.PA0, Pull::Down);
 
-    let buzzer_pwm_pin = PwmPin::new_ch3(p.PB10, OutputType::PushPull);
+    let buzzer_pwm_pin = PwmPin::new(p.PB10, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
         p.TIM2,
         None,

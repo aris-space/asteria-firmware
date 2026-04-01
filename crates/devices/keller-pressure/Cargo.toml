@@ -9,10 +9,10 @@ keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
 [dependencies]
 embedded-utils = { path = "../../embedded-utils" }
 
-embassy-stm32 = { workspace = true, features = ["stm32g473rc"] }
+embassy-stm32 = { workspace = true, features = ["stm32g473rc", "dual-bank"] }
 embassy-time = { workspace = true }
 
-embedded-io-async = "0.6.1"
+embedded-io-async = "0.7"
 heapless = "0.9.1"
 rmodbus = { version = "0.12.2", default-features = false, features = ["heapless"] }
 bitflags = "2.9.4"

@@ -2,7 +2,7 @@
 use crate::sensors::SensorId;
 use core::fmt;
 use core::fmt::{Debug, Formatter};
-use embassy_sync::blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex};
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel};
@@ -33,7 +33,7 @@ pub struct MagneticFieldDriver<'a> {
     publisher: ImmediatePublisher<'a, ThreadModeRawMutex, MagMeasurement, CAP, SUB, PUB>,
     watch: Sender<'a, ThreadModeRawMutex, MagMeasurement, WATCH>,
 
-    shared: Mutex<NoopRawMutex, Shared>,
+    shared: Mutex<CriticalSectionRawMutex, Shared>,
 }
 
 impl<'a> MagneticFieldDriver<'a> {

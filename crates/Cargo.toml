@@ -28,7 +28,7 @@ embedded-hal-bus = "0.3.0"
 defmt = { version = "1.0.1" }
 
 [patch.crates-io]
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d2f0ad" }
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }

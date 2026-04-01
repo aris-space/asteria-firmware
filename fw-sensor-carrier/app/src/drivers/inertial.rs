@@ -2,7 +2,7 @@ use crate::drivers::magnetic_field;
 use crate::drivers::magnetic_field::MagMeasurement;
 use crate::sensors::SensorId;
 use crate::sensors::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
-use embassy_sync::blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex};
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel};
@@ -56,7 +56,7 @@ pub struct InertialDriver<'a> {
     inertial_pub: ImmediatePublisher<'a, ThreadModeRawMutex, ImuData, CAP, SUB, PUB>,
     inertial_watch: Sender<'a, ThreadModeRawMutex, ImuData, WATCH>,
 
-    shared: Mutex<NoopRawMutex, SharedData<'a>>,
+    shared: Mutex<CriticalSectionRawMutex, SharedData<'a>>,
 }
 
 impl<'a> InertialDriver<'a> {

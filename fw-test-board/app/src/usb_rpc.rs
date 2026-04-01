@@ -251,7 +251,7 @@ pub async fn usb_rpc_task() {
     };
 
     let spawner = unsafe { embassy_executor::Spawner::for_current_executor().await };
-    spawner.spawn(usb_rpc_task_inner(usb_driver, spawner).expect("usb_rpc_task_inner token"));
+    spawner.spawn(usb_rpc_task_inner(usb_driver, spawner).unwrap());
 }
 
 #[embassy_executor::task]
@@ -282,9 +282,9 @@ async fn usb_rpc_task_inner(usb_driver: AppDriver, spawner: embassy_executor::Sp
         vkk,
     );
 
-    spawner.spawn(usb_device_task(device).expect("usb_device_task token"));
-    spawner.spawn(reboot_task().expect("reboot_task token"));
-    spawner.spawn(panic_task().expect("panic_task token"));
+    spawner.spawn(usb_device_task(device).unwrap());
+    spawner.spawn(reboot_task().unwrap());
+    spawner.spawn(panic_task().unwrap());
 
     loop {
         let _ = server.run().await;

@@ -94,7 +94,7 @@ where
 
 pub async fn init_lox_valve_motor(
     uart: Uart<'static, Async>,
-    mut endstop: ExtiInput<'_>,
+    mut endstop: ExtiInput<'_, Async>,
 ) -> Result<(), Epos4Error<usart::Error>> {
     info!("Initializing valve motor");
     let (tx, rx) = uart.split();
@@ -136,7 +136,7 @@ pub async fn init_lox_valve_motor(
 /// Moves the motor anti-clockwise until the limit switch is hit.
 async fn find_and_calibrate_home<R, W, E>(
     motor: &mut Epos4<R, W>,
-    limit_switch: &mut ExtiInput<'_>,
+    limit_switch: &mut ExtiInput<'_, Async>,
 ) -> Result<(), Epos4Error<E>>
 where
     R: Read<Error = E>,

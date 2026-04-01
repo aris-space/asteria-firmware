@@ -5,10 +5,13 @@ pub mod thermocouple_conversions;
 
 use crate::ADSError::SpiError;
 use core::slice;
+use embassy_stm32::dma;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
+use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::mode::Async;
 use embassy_stm32::spi::{BitOrder, Error, MisoPin, MosiPin, RxDma, SckPin, Spi, TxDma};
+use embassy_stm32::spi::mode::Master;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::{Peri, spi};
 use embassy_time::{Duration, Timer, with_timeout};
@@ -82,23 +85,26 @@ pub enum ADSError {
 }
 
 pub struct ADSThermocouples<'a> {
-    handle: Spi<'a, Async>,
-    ext_irq: ExtiInput<'a>,
+    handle: Spi<'a, Async, Master>,
+    ext_irq: ExtiInput<'a, Async>,
     voltage_offset: f32,
     pga_gain: PGAGain,
     _cs: Output<'a>,
 }
 
 impl<'a> ADSThermocouples<'a> {
-    pub async fn new<T: spi::Instance>(
+    pub async fn new<T: spi::Instance, D1: TxDma<T>, D2: RxDma<T>>(
         peri: Peri<'a, T>,
         sck: Peri<'a, impl SckPin<T>>,
         mosi: Peri<'a, impl MosiPin<T>>,
         miso: Peri<'a, impl MisoPin<T>>,
-        tx_dma: Peri<'a, impl TxDma<T>>,
-        rx_dma: Peri<'a, impl RxDma<T>>,
+        tx_dma: Peri<'a, D1>,
+        rx_dma: Peri<'a, D2>,
+        irq: impl Binding<D1::Interrupt, dma::InterruptHandler<D1>>
+            + Binding<D2::Interrupt, dma::InterruptHandler<D2>>
+            + 'a,
         cs: Peri<'a, impl Pin>,
-        ext_irq: ExtiInput<'a>,
+        ext_irq: ExtiInput<'a, Async>,
         pga_gain: PGAGain,
     ) -> Result<Self, ADSError> {
         // Set config
@@ -108,7 +114,7 @@ impl<'a> ADSThermocouples<'a> {
         config.frequency = Hertz(1_000_000);
 
         // Initialize SPI
-        let handle = Spi::new(peri, sck, mosi, miso, tx_dma, rx_dma, config);
+        let handle = Spi::new(peri, sck, mosi, miso, tx_dma, rx_dma, irq, config);
         // Set CS pin
         let mut cs = Output::new(cs, Level::High, Speed::Low);
         cs.set_low();

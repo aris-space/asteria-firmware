@@ -1,19 +1,19 @@
 #![allow(dead_code)]
 #![no_std]
 
-use embassy_stm32::i2c::{Error, I2c};
+use embassy_stm32::i2c::{Error, I2c, mode::Master};
 use embassy_stm32::mode::Async;
 use embassy_time::Timer;
 
 // MAX31889 sensor abstraction.
 
 pub struct MAX31889<'a> {
-    i2c: I2c<'a, Async>,
+    i2c: I2c<'a, Async, Master>,
     address: u8,
 }
 
 impl<'a> MAX31889<'a> {
-    pub fn new(i2c: I2c<'a, Async>, address: u8) -> Self {
+    pub fn new(i2c: I2c<'a, Async, Master>, address: u8) -> Self {
         MAX31889 { i2c, address }
     }
 

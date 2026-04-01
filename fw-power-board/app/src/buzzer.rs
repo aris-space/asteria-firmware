@@ -74,8 +74,8 @@ pub enum Step {
 /// *Global* loudness is still handled by `set_volume`.
 pub struct Buzzer<Tim: GeneralInstance4Channel> {
     pwm: SimplePwm<'static, Tim>,
-    max_duty: u16,
-    duty: u16,
+    max_duty: u32,
+    duty: u32,
     /// 0.0–100.0 %
     volume: f32,
 }
@@ -95,7 +95,7 @@ impl<Tim: GeneralInstance4Channel> Buzzer<Tim> {
 
     pub fn set_volume(&mut self, vol: f32) {
         self.volume = vol.min(100.0);
-        let duty = (self.max_duty as f32 * (self.volume / 100.0)).round() as u16;
+        let duty = (self.max_duty as f32 * (self.volume / 100.0)).round() as u32;
         self.duty = duty;
     }
     pub fn set_tone(&mut self, f: Hertz) {

@@ -55,13 +55,13 @@ async fn main(blocking_executor: Spawner) -> ! {
     interrupt::TIM2.set_priority(Priority::P1);
     let async_executor = board::INTERRUPT_EXECUTOR.start(interrupt::TIM2);
 
-    blocking_executor.spawn(logging::logging_task().expect("failed to create logging task"));
-    blocking_executor.spawn(logging::fs_worker_task().expect("failed to create fs_worker task"));
-    async_executor.spawn(usb_rpc::usb_rpc_task().expect("failed to create usb_rpc task"));
+    blocking_executor.spawn(logging::logging_task().unwrap());
+    blocking_executor.spawn(logging::fs_worker_task().unwrap());
+    async_executor.spawn(usb_rpc::usb_rpc_task().unwrap());
 
     #[cfg(feature = "log-stress")]
-    blocking_executor.spawn(defmt_stress_task().expect("failed to create defmt_stress_task"));
-    async_executor.spawn(blink_yellow().expect("failed to create blink_yellow task"));
+    blocking_executor.spawn(defmt_stress_task().unwrap());
+    async_executor.spawn(blink_yellow().unwrap());
 
     loop {
         pending::<()>().await;
