@@ -12,7 +12,7 @@ use embassy_stm32::can::frame::{self, FdFrame, Header};
 use embassy_stm32::can::{Can, CanConfigurator, CanRx, CanTx, OperatingMode, RxPin, TxPin};
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::{Peri, can};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Instant, Ticker, TimeoutError, with_timeout};
@@ -234,7 +234,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
         pub const NEW_DATA_TIMEOUT: Duration = Duration::from_secs(10);
     }
 
-    static CAN_TX: OnceLock<Mutex<NoopRawMutex, CanTx<'static>>> = OnceLock::new();
+    static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
 
     CAN_TX
         .init(Mutex::new(can_tx))
@@ -245,7 +245,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Pressure task (≈40 Hz)
     #[embassy_executor::task]
-    async fn pressure_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut pressure_watch = pressure::PRESSURE_DRIVER_WATCH
             .receiver()
@@ -285,7 +285,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Environmental task (≈1 Hz)
     #[embassy_executor::task]
-    async fn environmental_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn environmental_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut environmental_watch = environmental::ENVIRONMENTAL_DRIVER_WATCH
             .receiver()
@@ -323,7 +323,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Orientation task (≈40 Hz)
     #[embassy_executor::task]
-    async fn orientation_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn orientation_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut orientation_watch = inertial::ORIENTATION_WATCH
             .receiver()
@@ -368,7 +368,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Magnetic field task (≈10 Hz)
     #[embassy_executor::task]
-    async fn magnetic_field_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn magnetic_field_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut orientation_anon = inertial::ORIENTATION_WATCH.anon_receiver();
         let mut magnetic_field_watch = magnetic_field::MAGNETIC_FIELD_WATCH
@@ -431,7 +431,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Position task (≈20 Hz)
     #[embassy_executor::task]
-    async fn position_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn position_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut position_watch = position_velocity::POSITION_WATCH
             .receiver()
@@ -468,7 +468,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Velocity task (≈20 Hz)
     #[embassy_executor::task]
-    async fn velocity_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn velocity_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut velocity_watch = position_velocity::VELOCITY_WATCH
             .receiver()
@@ -505,7 +505,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Inertial task (≈40 Hz)
     #[embassy_executor::task]
-    async fn inertial_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn inertial_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut inertial_watch = inertial::INERTIAL_WATCH
             .receiver()
@@ -544,7 +544,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Status task (1 Hz)
     #[embassy_executor::task]
-    async fn status_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         use hermes_can::messages::board_status::{
             SensorCarrierStatus, SensorsHealth, StatusCommonMessage,
         };
@@ -592,7 +592,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Build Information task
     #[embassy_executor::task]
-    async fn build_information(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn build_information(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let build_info = crate::build_info::BUILD_INFO.get();
         let build_info_msg = hermes_can::messages::debug_info::SensorCarrierBuildInfo {
             data: build_info.clone(),

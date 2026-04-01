@@ -19,7 +19,7 @@ use embassy_stm32::can::{Can, CanConfigurator, CanRx, CanTx, OperatingMode, RxPi
 use embassy_stm32::gpio::Output;
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::{Peri, can};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::pubsub::WaitResult;
@@ -295,7 +295,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
     // transmission. Otherwise, discard and wait for the next data.
 
     // we need to wrap CanTx in a something to allow multiple tasks to access it
-    static CAN_TX: OnceLock<Mutex<NoopRawMutex, CanTx<'static>>> = OnceLock::new();
+    static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
 
     CAN_TX
         .init(Mutex::new(can_tx))
@@ -309,7 +309,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // AnalogPressure (≈20 Hz)
     #[embassy_executor::task]
-    async fn pressure_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         // Using digital pressure sensors
         // let mut pressure_watch = ANALOG_PRESSURE_WATCH.receiver().unwrap();
         let mut pressure_watch = DIGITAL_PRESSURE_WATCH.receiver().unwrap();
@@ -351,7 +351,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Thermocouple Task (≈10 Hz)
     #[embassy_executor::task]
-    async fn thermocouple_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn thermocouple_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut thermocouple_watch = THERMOCOUPLE_WATCH.receiver().unwrap();
 
         let mut ticker = Ticker::every(Duration::from_millis(
@@ -391,7 +391,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Valve States Task (≈5 Hz)
     #[embassy_executor::task]
-    async fn valve_states_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn valve_states_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut fss_mnl_watcher = FSS_MAIN_CONTROL.receiver().unwrap();
         let mut oss_mnl_watcher = OSS_MAIN_CONTROL.receiver().unwrap();
 
@@ -440,7 +440,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // External Valve Command Task (non-periodic)
     #[embassy_executor::task]
-    async fn external_valve_command_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn external_valve_command_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut general_valve_watcher = EXTERNAL_VALVE_CONTROL.subscriber().unwrap();
 
         loop {
@@ -542,7 +542,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Board Status Task (≈1 Hz)
     #[embassy_executor::task]
-    async fn board_status_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn board_status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut thermocouple_watcher = THERMOCOUPLE_ERROR_WATCH.receiver().unwrap();
         let start = Instant::now();
         let mut data = EngineControlBoardStatus {
@@ -589,7 +589,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Build Information Task (≈0.2 Hz)
     #[embassy_executor::task]
-    async fn build_information_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn build_information_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let build_info = crate::build_info::BUILD_INFO.get();
         let build_info_msg = hermes_can::messages::debug_info::EngineControlBoardBuildInfo {
             data: build_info.clone(),
@@ -620,7 +620,7 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
     }
 
     #[embassy_executor::task]
-    async fn firing_info_task(can_tx: &'static Mutex<NoopRawMutex, CanTx<'static>>) {
+    async fn firing_info_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
         let mut firing_info_watcher = FIRING_INFO.subscriber().unwrap();
 
         loop {
