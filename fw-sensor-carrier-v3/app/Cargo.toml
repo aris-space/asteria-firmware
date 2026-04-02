@@ -25,13 +25,28 @@ embassy-futures = "*"
 embassy-sync = "*"
 embassy-embedded-hal = "*"
 
+assign-resources = "0.5.0"
+static_cell = "2.1.1"
+
+# Sensor Drivers
+ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
+lsm6dso32 = { path = "../../crates/devices/lsm6dso32", features = ["defmt-03"] }
+lsm303agr = { version = "1.1.0", features = ["async"] }
+sht4x = { version = "0.2.0", features = ["embedded-hal-async", "defmt"] }
+ublox = { version = "0.4.5", default-features = false }
+
+# Flash Driver
+w25q256jv = { version = "0.1.1", features = ["defmt"] }
+
+embassy-usb = "0.6"
+embedded-can = "0.4.1"
+embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 embedded-hal-bus = { version = "0.3.0", features = ["async"] }
-embedded-io-async = { version = "0.7", features = ["defmt"] }
+embedded-io-async = { version = "0.7.0", default-features = false, features = ["defmt"] }
 
 defmt = { version = "1.0.1" }
 defmt-rtt = { version = "1.1.0", features = ["disable-blocking-mode"] }
-#embedded-can = "0.4.1"
 
 panic-probe = { version = "1.0.0" }
 panic-reset = "0.1.1"
