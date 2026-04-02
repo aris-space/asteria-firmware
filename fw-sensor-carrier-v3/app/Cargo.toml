@@ -1,0 +1,46 @@
+[package]
+name = "fw-sensor-carrier-v3"
+version = "0.1.0"
+edition = "2024"
+authors = ["Louis Schell <louis.schell1@gmx.de>"]
+
+[dependencies]
+# cortex-m setup
+cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+
+# Embassy stuff
+embassy-stm32 = { version = "*", features = [
+    "stm32h723zg",
+    "single-bank",
+    "time-driver-any",
+    "memory-x",
+    "unstable-pac",
+    "exti",
+] }
+embassy-time = { version = "*", features = ["tick-hz-32_768"] }
+embassy-executor = { version = "*", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", ] }
+
+embassy-futures = "*"
+embassy-sync = "*"
+embassy-embedded-hal = "*"
+
+embedded-hal-async = "1.0.0"
+embedded-hal-bus = { version = "0.3.0", features = ["async"] }
+embedded-io-async = { version = "0.7", features = ["defmt"] }
+
+defmt = { version = "1.0.1" }
+defmt-rtt = { version = "1.1.0", features = ["disable-blocking-mode"] }
+#embedded-can = "0.4.1"
+
+panic-probe = { version = "1.0.0" }
+panic-reset = "0.1.1"
+
+[build-dependencies]
+built = { version = "0.8", features = ["git2"] }
+
+[[bin]]
+name = "fw-sensor-carrier-v3"
+test = false
+doctest = false
+bench = false
