@@ -29,13 +29,12 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: tools -> tools/target
-          cache-all-crates: "true"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: taiki-e/install-action@cargo-hack
       - name: just test
         run: just test
+        env:
+          RUSTC_WRAPPER: sccache
 
   fmt:
     runs-on: self-hosted
@@ -80,25 +79,12 @@ jobs:
           targets: thumbv7em-none-eabihf
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: clippy
-          add-rust-environment-hash-key: "false"
-          workspaces: |
-            crates
-            fw-engine-board
-            fw-sensor-carrier
-            fw-power-board
-            fw-communication-board
-            fw-fuel-control-board
-            fw-oxidizer-control-board
-            fw-lox-valve-control-board
-            fw-recovery-board
-            fw-test-board
-          cache-all-crates: "true"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: taiki-e/install-action@cargo-hack
       - name: just ci-checks
         run: just ci-checks
+        env:
+          RUSTC_WRAPPER: sccache
 
   doc:
     # run docs generation on nightly rather than stable. This enables features like
@@ -117,12 +103,6 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            crates -> crates/target
-            tools -> tools/target
-          cache-all-crates: "true"
       - uses: taiki-e/install-action@cargo-hack
       - name: Build docs
         # Not quite sure anymore about these flags. But --workspace is important.
