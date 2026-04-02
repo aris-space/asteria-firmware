@@ -29,12 +29,13 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@sccache
       - name: just test
         run: just test
         env:
           RUSTC_WRAPPER: sccache
+          SCCACHE_DIR: /home/ubuntu/.sccache
 
   fmt:
     runs-on: self-hosted
@@ -79,12 +80,13 @@ jobs:
           targets: thumbv7em-none-eabihf
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@sccache
       - name: just ci-checks
         run: just ci-checks
         env:
           RUSTC_WRAPPER: sccache
+          SCCACHE_DIR: /home/ubuntu/.sccache
 
   doc:
     # run docs generation on nightly rather than stable. This enables features like
