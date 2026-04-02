@@ -83,7 +83,10 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - uses: taiki-e/install-action@sccache
       - name: just ci-checks
-        run: just ci-checks
+        run: |
+          sccache --start-server || true
+          just ci-checks
+          sccache --show-stats
         env:
           RUSTC_WRAPPER: sccache
           SCCACHE_DIR: /home/ubuntu/.sccache
