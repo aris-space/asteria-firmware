@@ -13,6 +13,7 @@ use crate::sensors::{
 use defmt_brtt::DefmtConsumer;
 
 use crate::resources::flash::BoardFlash;
+
 use crate::{resources, storage, tasks};
 
 pub struct PreparedBoard {
@@ -79,27 +80,25 @@ pub fn spawn_tasks(
     level_0_spawner: SendSpawner,
     defmt_consumer: DefmtConsumer,
 ) {
-    // Blinky on interrupt executor for reliable timing
     level_0_spawner.must_spawn(tasks::blinky::task(board.services.yellow_led));
 
-    // IMU tasks on thread executor
     let (imu1_spi, imu1_int1) = board.sensors.imu1;
     let (imu2_spi, imu2_int1) = board.sensors.imu2;
-    level_t_spawner.must_spawn(tasks::readout::imu::task(imu1_spi, imu1_int1, IMU_0));
-    level_t_spawner.must_spawn(tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1));
+    level_0_spawner.must_spawn(tasks::readout::imu::task(imu1_spi, imu1_int1, IMU_0));
+    level_0_spawner.must_spawn(tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1));
 
     let baro_delay = Duration::from_millis(20); // TODO: calibrate
-    level_t_spawner.must_spawn(tasks::readout::barometer::task(board.sensors.bus1, BAROMETER_0, baro_delay));
-    level_t_spawner.must_spawn(tasks::readout::barometer::task(board.sensors.bus2, BAROMETER_1, baro_delay));
+    level_0_spawner.must_spawn(tasks::readout::barometer::task(board.sensors.bus1, BAROMETER_0, baro_delay));
+    level_0_spawner.must_spawn(tasks::readout::barometer::task(board.sensors.bus2, BAROMETER_1, baro_delay));
 
     let mag_delay = Duration::from_millis(0); // TODO: calibrate
-    level_t_spawner.must_spawn(tasks::readout::magnetometer::task(board.sensors.bus1, MAGNETOMETER_0, mag_delay));
-    level_t_spawner.must_spawn(tasks::readout::magnetometer::task(board.sensors.bus2, MAGNETOMETER_1, mag_delay));
+    level_0_spawner.must_spawn(tasks::readout::magnetometer::task(board.sensors.bus1, MAGNETOMETER_0, mag_delay));
+    level_0_spawner.must_spawn(tasks::readout::magnetometer::task(board.sensors.bus2, MAGNETOMETER_1, mag_delay));
 
     let gnss_delay = Duration::from_millis(100); // TODO: calibrate
-    level_t_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0, gnss_delay));
-    level_t_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1, gnss_delay));
+    level_0_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0, gnss_delay));
+    level_0_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1, gnss_delay));
 
-    level_t_spawner.must_spawn(storage::task(board.flash));
-    level_t_spawner.must_spawn(tasks::logger::task(defmt_consumer));
+    // Storage runs on thread-mode — blocking flash I/O won't starve sensor readouts
+    level_t_spawner.must_spawn(storage::task(board.flash, defmt_consumer));
 }
