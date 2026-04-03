@@ -1,5 +1,6 @@
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::exti::ExtiInput;
+use embassy_time::Duration;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
@@ -77,6 +78,7 @@ pub fn spawn_tasks(
     level_t_spawner.must_spawn(tasks::imu::task(imu1_spi, imu1_int1, IMU_0));
     level_t_spawner.must_spawn(tasks::imu::task(imu2_spi, imu2_int1, IMU_1));
 
-    level_t_spawner.must_spawn(tasks::barometer::task(board.sensors.bus1, BAROMETER_0));
-    level_t_spawner.must_spawn(tasks::barometer::task(board.sensors.bus2, BAROMETER_1));
+    let baro_delay = Duration::from_millis(0); // TODO: calibrate
+    level_t_spawner.must_spawn(tasks::barometer::task(board.sensors.bus1, BAROMETER_0, baro_delay));
+    level_t_spawner.must_spawn(tasks::barometer::task(board.sensors.bus2, BAROMETER_1, baro_delay));
 }

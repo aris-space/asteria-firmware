@@ -15,6 +15,7 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(25); // ~40 Hz
 struct Inactive<I2C> {
     sensor: Ms5607<I2C, ms5607::Uninitialized>,
     id: BarometerId,
+    delay: Duration,
     attempt: u8,
 }
 
@@ -27,6 +28,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
                     return Active {
                         sensor,
                         id: self.id,
+                        delay: self.delay,
                     };
                 }
                 Err(err) => {
@@ -43,6 +45,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
 struct Active<I2C> {
     sensor: Ms5607<I2C, ms5607::Initialized>,
     id: BarometerId,
+    delay: Duration,
 }
 
 impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
@@ -57,10 +60,13 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                     errors = 0;
                     let sample = PressureSample {
                         sensor_id: self.id,
-                        data: Timestamped::now(PressureData {
-                            pressure_mbar: m.pressure_mbar,
-                            temperature_c: m.temperature_c,
-                        }),
+                        data: Timestamped::now_with_delay(
+                            PressureData {
+                                pressure_mbar: m.pressure_mbar,
+                                temperature_c: m.temperature_c,
+                            },
+                            self.delay,
+                        ),
                     };
                     signals::submit_pressure_sample(sample);
                     trace!("barometer: p={} mbar", m.pressure_mbar);
@@ -81,18 +87,20 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         Inactive {
             sensor: Ms5607::new(self.sensor.destroy(), false),
             id: self.id,
+            delay: self.delay,
             attempt: 0,
         }
     }
 }
 
-async fn run_inner<I2C>(i2c: I2C, id: BarometerId) -> !
+async fn run_inner<I2C>(i2c: I2C, id: BarometerId, delay: Duration) -> !
 where
     I2C: embedded_hal_async::i2c::I2c,
 {
     let mut inactive = Inactive {
         sensor: Ms5607::new(i2c, false),
         id,
+        delay,
         attempt: 0,
     };
 
@@ -103,7 +111,7 @@ where
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(bus: SharedI2cBus, id: BarometerId) -> ! {
+pub async fn task(bus: SharedI2cBus, id: BarometerId, delay: Duration) -> ! {
     let i2c = I2cDevice::<CriticalSectionRawMutex, SharedI2c>::new(bus);
-    run_inner(i2c, id).await
+    run_inner(i2c, id, delay).await
 }
