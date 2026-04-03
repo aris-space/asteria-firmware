@@ -22,27 +22,33 @@ pub static FS: RpcService<CriticalSectionRawMutex, Fs, 256> = RpcService::new();
 
 static SESSION_INDEX: AtomicU32 = AtomicU32::new(u32::MAX);
 
-pub fn workdir() -> Option<PathBuf> {
-    let idx = SESSION_INDEX.load(Ordering::Relaxed);
-    if idx == u32::MAX {
-        return None;
+pub fn is_available() -> bool {
+    SESSION_INDEX.load(Ordering::Relaxed) != u32::MAX
+}
+
+fn session_idx() -> Option<u32> {
+    match SESSION_INDEX.load(Ordering::Relaxed) {
+        u32::MAX => None,
+        idx => Some(idx),
     }
+}
+
+pub fn workdir() -> Option<PathBuf> {
     let mut s = heapless::String::<32>::new();
-    write!(s, "/log_{}", idx).ok()?;
+    write!(s, "/log_{}", session_idx()?).ok()?;
     PathBuf::try_from(s.as_bytes()).ok()
 }
 
 pub fn workdir_path(filename: &str) -> Option<PathBuf> {
-    let dir = workdir()?;
     let mut s = heapless::String::<64>::new();
-    write!(s, "{}/{}", dir.as_str_ref_with_trailing_nul().trim_end_matches('\0'), filename).ok()?;
+    write!(s, "/log_{}/{}", session_idx()?, filename).ok()?;
     PathBuf::try_from(s.as_bytes()).ok()
 }
 
 static ADAPTER: StaticCell<Adapter> = StaticCell::new();
 static ALLOC: StaticCell<Allocation<Adapter>> = StaticCell::new();
 
-fn prepare_session(fs: &Filesystem<'_, Adapter>) -> u32 {
+fn prepare_session(fs: &Filesystem<'_, Adapter>) -> Option<u32> {
     let mut max_index: Option<u32> = None;
 
     let _ = fs.read_dir_and_then(path!("/"), |dir| {
@@ -52,61 +58,91 @@ fn prepare_session(fs: &Filesystem<'_, Adapter>) -> u32 {
             let name = name.trim_end_matches('\0');
             if let Some(suffix) = name.strip_prefix("log_") {
                 if let Ok(n) = suffix.parse::<u32>() {
-                    max_index = Some(match max_index {
-                        Some(m) => m.max(n),
-                        None => n,
-                    });
+                    max_index = Some(max_index.map_or(n, |m| m.max(n)));
                 }
             }
         }
         Ok(())
     });
 
-    let next = max_index.map(|n| n + 1).unwrap_or(0);
+    let next = max_index.map_or(0, |n| n + 1);
     let mut dir_name = heapless::String::<32>::new();
-    write!(dir_name, "/log_{}", next).expect("dir name overflow");
+    write!(dir_name, "/log_{}", next).ok()?;
 
-    let dir_path = PathBuf::try_from(dir_name.as_bytes()).expect("invalid path");
-    fs.create_dir(&dir_path).expect("mkdir failed");
+    fs.create_dir(&PathBuf::try_from(dir_name.as_bytes()).ok()?).ok()?;
 
     let mut info_path = heapless::String::<64>::new();
-    write!(info_path, "{}/build_info.txt", dir_name.as_str()).expect("path overflow");
-    let info_path = PathBuf::try_from(info_path.as_bytes()).expect("invalid path");
+    write!(info_path, "{}/build_info.txt", dir_name.as_str()).ok()?;
 
-    fs.create_file_and_then(&info_path, |file| {
-        use crate::built;
-        let mut buf = heapless::String::<512>::new();
-        let _ = write!(buf, "pkg={}\n", built::PKG_NAME);
-        let _ = write!(buf, "profile={}\n", built::PROFILE);
-        let _ = write!(buf, "target={}\n", built::TARGET);
-        let _ = write!(buf, "git={}\n", built::GIT_COMMIT_HASH_SHORT.unwrap_or("none"));
-        let _ = write!(buf, "dirty={}\n", match built::GIT_DIRTY {
-            Some(true) => "true",
-            Some(false) => "false",
-            None => "none",
-        });
-        let _ = write!(buf, "features={}\n", built::FEATURES_LOWERCASE_STR);
-        file.write(buf.as_bytes())?;
-        Ok(())
-    })
-    .expect("write build_info failed");
+    let _ = fs.create_file_and_then(
+        &PathBuf::try_from(info_path.as_bytes()).ok()?,
+        |file| {
+            use crate::built;
+            let mut buf = heapless::String::<512>::new();
+            let _ = write!(
+                buf,
+                "pkg={}\nprofile={}\ntarget={}\ngit={}\ndirty={}\nfeatures={}\n",
+                built::PKG_NAME,
+                built::PROFILE,
+                built::TARGET,
+                built::GIT_COMMIT_HASH_SHORT.unwrap_or("none"),
+                match built::GIT_DIRTY {
+                    Some(true) => "true",
+                    Some(false) => "false",
+                    None => "none",
+                },
+                built::FEATURES_LOWERCASE_STR,
+            );
+            file.write(buf.as_bytes())?;
+            Ok(())
+        },
+    );
 
     info!("storage: session {}", dir_name.as_str());
-    next
+    Some(next)
 }
 
-fn drain_defmt(fs: &Fs, defmt_path: &PathBuf, consumer: &mut DefmtConsumer) {
-    while let Ok(grant) = consumer.read() {
-        let len = grant.buf().len();
-        {
-            let data = grant.buf();
-            let _ = fs.open_file_with_options_and_then(
-                |o| o.append(true).create(true),
-                defmt_path,
-                |file| Ok(file.write(data)?),
-            );
+const STAGING_SIZE: usize = 512;
+
+struct DefmtStaging {
+    buf: [u8; STAGING_SIZE],
+    len: usize,
+}
+
+impl DefmtStaging {
+    fn new() -> Self {
+        Self { buf: [0u8; STAGING_SIZE], len: 0 }
+    }
+
+    fn stage(&mut self, fs: &Fs, path: &PathBuf, data: &[u8]) {
+        if self.len + data.len() > STAGING_SIZE {
+            self.flush(fs, path);
         }
-        grant.release(len);
+        let n = data.len().min(STAGING_SIZE - self.len);
+        self.buf[self.len..self.len + n].copy_from_slice(&data[..n]);
+        self.len += n;
+    }
+
+    fn flush(&mut self, fs: &Fs, path: &PathBuf) {
+        if self.len == 0 {
+            return;
+        }
+        let _ = fs.open_file_with_options_and_then(
+            |o| o.append(true).create(true),
+            path,
+            |file| Ok(file.write(&self.buf[..self.len])?),
+        );
+        self.len = 0;
+    }
+
+    fn drain(&mut self, fs: &Fs, path: &PathBuf, consumer: &mut DefmtConsumer) {
+        while let Ok(grant) = consumer.read() {
+            let data = grant.buf();
+            let dlen = data.len();
+            self.stage(fs, path, data);
+            grant.release(dlen);
+        }
+        self.flush(fs, path);
     }
 }
 
@@ -115,37 +151,44 @@ pub async fn task(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -
     let adapter = ADAPTER.init(LittlefsAdapter::<_, _, _, U256, U1>::new(flash));
     let alloc = ALLOC.init(Filesystem::allocate());
 
-    // Try mount to check if we need to format. The successful Filesystem is
-    // dropped here due to borrow-checker constraints, then remounted below.
-    let needs_format = Filesystem::mount(alloc, adapter).is_err();
-    if needs_format {
-        info!("storage: formatting flash");
-        Filesystem::format(adapter).expect("format failed");
+    // Mount with retry. On first failure, format and try again.
+    // On second failure, run without filesystem.
+    for attempt in 0..2u8 {
+        if Filesystem::mount(alloc, adapter).is_err() {
+            info!("storage: mount failed (attempt {}), formatting", attempt + 1);
+            let _ = Filesystem::format(adapter);
+        }
     }
-    let mut fs = Filesystem::mount(alloc, adapter).expect("mount failed");
+    let Ok(mut fs) = Filesystem::mount(alloc, adapter) else {
+        defmt::error!("storage: mount failed after retries, running without filesystem");
+        loop {
+            let mut grant = consumer.wait_for_log().await;
+            let len = grant.buf().len();
+            grant.release(len);
+        }
+    };
     info!("storage: filesystem mounted");
 
-    let session_idx = prepare_session(&fs);
-    SESSION_INDEX.store(session_idx, Ordering::Relaxed);
+    if let Some(idx) = prepare_session(&fs) {
+        SESSION_INDEX.store(idx, Ordering::Relaxed);
+    }
 
-    let defmt_path = workdir_path("defmt.bin").expect("workdir path failed");
+    let defmt_path = workdir_path("defmt.bin").unwrap_or_else(|| {
+        PathBuf::try_from(b"/defmt.bin".as_slice()).unwrap()
+    });
+
+    let mut staging = DefmtStaging::new();
 
     loop {
-        drain_defmt(&fs, &defmt_path, &mut consumer);
+        staging.drain(&fs, &defmt_path, &mut consumer);
 
         match select(FS.run(&mut fs), consumer.wait_for_log()).await {
             Either::First(_) => unreachable!(),
             Either::Second(grant) => {
-                let len = grant.buf().len();
-                {
-                    let data = grant.buf();
-                    let _ = fs.open_file_with_options_and_then(
-                        |o| o.append(true).create(true),
-                        &defmt_path,
-                        |file| Ok(file.write(data)?),
-                    );
-                }
-                grant.release(len);
+                let data = grant.buf();
+                let dlen = data.len();
+                staging.stage(&fs, &defmt_path, data);
+                grant.release(dlen);
             }
         }
     }
