@@ -10,6 +10,9 @@ use lsm6dso32::{
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::resources::sensors::SpiDevice;
+use crate::sensors::ImuId;
+use crate::measurements::{ImuData, ImuSample, Timestamped};
+use crate::signals;
 
 async fn configure(
     sensor: &mut Lsm6dso32<Lsm6Dso32SpiInterface<impl embedded_hal_async::spi::SpiDevice>, lsm6dso32::Initialised>,
@@ -49,7 +52,7 @@ async fn configure(
     }
 }
 
-async fn run_inner<SPI, INT>(spi: SPI, mut int1: INT) -> !
+async fn run_inner<SPI, INT>(spi: SPI, mut int1: INT, id: ImuId) -> !
 where
     SPI: embedded_hal_async::spi::SpiDevice,
     INT: embedded_hal_async::digital::Wait,
@@ -84,10 +87,12 @@ where
             match sensor.read_accelerometer_and_gyroscope().await {
                 Ok((accel, gyro)) => {
                     errors = 0;
-                    trace!(
-                        "imu: accel x={} y={} z={} | gyro x={} y={} z={}",
-                        accel.x, accel.y, accel.z, gyro.x, gyro.y, gyro.z
-                    );
+                    let sample = ImuSample {
+                        sensor_id: id,
+                        data: Timestamped::now(ImuData { accel, gyro }),
+                    };
+                    signals::submit_imu_sample(sample);
+                    trace!("imu: accel x={} y={} z={}", accel.x, accel.y, accel.z);
                 }
                 Err(_) => {
                     errors = errors.saturating_add(1);
@@ -105,6 +110,6 @@ where
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(spi: SpiDevice, int1: ExtiInput<'static, Async>) -> ! {
-    run_inner(spi, int1).await
+pub async fn task(spi: SpiDevice, int1: ExtiInput<'static, Async>, id: ImuId) -> ! {
+    run_inner(spi, int1, id).await
 }

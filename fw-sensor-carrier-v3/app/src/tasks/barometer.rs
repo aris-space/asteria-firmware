@@ -2,22 +2,21 @@ use defmt::{info, trace, warn};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Timer};
-use ms5607::{Ms5607, Oversampling, Uninitialized};
+use ms5607::{Ms5607, Oversampling};
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
+use crate::sensors::BarometerId;
+use crate::measurements::{PressureData, PressureSample, Timestamped};
+use crate::signals;
 
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(25); // ~40 Hz
 
-fn new_sensor<I2C: embedded_hal_async::i2c::I2c>(i2c: I2C) -> Ms5607<I2C, Uninitialized> {
-    Ms5607::new(i2c, false)
-}
-
-async fn run_inner<I2C>(i2c: I2C) -> !
+async fn run_inner<I2C>(i2c: I2C, id: BarometerId) -> !
 where
     I2C: embedded_hal_async::i2c::I2c,
 {
-    let mut uninit = new_sensor(i2c);
+    let mut uninit = Ms5607::new(i2c, false);
     let mut attempt: u8 = 0;
 
     loop {
@@ -30,7 +29,7 @@ where
                 Err(err) => {
                     attempt = attempt.saturating_add(1);
                     warn!("barometer: init failed (attempt {}), retrying...", attempt);
-                    uninit = new_sensor(err.sensor.destroy());
+                    uninit = Ms5607::new(err.sensor.destroy(), false);
                     Timer::after(backoff(attempt)).await;
                 }
             }
@@ -43,10 +42,15 @@ where
             match sensor.measure(Oversampling::Osr2048, &mut Delay).await {
                 Ok(m) => {
                     errors = 0;
-                    trace!(
-                        "barometer: pressure={} mbar, temp={} C",
-                        m.pressure_mbar, m.temperature_c
-                    );
+                    let sample = PressureSample {
+                        sensor_id: id,
+                        data: Timestamped::now(PressureData {
+                            pressure_mbar: m.pressure_mbar,
+                            temperature_c: m.temperature_c,
+                        }),
+                    };
+                    signals::submit_pressure_sample(sample);
+                    trace!("barometer: p={} mbar", m.pressure_mbar);
                 }
                 Err(_) => {
                     errors = errors.saturating_add(1);
@@ -61,12 +65,12 @@ where
         }
 
         warn!("barometer: inactive (too many errors)");
-        uninit = new_sensor(sensor.destroy());
+        uninit = Ms5607::new(sensor.destroy(), false);
     }
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(bus: SharedI2cBus) -> ! {
+pub async fn task(bus: SharedI2cBus, id: BarometerId) -> ! {
     let i2c = I2cDevice::<CriticalSectionRawMutex, SharedI2c>::new(bus);
-    run_inner(i2c).await
+    run_inner(i2c, id).await
 }

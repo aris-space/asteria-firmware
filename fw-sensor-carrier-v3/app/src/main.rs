@@ -7,7 +7,10 @@ use embassy_executor::Spawner;
 
 mod built;
 mod macros;
+mod measurements;
 mod resources;
+mod sensors;
+mod signals;
 mod startup;
 mod tasks;
 
