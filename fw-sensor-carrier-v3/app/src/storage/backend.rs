@@ -33,19 +33,44 @@ mod imp {
     };
     use super::{BoardFlash, DefmtConsumer, discard_logs_forever};
 
-    const KV_REGION_SIZE: u32 = 512 * 1024;
-    const LOG_REGION_OFFSET: u32 = KV_REGION_SIZE;
-    const LOG_REGION_SIZE: u32 = CAPACITY - LOG_REGION_OFFSET;
     const KV_BUFFER_SIZE: usize = 384;
     const STORAGE_KEY_CAPACITY: usize = 32;
     const SESSION_NEXT_ID_KEY: StorageKey = "session.next_id";
 
+    #[derive(Clone, Copy)]
+    struct Region {
+        offset: u32,
+        size: u32,
+    }
+
+    impl Region {
+        const fn new(offset: u32, size: u32) -> Self {
+            Self { offset, size }
+        }
+
+        const fn end(self) -> u32 {
+            self.offset + self.size
+        }
+    }
+
+    struct FlashLayout;
+
+    impl FlashLayout {
+        const KV: Region = Region::new(0, 512 * 1024);
+        const LOG: Region = Region::new(Self::KV.end(), CAPACITY - Self::KV.end());
+
+        const fn is_valid() -> bool {
+            Self::KV.size >= (SECTOR_SIZE * 2)
+                && Self::LOG.size >= SECTOR_SIZE
+                && Self::LOG.end() <= CAPACITY
+        }
+    }
+
     type SharedFlash = Mutex<ThreadModeRawMutex, &'static mut BoardFlash>;
-    type KvPartition = Partition<'static, ThreadModeRawMutex, &'static mut BoardFlash>;
-    type LogPartition = Partition<'static, ThreadModeRawMutex, &'static mut BoardFlash>;
+    type StoragePartition = Partition<'static, ThreadModeRawMutex, &'static mut BoardFlash>;
     type MapKey = HeaplessString<STORAGE_KEY_CAPACITY>;
-    type KvMap = MapStorage<MapKey, KvPartition, NoCache>;
-    type LogQueue = QueueStorage<LogPartition, NoCache>;
+    type KvMap = MapStorage<MapKey, StoragePartition, NoCache>;
+    type LogQueue = QueueStorage<StoragePartition, NoCache>;
 
     static FLASH: StaticCell<SharedFlash> = StaticCell::new();
     static STATE: Mutex<CriticalSectionRawMutex, Option<StorageState>> = Mutex::new(None);
@@ -53,6 +78,10 @@ mod imp {
     async fn load_in_memory_defaults() {
         let mut unavailable = UnavailableStorage;
         crate::params::load_all(&mut unavailable).await;
+    }
+
+    fn partition(flash: &'static SharedFlash, region: Region) -> StoragePartition {
+        Partition::new(flash, region.offset, region.size)
     }
 
     struct KvState {
@@ -64,8 +93,8 @@ mod imp {
         fn new(flash: &'static SharedFlash) -> Self {
             Self {
                 store: MapStorage::new(
-                    Partition::new(flash, 0, KV_REGION_SIZE),
-                    const { MapConfig::new(0..KV_REGION_SIZE) },
+                    partition(flash, FlashLayout::KV),
+                    const { MapConfig::new(0..FlashLayout::KV.size) },
                     NoCache::new(),
                 ),
                 buffer: [0; KV_BUFFER_SIZE],
@@ -131,8 +160,8 @@ mod imp {
         fn new(flash: &'static SharedFlash) -> Self {
             Self {
                 store: QueueStorage::new(
-                    Partition::new(flash, LOG_REGION_OFFSET, LOG_REGION_SIZE),
-                    const { QueueConfig::new(0..LOG_REGION_SIZE) },
+                    partition(flash, FlashLayout::LOG),
+                    const { QueueConfig::new(0..FlashLayout::LOG.size) },
                     NoCache::new(),
                 ),
                 record_buffer: [0; LOG_RECORD_BUFFER_SIZE],
@@ -224,7 +253,7 @@ mod imp {
     }
 
     async fn init_state(flash: &'static mut BoardFlash) -> Option<StorageState> {
-        if KV_REGION_SIZE < (SECTOR_SIZE * 2) || LOG_REGION_SIZE < SECTOR_SIZE {
+        if !FlashLayout::is_valid() {
             return None;
         }
 
