@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Louis Schell <louis.schell1@gmx.de>"]
 
+[features]
+default = ["storage"]
+storage = ["dep:w25q256jv", "dep:littlefs2", "dep:generic-array"]
+
 [dependencies]
 # cortex-m setup
 cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
@@ -36,9 +40,9 @@ sht4x = { version = "0.2.0", features = ["embedded-hal-async", "defmt"] }
 ublox = { version = "0.4.5", default-features = false }
 
 # Flash Driver
-w25q256jv = { version = "0.1.1", features = ["defmt", "littlefs2"] }
-littlefs2 = { version = "0.6.1", default-features = false }
-generic-array = "0.14"
+w25q256jv = { version = "0.1.1", features = ["defmt", "littlefs2"], optional = true }
+littlefs2 = { version = "0.6.1", default-features = false, optional = true }
+generic-array = { version = "0.14", optional = true }
 
 embassy-usb = "0.6"
 embedded-can = "0.4.1"

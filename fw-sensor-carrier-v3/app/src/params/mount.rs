@@ -1,9 +1,8 @@
 use nalgebra::Matrix3;
 use serde::{Deserialize, Serialize};
 
-use super::{Config, RegistryEntry};
+use super::{Config, ConfigBackend, RegistryEntry};
 use crate::sensors::{IMU_COUNT, ImuId};
-use crate::tasks::storage;
 
 const IMU_MOUNT_BYTES: usize = 64;
 
@@ -31,25 +30,17 @@ pub static IMU_MOUNTS: [Config<ImuMount, IMU_MOUNT_BYTES>; IMU_COUNT] = [
     Config::new("imu_mount_1", ImuMount::DEFAULT),
 ];
 
-fn load_imu_mount_0(fs: &storage::Fs) {
-    IMU_MOUNTS[0].load_from_fs(fs);
+fn load_imu_mount_0(backend: &dyn ConfigBackend) {
+    IMU_MOUNTS[0].load_from_backend(backend);
 }
 
-fn save_imu_mount_0(fs: &storage::Fs) {
-    IMU_MOUNTS[0].save_to_fs(fs);
-}
-
-fn load_imu_mount_1(fs: &storage::Fs) {
-    IMU_MOUNTS[1].load_from_fs(fs);
-}
-
-fn save_imu_mount_1(fs: &storage::Fs) {
-    IMU_MOUNTS[1].save_to_fs(fs);
+fn load_imu_mount_1(backend: &dyn ConfigBackend) {
+    IMU_MOUNTS[1].load_from_backend(backend);
 }
 
 pub static REGISTRY: [RegistryEntry; IMU_COUNT] = [
-    RegistryEntry::new(load_imu_mount_0, save_imu_mount_0),
-    RegistryEntry::new(load_imu_mount_1, save_imu_mount_1),
+    RegistryEntry::new(load_imu_mount_0),
+    RegistryEntry::new(load_imu_mount_1),
 ];
 
 pub fn imu_mount(id: ImuId) -> &'static Config<ImuMount, IMU_MOUNT_BYTES> {
