@@ -4,7 +4,7 @@ use embassy_stm32::usart::UartRx;
 use embassy_time::Duration;
 use ublox::{GpsFix, PacketRef, Parser};
 
-use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{GnssSample, PvtData, Timestamped};
 use crate::sensors::GnssId;
 use crate::signals;

@@ -9,7 +9,7 @@ use lsm6dso32::{
     Uninitialised,
 };
 
-use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{ImuData, ImuSample, Timestamped};
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::ImuId;

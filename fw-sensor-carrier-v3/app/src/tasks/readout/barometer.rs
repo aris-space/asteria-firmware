@@ -4,7 +4,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use ms5607::{Ms5607, Oversampling};
 
-use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{PressureData, PressureSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::BarometerId;
