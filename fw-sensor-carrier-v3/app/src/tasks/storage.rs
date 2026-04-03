@@ -16,7 +16,7 @@ use w25q256jv::LittlefsAdapter;
 use crate::resources::flash::{BoardFlash, FixedHighPin, FlashDevice};
 
 type Adapter = LittlefsAdapter<'static, FlashDevice, FixedHighPin, FixedHighPin, U256, U1>;
-type Fs = Filesystem<'static, Adapter>;
+pub(crate) type Fs = Filesystem<'static, Adapter>;
 
 pub static FS: RpcService<CriticalSectionRawMutex, Fs, 512> = RpcService::new();
 

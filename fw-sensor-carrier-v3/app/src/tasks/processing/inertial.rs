@@ -4,7 +4,7 @@ use nalgebra::{Matrix3, Vector3};
 
 use crate::measurements::{ImuData, ImuSample, Timestamped};
 use crate::params::calibration::{self, ImuCalib};
-use crate::params::mount;
+use crate::params::mount::{self, ImuMount};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
 use crate::tasks::storage;
@@ -15,8 +15,8 @@ struct ImuConfig {
 }
 
 impl ImuConfig {
-    fn new(id: ImuId, cal: &ImuCalib) -> Self {
-        let mount = *mount::imu_mount(id);
+    fn new(mount: &ImuMount, cal: &ImuCalib) -> Self {
+        let mount = mount.rotation_matrix();
         if cal.valid {
             Self {
                 full_rot: cal.fine_rot_matrix() * mount,
@@ -57,9 +57,32 @@ impl ImuConfig {
     }
 }
 
-async fn run(id: ImuId, cfg: &ImuConfig) -> ! {
+async fn run(id: ImuId) -> ! {
     let mut sub = signals::IMU_CHANNELS[id.index()].subscriber().unwrap();
+    let mut calib_updates = calibration::imu_cal(id).receiver().unwrap();
+    let mut mount_updates = mount::imu_mount(id).receiver().unwrap();
+
+    let mut mount = mount_updates.get().await;
+    let mut calib = calib_updates.get().await;
+    let mut cfg = ImuConfig::new(&mount, &calib);
+
     loop {
+        let mut changed = false;
+
+        if let Some(next_mount) = mount_updates.try_changed() {
+            mount = next_mount;
+            changed = true;
+        }
+
+        if let Some(next_calib) = calib_updates.try_changed() {
+            calib = next_calib;
+            changed = true;
+        }
+
+        if changed {
+            cfg = ImuConfig::new(&mount, &calib);
+        }
+
         let sample = sub.next_message_pure().await;
         signals::submit_inertial_sample(cfg.process(&sample));
     }
@@ -69,9 +92,6 @@ async fn run(id: ImuId, cfg: &ImuConfig) -> ! {
 pub async fn task() -> ! {
     storage::READY.wait().await;
 
-    let cfg0 = ImuConfig::new(IMU_0, &calibration::imu_cal(IMU_0).snapshot());
-    let cfg1 = ImuConfig::new(IMU_1, &calibration::imu_cal(IMU_1).snapshot());
-
-    join(run(IMU_0, &cfg0), run(IMU_1, &cfg1)).await;
+    join(run(IMU_0), run(IMU_1)).await;
     unreachable!("processing tasks should never end");
 }

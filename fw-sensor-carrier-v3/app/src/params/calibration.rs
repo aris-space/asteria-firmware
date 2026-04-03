@@ -1,8 +1,11 @@
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use super::Table;
+use super::{Config, RegistryEntry};
 use crate::sensors::{IMU_COUNT, ImuId};
+use crate::tasks::storage;
+
+const IMU_CAL_BYTES: usize = 128;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ImuCalib {
@@ -30,11 +33,32 @@ impl ImuCalib {
     }
 }
 
-pub static IMU_CAL: [Table<ImuCalib>; IMU_COUNT] = [
-    Table::new("imu_cal_0", ImuCalib::DEFAULT),
-    Table::new("imu_cal_1", ImuCalib::DEFAULT),
+pub static IMU_CAL: [Config<ImuCalib, IMU_CAL_BYTES>; IMU_COUNT] = [
+    Config::new("imu_cal_0", ImuCalib::DEFAULT),
+    Config::new("imu_cal_1", ImuCalib::DEFAULT),
 ];
 
-pub fn imu_cal(id: ImuId) -> &'static Table<ImuCalib> {
+fn load_imu_cal_0(fs: &storage::Fs) {
+    IMU_CAL[0].load_from_fs(fs);
+}
+
+fn save_imu_cal_0(fs: &storage::Fs) {
+    IMU_CAL[0].save_to_fs(fs);
+}
+
+fn load_imu_cal_1(fs: &storage::Fs) {
+    IMU_CAL[1].load_from_fs(fs);
+}
+
+fn save_imu_cal_1(fs: &storage::Fs) {
+    IMU_CAL[1].save_to_fs(fs);
+}
+
+pub static REGISTRY: [RegistryEntry; IMU_COUNT] = [
+    RegistryEntry::new(load_imu_cal_0, save_imu_cal_0),
+    RegistryEntry::new(load_imu_cal_1, save_imu_cal_1),
+];
+
+pub fn imu_cal(id: ImuId) -> &'static Config<ImuCalib, IMU_CAL_BYTES> {
     &IMU_CAL[id.index()]
 }
