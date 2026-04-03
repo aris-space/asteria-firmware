@@ -1,0 +1,72 @@
+[package]
+name = "fw-sensor-carrier-v3"
+version = "0.1.0"
+edition = "2024"
+authors = ["Louis Schell <louis.schell1@gmx.de>"]
+
+[features]
+default = ["storage"]
+storage = ["dep:w25q256jv", "dep:littlefs2", "dep:generic-array"]
+
+[dependencies]
+# cortex-m setup
+cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+
+# Embassy stuff
+embassy-stm32 = { version = "*", features = [
+    "stm32h723zg",
+    "single-bank",
+    "time-driver-any",
+    "memory-x",
+    "unstable-pac",
+    "exti",
+] }
+embassy-time = { version = "*", features = ["tick-hz-32_768"] }
+embassy-executor = { version = "*", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", ] }
+
+embassy-futures = "*"
+embassy-sync = "*"
+embassy-embedded-hal = "*"
+
+assign-resources = "0.5.0"
+static_cell = "2.1.1"
+
+# Sensor Drivers
+ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
+lsm6dso32 = { path = "../../crates/devices/lsm6dso32", features = ["defmt-03"] }
+lsm303agr = { version = "1.1.0", features = ["async"] }
+sht4x = { version = "0.2.0", features = ["embedded-hal-async", "defmt"] }
+ublox = { version = "0.4.5", default-features = false }
+
+# Flash Driver
+w25q256jv = { version = "0.1.1", features = ["defmt", "littlefs2"], optional = true }
+littlefs2 = { version = "0.6.1", default-features = false, optional = true }
+generic-array = { version = "0.14", optional = true }
+
+embassy-usb = "0.6"
+embedded-can = "0.4.1"
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+embedded-hal-bus = { version = "0.3.0", features = ["async"] }
+embedded-io-async = { version = "0.7.0", default-features = false, features = ["defmt"] }
+
+defmt = { version = "1.0.1" }
+defmt-brtt = { version = "0.1.1", default-features = false, features = ["async-await", "bbq", "rtt"] }
+
+nalgebra = { version = "0.33", default-features = false, features = ["libm"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
+postcard = { version = "1", default-features = false }
+
+panic-probe = { version = "1.0.0" }
+panic-reset = "0.1.1"
+heapless = "0.9.2"
+
+[build-dependencies]
+built = { version = "0.8", features = ["git2"] }
+
+[[bin]]
+name = "fw-sensor-carrier-v3"
+test = false
+doctest = false
+bench = false

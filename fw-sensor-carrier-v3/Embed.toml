@@ -1,0 +1,3 @@
+[default.general]
+chip = "STM32G473RCTx"
+connect_under_reset = true

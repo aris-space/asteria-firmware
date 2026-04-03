@@ -1,5 +1,5 @@
 # List of all workspaces
-workspaces := "fw-engine-board fw-sensor-carrier fw-power-board fw-communication-board fw-fuel-control-board fw-oxidizer-control-board fw-lox-valve-control-board fw-recovery-board fw-test-board crates tools"
+workspaces := "fw-engine-board fw-sensor-carrier fw-sensor-carrier-v3 fw-power-board fw-communication-board fw-fuel-control-board fw-oxidizer-control-board fw-lox-valve-control-board fw-recovery-board fw-test-board crates tools"
 # Workspaces to skip when running commands across all workspaces
 exclude_workspaces := "hermes-can"
 # Workspaces that can run tests

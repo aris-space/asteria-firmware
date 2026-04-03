@@ -1,0 +1,5 @@
+chip    := "STM32H723ZG"
+bin     := "fw-sensor-carrier-v3"
+use_probe_rs := "true"
+
+import '../just/firmware.just'
