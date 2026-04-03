@@ -24,8 +24,8 @@ pub fn is_available() -> bool {
 }
 
 #[allow(dead_code)]
-pub async fn save(key: &'static str, data: &[u8]) -> SaveStatus {
-    backend::save(key, data).await
+pub async fn save<const N: usize>(key: &'static str, data: [u8; N], len: usize) -> SaveStatus {
+    backend::save(key, data, len).await
 }
 
 #[cfg(feature = "storage")]
@@ -200,17 +200,14 @@ mod backend {
         }
     }
 
-    pub async fn save(key: &'static str, data: &[u8]) -> SaveStatus {
+    pub async fn save<const N: usize>(key: &'static str, data: [u8; N], len: usize) -> SaveStatus {
         if !super::is_available() {
             return SaveStatus::RuntimeOnly;
         }
 
-        let mut buf = [0u8; 512];
-        if data.len() > buf.len() {
+        if len > N {
             return SaveStatus::RuntimeOnly;
         }
-        let count = data.len();
-        buf[..count].copy_from_slice(data);
 
         FS.call(move |fs| {
             let Some(path) = config_path(key) else {
@@ -221,7 +218,7 @@ mod backend {
             match fs.open_file_with_options_and_then(
                 |options| options.create(true).truncate(true),
                 &path,
-                |file| file.write(&buf[..count]),
+                |file| file.write(&data[..len]),
             ) {
                 Ok(_) => SaveStatus::Persisted,
                 Err(_) => SaveStatus::RuntimeOnly,
@@ -289,7 +286,11 @@ mod backend {
     use super::*;
 
     #[allow(dead_code)]
-    pub async fn save(_key: &'static str, _data: &[u8]) -> SaveStatus {
+    pub async fn save<const N: usize>(
+        _key: &'static str,
+        _data: [u8; N],
+        _len: usize,
+    ) -> SaveStatus {
         SaveStatus::RuntimeOnly
     }
 
