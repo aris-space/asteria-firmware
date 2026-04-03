@@ -127,6 +127,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bbqueue"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3baa8859d1a4c7411039a75c0599a4640ef1c9a8fc811e4325b00e6cfe0a55"
+dependencies = [
+ "defmt 0.3.100",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -383,6 +392,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "defmt-brtt"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2f0ac3635d0c89d12b8101fcb44a7625f5f030a1c0491124b74467eb5a58a78"
+dependencies = [
+ "bbqueue",
+ "critical-section",
+ "defmt 0.3.100",
+]
+
+[[package]]
 name = "defmt-macros"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -402,16 +422,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
 dependencies = [
  "thiserror",
-]
-
-[[package]]
-name = "defmt-rtt"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93d5a25c99d89c40f5676bec8cefe0614f17f0f40e916f98e345dae941807f9e"
-dependencies = [
- "critical-section",
- "defmt 1.0.1",
 ]
 
 [[package]]
@@ -930,7 +940,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt 1.0.1",
- "defmt-rtt",
+ "defmt-brtt",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",

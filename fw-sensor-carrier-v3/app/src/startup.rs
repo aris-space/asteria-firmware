@@ -10,6 +10,8 @@ use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
     BAROMETER_0, BAROMETER_1, GNSS_0, GNSS_1, IMU_0, IMU_1, MAGNETOMETER_0, MAGNETOMETER_1,
 };
+use defmt_brtt::DefmtConsumer;
+
 use crate::resources::flash::BoardFlash;
 use crate::{resources, storage, tasks};
 
@@ -75,6 +77,7 @@ pub fn spawn_tasks(
     board: PreparedBoard,
     level_t_spawner: Spawner,
     level_0_spawner: SendSpawner,
+    defmt_consumer: DefmtConsumer,
 ) {
     // Blinky on interrupt executor for reliable timing
     level_0_spawner.must_spawn(tasks::blinky::task(board.services.yellow_led));
@@ -98,4 +101,5 @@ pub fn spawn_tasks(
     level_t_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1, gnss_delay));
 
     level_t_spawner.must_spawn(storage::task(board.flash));
+    level_t_spawner.must_spawn(tasks::logger::task(defmt_consumer));
 }

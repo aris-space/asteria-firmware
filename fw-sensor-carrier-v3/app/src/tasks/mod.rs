@@ -7,6 +7,7 @@
 use embassy_time::Duration;
 
 pub mod blinky;
+pub mod logger;
 pub mod readout;
 
 pub const MAX_CONSECUTIVE_ERRORS: u8 = 10;
