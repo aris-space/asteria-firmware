@@ -15,9 +15,6 @@ mod imp {
     use embassy_embedded_hal::flash::partition::Partition;
     use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
     use embassy_sync::mutex::Mutex;
-    use embedded_storage_async::nor_flash::{
-        ErrorType, NorFlash as AsyncNorFlash, ReadNorFlash as AsyncReadNorFlash,
-    };
     use heapless::String as HeaplessString;
     use sequential_storage::Error as SeqError;
     use sequential_storage::cache::NoCache;
@@ -43,54 +40,15 @@ mod imp {
     const STORAGE_KEY_CAPACITY: usize = 32;
     const SESSION_NEXT_ID_KEY: StorageKey = "session.next_id";
 
-    type SharedFlash = Mutex<ThreadModeRawMutex, SharedBoardFlash>;
-    type KvPartition = Partition<'static, ThreadModeRawMutex, SharedBoardFlash>;
-    type LogPartition = Partition<'static, ThreadModeRawMutex, SharedBoardFlash>;
+    type SharedFlash = Mutex<ThreadModeRawMutex, &'static mut BoardFlash>;
+    type KvPartition = Partition<'static, ThreadModeRawMutex, &'static mut BoardFlash>;
+    type LogPartition = Partition<'static, ThreadModeRawMutex, &'static mut BoardFlash>;
     type MapKey = HeaplessString<STORAGE_KEY_CAPACITY>;
     type KvMap = MapStorage<MapKey, KvPartition, NoCache>;
     type LogQueue = QueueStorage<LogPartition, NoCache>;
 
     static FLASH: StaticCell<SharedFlash> = StaticCell::new();
     static STATE: Mutex<CriticalSectionRawMutex, Option<StorageState>> = Mutex::new(None);
-
-    struct SharedBoardFlash {
-        flash: &'static mut BoardFlash,
-    }
-
-    impl SharedBoardFlash {
-        fn new(flash: &'static mut BoardFlash) -> Self {
-            Self { flash }
-        }
-    }
-
-    impl ErrorType for SharedBoardFlash {
-        type Error = <BoardFlash as ErrorType>::Error;
-    }
-
-    impl AsyncReadNorFlash for SharedBoardFlash {
-        const READ_SIZE: usize = <BoardFlash as AsyncReadNorFlash>::READ_SIZE;
-
-        async fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
-            self.flash.read(offset, bytes).await
-        }
-
-        fn capacity(&self) -> usize {
-            CAPACITY as usize
-        }
-    }
-
-    impl AsyncNorFlash for SharedBoardFlash {
-        const WRITE_SIZE: usize = <BoardFlash as AsyncNorFlash>::WRITE_SIZE;
-        const ERASE_SIZE: usize = <BoardFlash as AsyncNorFlash>::ERASE_SIZE;
-
-        async fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
-            self.flash.write(offset, bytes).await
-        }
-
-        async fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
-            self.flash.erase(from, to).await
-        }
-    }
 
     struct StorageState {
         kv: KvMap,
@@ -240,7 +198,7 @@ mod imp {
             return None;
         }
 
-        let shared_flash = FLASH.init(Mutex::new(SharedBoardFlash::new(flash)));
+        let shared_flash = FLASH.init(Mutex::new(flash));
         Some(StorageState::new(shared_flash))
     }
 
