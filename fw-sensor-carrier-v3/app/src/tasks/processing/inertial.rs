@@ -5,7 +5,6 @@ use nalgebra::{Matrix3, Vector3};
 use crate::measurements::{ImuData, ImuSample, Timestamped};
 use crate::params::calibration::{self, ImuCalib};
 use crate::params::mount::{self, ImuMount};
-use crate::params::{Config, ConfigSnapshot, ConfigSource};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
 use crate::storage;
@@ -58,25 +57,9 @@ impl ImuConfig {
     }
 }
 
-fn startup_value<T: Clone, const BYTES: usize, const WATCHERS: usize>(
-    config: &'static Config<T, BYTES, WATCHERS>,
-) -> T {
-    match config.snapshot() {
-        ConfigSnapshot {
-            source: ConfigSource::Persisted | ConfigSource::Runtime,
-            value: Some(value),
-        } => value,
-        ConfigSnapshot {
-            source: ConfigSource::Missing | ConfigSource::Invalid | ConfigSource::Unavailable,
-            ..
-        } => config.default_value(),
-        ConfigSnapshot { value: None, .. } => config.default_value(),
-    }
-}
-
 fn config_for(id: ImuId) -> ImuConfig {
-    let mount = startup_value(mount::imu_mount(id));
-    let calib = startup_value(calibration::imu_cal(id));
+    let mount = mount::imu_mount(id).value_or_default();
+    let calib = calibration::imu_cal(id).value_or_default();
     ImuConfig::new(mount, calib)
 }
 

@@ -1,11 +1,12 @@
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use super::Config;
+use super::{Config, load_all_configs};
 use crate::sensors::{IMU_COUNT, ImuId};
 use crate::storage::KeyStorage;
 
 const BYTES: usize = 128;
+type ImuCalParam = Config<ImuCalib, BYTES>;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ImuCalib {
@@ -14,25 +15,23 @@ pub struct ImuCalib {
     pub valid: bool,
 }
 
-fn default_imu_calib() -> ImuCalib {
-    ImuCalib {
-        gyr_bias: Vector3::zeros(),
-        fine_rot: Matrix3::identity(),
-        valid: false,
+impl Default for ImuCalib {
+    fn default() -> Self {
+        Self {
+            gyr_bias: Vector3::zeros(),
+            fine_rot: Matrix3::identity(),
+            valid: false,
+        }
     }
 }
 
-pub static IMU_CALS: [Config<ImuCalib, BYTES>; IMU_COUNT] = [
-    Config::new("imu_cal_0", default_imu_calib),
-    Config::new("imu_cal_1", default_imu_calib),
-];
+pub static IMU_CALS: [ImuCalParam; IMU_COUNT] =
+    [Config::new("imu_cal_0"), Config::new("imu_cal_1")];
 
 pub async fn load_all(backend: &mut impl KeyStorage) {
-    for config in &IMU_CALS {
-        config.load_from_backend(backend).await;
-    }
+    load_all_configs(backend, &IMU_CALS).await;
 }
 
-pub fn imu_cal(id: ImuId) -> &'static Config<ImuCalib, BYTES> {
+pub fn imu_cal(id: ImuId) -> &'static ImuCalParam {
     &IMU_CALS[id.index()]
 }

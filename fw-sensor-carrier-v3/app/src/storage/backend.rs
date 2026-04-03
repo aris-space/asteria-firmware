@@ -1,6 +1,7 @@
 use defmt_brtt::DefmtConsumer;
 
 use crate::resources::flash::BoardFlash;
+use crate::storage::{CONFIG_READY, UnavailableStorage};
 
 async fn discard_logs_forever(mut consumer: DefmtConsumer) -> ! {
     loop {
@@ -10,15 +11,26 @@ async fn discard_logs_forever(mut consumer: DefmtConsumer) -> ! {
     }
 }
 
+async fn load_in_memory_defaults() {
+    let mut unavailable = UnavailableStorage;
+    crate::params::load_all(&mut unavailable).await;
+}
+
+async fn run_with_defaults(consumer: DefmtConsumer, message: &'static str) -> ! {
+    load_in_memory_defaults().await;
+    CONFIG_READY.signal(());
+    defmt::warn!("{}", message);
+    discard_logs_forever(consumer).await
+}
+
 #[cfg(feature = "storage")]
-mod imp {
+mod with_storage {
     use embassy_embedded_hal::flash::partition::Partition;
-    use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
+    use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
     use embassy_sync::mutex::Mutex;
-    use heapless::String as HeaplessString;
     use sequential_storage::Error as SeqError;
     use sequential_storage::cache::NoCache;
-    use sequential_storage::map::{MapConfig, MapStorage};
+    use sequential_storage::map::{Key as SeqKey, MapConfig, MapStorage, SerializationError};
     use sequential_storage::queue::{QueueConfig, QueueStorage};
     use static_cell::StaticCell;
     use w25q256jv::{CAPACITY, SECTOR_SIZE};
@@ -28,14 +40,13 @@ mod imp {
     };
 
     use super::super::{
-        CONFIG_READY, KeyRead, KeyStorage, LogWriteStatus, SaveStatus, StorageKey, StorageResult,
-        StorageUnavailable, UnavailableStorage, is_available, set_available,
+        CONFIG_READY, KeyRead, KeyStorage, LogWriteStatus, STORAGE_KEY_CAPACITY, SaveStatus,
+        StorageKey, StorageResult, StorageUnavailable,
     };
-    use super::{BoardFlash, DefmtConsumer, discard_logs_forever};
+    use super::{BoardFlash, DefmtConsumer, run_with_defaults};
 
     const KV_BUFFER_SIZE: usize = 384;
-    const STORAGE_KEY_CAPACITY: usize = 32;
-    const SESSION_NEXT_ID_KEY: StorageKey = "session.next_id";
+    const SESSION_NEXT_ID_KEY: StorageKey = StorageKey::new("session.next_id");
 
     #[derive(Clone, Copy)]
     struct Region {
@@ -68,16 +79,55 @@ mod imp {
 
     type SharedFlash = Mutex<ThreadModeRawMutex, &'static mut BoardFlash>;
     type StoragePartition = Partition<'static, ThreadModeRawMutex, &'static mut BoardFlash>;
-    type MapKey = HeaplessString<STORAGE_KEY_CAPACITY>;
-    type KvMap = MapStorage<MapKey, StoragePartition, NoCache>;
+    type KvMap = MapStorage<StorageKey, StoragePartition, NoCache>;
     type LogQueue = QueueStorage<StoragePartition, NoCache>;
 
     static FLASH: StaticCell<SharedFlash> = StaticCell::new();
-    static STATE: Mutex<CriticalSectionRawMutex, Option<StorageState>> = Mutex::new(None);
 
-    async fn load_in_memory_defaults() {
-        let mut unavailable = UnavailableStorage;
-        crate::params::load_all(&mut unavailable).await;
+    impl SeqKey for StorageKey {
+        fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
+            let len = self.len as usize;
+            if buffer.len() < len + 2 {
+                return Err(SerializationError::BufferTooSmall);
+            }
+
+            buffer[..2].copy_from_slice(&(len as u16).to_le_bytes());
+            buffer[2..][..len].copy_from_slice(&self.bytes[..len]);
+            Ok(len + 2)
+        }
+
+        fn deserialize_from(buffer: &[u8]) -> Result<(Self, usize), SerializationError> {
+            let total_len = Self::get_len(buffer)?;
+            let len = total_len - 2;
+
+            if buffer.len() < total_len {
+                return Err(SerializationError::BufferTooSmall);
+            }
+
+            let mut bytes = [0; STORAGE_KEY_CAPACITY];
+            bytes[..len].copy_from_slice(&buffer[2..][..len]);
+
+            Ok((
+                Self {
+                    len: len as u8,
+                    bytes,
+                },
+                total_len,
+            ))
+        }
+
+        fn get_len(buffer: &[u8]) -> Result<usize, SerializationError> {
+            if buffer.len() < 2 {
+                return Err(SerializationError::BufferTooSmall);
+            }
+
+            let len = u16::from_le_bytes(buffer[..2].try_into().unwrap()) as usize;
+            if len > STORAGE_KEY_CAPACITY {
+                return Err(SerializationError::InvalidData);
+            }
+
+            Ok(len + 2)
+        }
     }
 
     fn partition(flash: &'static SharedFlash, region: Region) -> StoragePartition {
@@ -102,7 +152,6 @@ mod imp {
         }
 
         async fn load_u32(&mut self, key: StorageKey) -> Option<u32> {
-            let key = storage_key(key)?;
             self.store
                 .fetch_item::<u32>(&mut self.buffer, &key)
                 .await
@@ -110,7 +159,6 @@ mod imp {
         }
 
         async fn store_u32(&mut self, key: StorageKey, value: u32) -> StorageResult {
-            let key = storage_key(key).ok_or(StorageUnavailable)?;
             self.store
                 .store_item(&mut self.buffer, &key, &value)
                 .await
@@ -118,10 +166,6 @@ mod imp {
         }
 
         async fn read_key(&mut self, key: StorageKey, out: &mut [u8]) -> KeyRead {
-            let Some(key) = storage_key(key) else {
-                return KeyRead::Unavailable;
-            };
-
             match self.store.fetch_item::<&[u8]>(&mut self.buffer, &key).await {
                 Ok(Some(value)) if value.len() <= out.len() => {
                     out[..value.len()].copy_from_slice(value);
@@ -134,7 +178,6 @@ mod imp {
         }
 
         async fn write_key(&mut self, key: StorageKey, data: &[u8]) -> StorageResult {
-            let key = storage_key(key).ok_or(StorageUnavailable)?;
             self.store
                 .store_item(&mut self.buffer, &key, &data)
                 .await
@@ -145,6 +188,13 @@ mod imp {
     impl KeyStorage for KvState {
         async fn read_key(&mut self, key: StorageKey, out: &mut [u8]) -> KeyRead {
             KvState::read_key(self, key, out).await
+        }
+
+        async fn write_key(&mut self, key: StorageKey, data: &[u8]) -> SaveStatus {
+            KvState::write_key(self, key, data)
+                .await
+                .map(|_| SaveStatus::Persisted)
+                .unwrap_or(SaveStatus::RuntimeOnly)
         }
     }
 
@@ -246,12 +296,6 @@ mod imp {
         }
     }
 
-    fn storage_key(key: StorageKey) -> Option<MapKey> {
-        let mut storage_key = MapKey::new();
-        storage_key.push_str(key).ok()?;
-        Some(storage_key)
-    }
-
     async fn init_state(flash: &'static mut BoardFlash) -> Option<StorageState> {
         if !FlashLayout::is_valid() {
             return None;
@@ -261,58 +305,31 @@ mod imp {
         Some(StorageState::new(shared_flash))
     }
 
-    pub(crate) async fn persist_key<const N: usize>(
-        key: StorageKey,
-        data: [u8; N],
-        len: usize,
-    ) -> SaveStatus {
-        if !is_available() || len > N {
-            return SaveStatus::RuntimeOnly;
-        }
-
-        let mut state = STATE.lock().await;
-        let Some(state) = state.as_mut() else {
-            return SaveStatus::RuntimeOnly;
-        };
-
-        state
-            .kv
-            .write_key(key, &data[..len])
-            .await
-            .map(|_| SaveStatus::Persisted)
-            .unwrap_or(SaveStatus::RuntimeOnly)
-    }
-
     pub(crate) async fn run(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -> ! {
         let Some(mut state) = init_state(flash).await else {
-            defmt::warn!("storage: sequential regions invalid, continuing with in-memory defaults");
-            load_in_memory_defaults().await;
-            CONFIG_READY.signal(());
-            discard_logs_forever(consumer).await
+            run_with_defaults(
+                consumer,
+                "storage: sequential regions invalid, continuing with in-memory defaults",
+            )
+            .await
         };
 
         crate::params::load_all(&mut state.kv).await;
 
         match state.begin_session().await {
             LogWriteStatus::Stored => {
-                set_available(true);
                 defmt::info!("storage: sequential backend initialized");
             }
             LogWriteStatus::Full => {
-                set_available(true);
                 defmt::warn!("storage: log region full at startup, continuing without new logs");
             }
             LogWriteStatus::Unavailable => {
-                defmt::warn!("storage: unavailable, continuing with in-memory defaults");
-                load_in_memory_defaults().await;
-                CONFIG_READY.signal(());
-                discard_logs_forever(consumer).await
+                run_with_defaults(
+                    consumer,
+                    "storage: unavailable, continuing with in-memory defaults",
+                )
+                .await
             }
-        }
-
-        {
-            let mut slot = STATE.lock().await;
-            *slot = Some(state);
         }
 
         CONFIG_READY.signal(());
@@ -324,15 +341,12 @@ mod imp {
 
             if len > 0 {
                 let data = grant.buf();
-                let mut state = STATE.lock().await;
-                if let Some(state) = state.as_mut() {
-                    for chunk in data.chunks(DEFMT_CHUNK_SIZE) {
-                        if !matches!(
-                            state.log.append_defmt_chunk(chunk).await,
-                            LogWriteStatus::Stored
-                        ) {
-                            break;
-                        }
+                for chunk in data.chunks(DEFMT_CHUNK_SIZE) {
+                    if !matches!(
+                        state.log.append_defmt_chunk(chunk).await,
+                        LogWriteStatus::Stored
+                    ) {
+                        break;
                     }
                 }
             }
@@ -343,29 +357,15 @@ mod imp {
 }
 
 #[cfg(not(feature = "storage"))]
-mod imp {
-    use super::{BoardFlash, DefmtConsumer, discard_logs_forever};
-    use crate::storage::{CONFIG_READY, SaveStatus, StorageKey, UnavailableStorage};
-
-    async fn load_in_memory_defaults() {
-        let mut unavailable = UnavailableStorage;
-        crate::params::load_all(&mut unavailable).await;
-    }
-
-    pub(crate) async fn persist_key<const N: usize>(
-        _key: StorageKey,
-        _data: [u8; N],
-        _len: usize,
-    ) -> SaveStatus {
-        SaveStatus::RuntimeOnly
-    }
+mod without_storage {
+    use super::{BoardFlash, DefmtConsumer, run_with_defaults};
 
     pub(crate) async fn run(_flash: &'static mut BoardFlash, consumer: DefmtConsumer) -> ! {
-        load_in_memory_defaults().await;
-        CONFIG_READY.signal(());
-        defmt::info!("storage: disabled, using in-memory defaults");
-        discard_logs_forever(consumer).await
+        run_with_defaults(consumer, "storage: disabled, using in-memory defaults").await
     }
 }
 
-pub(crate) use imp::{persist_key, run};
+#[cfg(feature = "storage")]
+pub(crate) use with_storage::run;
+#[cfg(not(feature = "storage"))]
+pub(crate) use without_storage::run;
