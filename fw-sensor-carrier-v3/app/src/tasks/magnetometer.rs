@@ -106,9 +106,9 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                         sensor_id: self.id,
                         data: Timestamped::now_with_delay(
                             MagData {
-                                x: (field.x_raw() as i16).wrapping_neg(),
-                                y: (field.y_raw() as i16).wrapping_neg(),
-                                z: (field.z_raw() as i16).wrapping_neg(),
+                                x: field.x_raw() as i16,
+                                y: field.y_raw() as i16,
+                                z: field.z_raw() as i16,
                             },
                             self.delay,
                         ),

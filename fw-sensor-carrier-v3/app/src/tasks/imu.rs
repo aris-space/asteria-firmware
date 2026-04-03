@@ -175,11 +175,11 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 };
 
                 let accel = Acceleration::from_raw(
-                    AccelerationRaw { x: -acc.x(), y: acc.y(), z: -acc.z() },
+                    AccelerationRaw { x: acc.x(), y: acc.y(), z: acc.z() },
                     self.sensor.accel_full_scale(),
                 );
                 let gyro = AngularRate::from_raw(
-                    AngularRateRaw { x: -gyr.x(), y: gyr.y(), z: -gyr.z() },
+                    AngularRateRaw { x: gyr.x(), y: gyr.y(), z: gyr.z() },
                     self.sensor.gyro_full_scale(),
                 );
 
