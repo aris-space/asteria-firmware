@@ -10,11 +10,13 @@ use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
     BAROMETER_0, BAROMETER_1, GNSS_0, GNSS_1, IMU_0, IMU_1, MAGNETOMETER_0, MAGNETOMETER_1,
 };
-use crate::{resources, tasks};
+use crate::resources::flash::BoardFlash;
+use crate::{resources, storage, tasks};
 
 pub struct PreparedBoard {
     pub services: ServiceResources,
     pub sensors: SensorResources,
+    pub flash: &'static mut BoardFlash,
 }
 
 pub struct ServiceResources {
@@ -49,7 +51,10 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let bus1 = resources.bus1.setup();
     let bus2 = resources.bus2.setup();
 
+    let flash = resources.flash.setup();
+
     PreparedBoard {
+        flash,
         services: ServiceResources {
             green_led,
             yellow_led,
@@ -91,4 +96,6 @@ pub fn spawn_tasks(
     let gnss_delay = Duration::from_millis(100); // TODO: calibrate
     level_t_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0, gnss_delay));
     level_t_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1, gnss_delay));
+
+    level_t_spawner.must_spawn(storage::task(board.flash));
 }

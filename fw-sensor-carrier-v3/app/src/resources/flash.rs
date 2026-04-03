@@ -11,7 +11,7 @@ use w25q256jv::W25q256jv;
 use super::Flash;
 
 type FlashSpi = Spi<'static, Blocking, SpiMaster>;
-type FlashDevice = ExclusiveDevice<FlashSpi, Output<'static>, Delay>;
+pub type FlashDevice = ExclusiveDevice<FlashSpi, Output<'static>, Delay>;
 pub type BoardFlash = W25q256jv<FlashDevice, FixedHighPin, FixedHighPin>;
 
 static BOARD_FLASH: StaticCell<BoardFlash> = StaticCell::new();

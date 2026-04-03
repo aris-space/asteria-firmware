@@ -12,6 +12,7 @@ mod resources;
 mod sensors;
 mod signals;
 mod startup;
+mod storage;
 mod tasks;
 
 mod clocks {
