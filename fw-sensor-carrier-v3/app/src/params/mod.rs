@@ -19,6 +19,7 @@ pub enum ConfigSource {
     Unavailable,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ConfigSnapshot<T> {
     pub source: ConfigSource,

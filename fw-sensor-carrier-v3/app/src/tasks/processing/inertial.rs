@@ -5,7 +5,6 @@ use nalgebra::{Matrix3, Vector3};
 use crate::measurements::{ImuData, ImuSample, Timestamped};
 use crate::params::calibration::{self, ImuCalib};
 use crate::params::mount::{self, ImuMount};
-use crate::params::{ConfigSnapshot, ConfigSource};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
 use crate::tasks::storage;
@@ -58,53 +57,16 @@ impl ImuConfig {
     }
 }
 
-fn resolve_or_default<T: Clone>(snapshot: &ConfigSnapshot<T>, default: &T) -> T {
-    match snapshot.source {
-        ConfigSource::Persisted | ConfigSource::Runtime => snapshot
-            .value
-            .clone()
-            .expect("persisted/runtime configs must contain a value"),
-        ConfigSource::Missing | ConfigSource::Invalid | ConfigSource::Unavailable => {
-            default.clone()
-        }
-    }
+fn config_for(id: ImuId) -> ImuConfig {
+    let mount = mount::imu_mount(id).effective_or_default();
+    let calib = calibration::imu_cal(id).effective_or_default();
+    ImuConfig::new(&mount, &calib)
 }
 
-async fn run(id: ImuId) -> ! {
+async fn run(id: ImuId, cfg: &ImuConfig) -> ! {
     let mut sub = signals::IMU_CHANNELS[id.index()].subscriber().unwrap();
-    let mut calib_updates = calibration::imu_cal(id).receiver().unwrap();
-    let mut mount_updates = mount::imu_mount(id).receiver().unwrap();
-
-    let mount_config = mount::imu_mount(id);
-    let calib_config = calibration::imu_cal(id);
-
-    let mut mount_snapshot = mount_updates.get().await;
-    let mut calib_snapshot = calib_updates.get().await;
-    let mut cfg = ImuConfig::new(
-        &resolve_or_default(&mount_snapshot, &mount_config.default_value()),
-        &resolve_or_default(&calib_snapshot, &calib_config.default_value()),
-    );
 
     loop {
-        let mut changed = false;
-
-        if let Some(next_mount) = mount_updates.try_changed() {
-            mount_snapshot = next_mount;
-            changed = true;
-        }
-
-        if let Some(next_calib) = calib_updates.try_changed() {
-            calib_snapshot = next_calib;
-            changed = true;
-        }
-
-        if changed {
-            cfg = ImuConfig::new(
-                &resolve_or_default(&mount_snapshot, &mount_config.default_value()),
-                &resolve_or_default(&calib_snapshot, &calib_config.default_value()),
-            );
-        }
-
         let sample = sub.next_message_pure().await;
         signals::submit_inertial_sample(cfg.process(&sample));
     }
@@ -114,6 +76,9 @@ async fn run(id: ImuId) -> ! {
 pub async fn task() -> ! {
     storage::CONFIG_READY.wait().await;
 
-    join(run(IMU_0), run(IMU_1)).await;
+    let cfg0 = config_for(IMU_0);
+    let cfg1 = config_for(IMU_1);
+
+    join(run(IMU_0, &cfg0), run(IMU_1, &cfg1)).await;
     unreachable!("processing tasks should never end");
 }
