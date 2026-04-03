@@ -9,11 +9,11 @@ use lsm6dso32::{
     Uninitialised,
 };
 
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{ImuData, ImuSample, Timestamped};
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::ImuId;
 use crate::signals;
+use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
 const FIFO_BUFFER_SIZE: usize = 512;
 const FIFO_WATERMARK: u16 = 26;
@@ -128,7 +128,10 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 Ok(level) => level,
                 Err(_) => {
                     errors = errors.saturating_add(1);
-                    warn!("imu: fifo level read error ({}/{})", errors, MAX_CONSECUTIVE_ERRORS);
+                    warn!(
+                        "imu: fifo level read error ({}/{})",
+                        errors, MAX_CONSECUTIVE_ERRORS
+                    );
                     if errors >= MAX_CONSECUTIVE_ERRORS {
                         break;
                     }
@@ -155,7 +158,10 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 .is_err()
             {
                 errors = errors.saturating_add(1);
-                warn!("imu: fifo read error ({}/{})", errors, MAX_CONSECUTIVE_ERRORS);
+                warn!(
+                    "imu: fifo read error ({}/{})",
+                    errors, MAX_CONSECUTIVE_ERRORS
+                );
                 if errors >= MAX_CONSECUTIVE_ERRORS {
                     break;
                 }
@@ -175,18 +181,26 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 };
 
                 let accel = Acceleration::from_raw(
-                    AccelerationRaw { x: acc.x(), y: acc.y(), z: acc.z() },
+                    AccelerationRaw {
+                        x: acc.x(),
+                        y: acc.y(),
+                        z: acc.z(),
+                    },
                     self.sensor.accel_full_scale(),
                 );
                 let gyro = AngularRate::from_raw(
-                    AngularRateRaw { x: gyr.x(), y: gyr.y(), z: gyr.z() },
+                    AngularRateRaw {
+                        x: gyr.x(),
+                        y: gyr.y(),
+                        z: gyr.z(),
+                    },
                     self.sensor.gyro_full_scale(),
                 );
 
                 let ts = this_data_start + Duration::from_micros(avg_dt_us * i as u64);
                 let _ = samples.push(ImuSample {
                     sensor_id: self.id,
-                    data: Timestamped { ts, value: ImuData { accel, gyro } },
+                    data: Timestamped::at(ts, ImuData { accel, gyro }),
                 });
             }
 

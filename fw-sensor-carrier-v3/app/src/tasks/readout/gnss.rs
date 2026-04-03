@@ -4,10 +4,10 @@ use embassy_stm32::usart::UartRx;
 use embassy_time::Duration;
 use ublox::{GpsFix, PacketRef, Parser};
 
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{GnssSample, PvtData, Timestamped};
 use crate::sensors::GnssId;
 use crate::signals;
+use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
 struct Inactive<'a, RX> {
     rx: RX,
@@ -23,7 +23,7 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
         let mut recv_buf = [0u8; 64];
 
         loop {
-            if consecutive_errors > MAX_CONSECUTIVE_ERRORS {
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                 self.attempt = self.attempt.saturating_add(1);
                 warn!("gnss: too many parse errors (attempt {})", self.attempt);
                 consecutive_errors = 0;
@@ -34,7 +34,7 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                 Ok(0) => continue,
                 Ok(n) => n,
                 Err(_) => {
-                    consecutive_errors += 1;
+                    consecutive_errors = consecutive_errors.saturating_add(1);
                     continue;
                 }
             };
@@ -62,7 +62,7 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                             consecutive_errors = 0;
                         }
                         Err(_) => {
-                            consecutive_errors += 1;
+                            consecutive_errors = consecutive_errors.saturating_add(1);
                         }
                     }
                 }
@@ -117,8 +117,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                             heading_accuracy_estimate: pvt
                                                 .heading_accuracy_estimate()
                                                 as f32,
-                                            heading_of_vehicle_deg: pvt
-                                                .heading_of_vehicle_degrees()
+                                            heading_of_vehicle_deg: pvt.heading_of_vehicle_degrees()
                                                 as f32,
                                             vel_north: pvt.vel_north() as f32,
                                             vel_east: pvt.vel_east() as f32,
@@ -140,13 +139,13 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                             }
                             Ok(_) => {}
                             Err(_) => {
-                                self.errors += 1;
+                                self.errors = self.errors.saturating_add(1);
                             }
                         }
                     }
                 }
                 Err(_) => {
-                    self.errors += 1;
+                    self.errors = self.errors.saturating_add(1);
                 }
                 _ => {}
             }

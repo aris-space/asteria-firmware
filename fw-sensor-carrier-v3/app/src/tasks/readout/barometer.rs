@@ -4,11 +4,11 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use ms5607::{Ms5607, Oversampling};
 
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{PressureData, PressureSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::BarometerId;
 use crate::signals;
+use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(25); // ~40 Hz
 
@@ -73,7 +73,10 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                 }
                 Err(_) => {
                     errors = errors.saturating_add(1);
-                    warn!("barometer: read error ({}/{})", errors, MAX_CONSECUTIVE_ERRORS);
+                    warn!(
+                        "barometer: read error ({}/{})",
+                        errors, MAX_CONSECUTIVE_ERRORS
+                    );
                     if errors >= MAX_CONSECUTIVE_ERRORS {
                         break;
                     }

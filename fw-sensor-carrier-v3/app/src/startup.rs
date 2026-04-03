@@ -1,9 +1,9 @@
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::exti::ExtiInput;
-use embassy_time::Duration;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
+use embassy_time::Duration;
 
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
@@ -16,12 +16,18 @@ use crate::resources::flash::BoardFlash;
 
 use crate::{resources, tasks};
 
+const BAROMETER_DELAY: Duration = Duration::from_millis(20); // TODO: calibrate
+const MAGNETOMETER_DELAY: Duration = Duration::from_millis(0); // TODO: calibrate
+const GNSS_DELAY: Duration = Duration::from_millis(100); // TODO: calibrate
+
+#[allow(dead_code)]
 pub struct PreparedBoard {
     pub services: ServiceResources,
     pub sensors: SensorResources,
     pub flash: &'static mut BoardFlash,
 }
 
+#[allow(dead_code)]
 pub struct ServiceResources {
     pub green_led: Output<'static>,
     pub yellow_led: Output<'static>,
@@ -76,7 +82,7 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
 
 pub fn spawn_tasks(
     board: PreparedBoard,
-    level_t_spawner: Spawner,
+    thread_spawner: Spawner,
     level_0_spawner: SendSpawner,
     defmt_consumer: DefmtConsumer,
 ) {
@@ -87,20 +93,41 @@ pub fn spawn_tasks(
     level_0_spawner.must_spawn(tasks::readout::imu::task(imu1_spi, imu1_int1, IMU_0));
     level_0_spawner.must_spawn(tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1));
 
-    let baro_delay = Duration::from_millis(20); // TODO: calibrate
-    level_0_spawner.must_spawn(tasks::readout::barometer::task(board.sensors.bus1, BAROMETER_0, baro_delay));
-    level_0_spawner.must_spawn(tasks::readout::barometer::task(board.sensors.bus2, BAROMETER_1, baro_delay));
+    level_0_spawner.must_spawn(tasks::readout::barometer::task(
+        board.sensors.bus1,
+        BAROMETER_0,
+        BAROMETER_DELAY,
+    ));
+    level_0_spawner.must_spawn(tasks::readout::barometer::task(
+        board.sensors.bus2,
+        BAROMETER_1,
+        BAROMETER_DELAY,
+    ));
 
-    let mag_delay = Duration::from_millis(0); // TODO: calibrate
-    level_0_spawner.must_spawn(tasks::readout::magnetometer::task(board.sensors.bus1, MAGNETOMETER_0, mag_delay));
-    level_0_spawner.must_spawn(tasks::readout::magnetometer::task(board.sensors.bus2, MAGNETOMETER_1, mag_delay));
+    level_0_spawner.must_spawn(tasks::readout::magnetometer::task(
+        board.sensors.bus1,
+        MAGNETOMETER_0,
+        MAGNETOMETER_DELAY,
+    ));
+    level_0_spawner.must_spawn(tasks::readout::magnetometer::task(
+        board.sensors.bus2,
+        MAGNETOMETER_1,
+        MAGNETOMETER_DELAY,
+    ));
 
-    let gnss_delay = Duration::from_millis(100); // TODO: calibrate
-    level_0_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0, gnss_delay));
-    level_0_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1, gnss_delay));
+    level_0_spawner.must_spawn(tasks::readout::gnss::task(
+        board.sensors.gps1_rx,
+        GNSS_0,
+        GNSS_DELAY,
+    ));
+    level_0_spawner.must_spawn(tasks::readout::gnss::task(
+        board.sensors.gps2_rx,
+        GNSS_1,
+        GNSS_DELAY,
+    ));
 
     level_0_spawner.must_spawn(tasks::processing::inertial::task());
 
     // Storage runs on thread-mode — blocking flash I/O won't starve sensor readouts
-    level_t_spawner.must_spawn(tasks::storage::task(board.flash, defmt_consumer));
+    thread_spawner.must_spawn(tasks::storage::task(board.flash, defmt_consumer));
 }

@@ -49,10 +49,10 @@ fn prepare_session(fs: &Filesystem<'_, Adapter>) -> Option<u32> {
             let entry = entry?;
             let name = entry.file_name().as_str_ref_with_trailing_nul();
             let name = name.trim_end_matches('\0');
-            if let Some(suffix) = name.strip_prefix("log_") {
-                if let Ok(n) = suffix.parse::<u32>() {
-                    max_index = Some(max_index.map_or(n, |m| m.max(n)));
-                }
+            if let Some(suffix) = name.strip_prefix("log_")
+                && let Ok(n) = suffix.parse::<u32>()
+            {
+                max_index = Some(max_index.map_or(n, |m| m.max(n)));
             }
         }
         Ok(())
@@ -62,34 +62,32 @@ fn prepare_session(fs: &Filesystem<'_, Adapter>) -> Option<u32> {
     let mut dir_name = heapless::String::<32>::new();
     write!(dir_name, "/log_{}", next).ok()?;
 
-    fs.create_dir(&PathBuf::try_from(dir_name.as_bytes()).ok()?).ok()?;
+    fs.create_dir(&PathBuf::try_from(dir_name.as_bytes()).ok()?)
+        .ok()?;
 
     let mut info_path = heapless::String::<64>::new();
     write!(info_path, "{}/build_info.txt", dir_name.as_str()).ok()?;
 
-    let _ = fs.create_file_and_then(
-        &PathBuf::try_from(info_path.as_bytes()).ok()?,
-        |file| {
-            use crate::built;
-            let mut buf = heapless::String::<512>::new();
-            let _ = write!(
-                buf,
-                "pkg={}\nprofile={}\ntarget={}\ngit={}\ndirty={}\nfeatures={}\n",
-                built::PKG_NAME,
-                built::PROFILE,
-                built::TARGET,
-                built::GIT_COMMIT_HASH_SHORT.unwrap_or("none"),
-                match built::GIT_DIRTY {
-                    Some(true) => "true",
-                    Some(false) => "false",
-                    None => "none",
-                },
-                built::FEATURES_LOWERCASE_STR,
-            );
-            file.write(buf.as_bytes())?;
-            Ok(())
-        },
-    );
+    let _ = fs.create_file_and_then(&PathBuf::try_from(info_path.as_bytes()).ok()?, |file| {
+        use crate::built;
+        let mut buf = heapless::String::<512>::new();
+        let _ = write!(
+            buf,
+            "pkg={}\nprofile={}\ntarget={}\ngit={}\ndirty={}\nfeatures={}\n",
+            built::PKG_NAME,
+            built::PROFILE,
+            built::TARGET,
+            built::GIT_COMMIT_HASH_SHORT.unwrap_or("none"),
+            match built::GIT_DIRTY {
+                Some(true) => "true",
+                Some(false) => "false",
+                None => "none",
+            },
+            built::FEATURES_LOWERCASE_STR,
+        );
+        file.write(buf.as_bytes())?;
+        Ok(())
+    });
 
     info!("storage: session {}", dir_name.as_str());
     Some(next)
@@ -104,7 +102,10 @@ struct DefmtStaging {
 
 impl DefmtStaging {
     fn new() -> Self {
-        Self { buf: [0u8; STAGING_SIZE], len: 0 }
+        Self {
+            buf: [0u8; STAGING_SIZE],
+            len: 0,
+        }
     }
 
     fn stage(&mut self, fs: &Fs, path: &PathBuf, data: &[u8]) {
@@ -123,7 +124,7 @@ impl DefmtStaging {
         let _ = fs.open_file_with_options_and_then(
             |o| o.append(true).create(true),
             path,
-            |file| Ok(file.write(&self.buf[..self.len])?),
+            |file| file.write(&self.buf[..self.len]),
         );
         self.len = 0;
     }
@@ -154,7 +155,7 @@ pub async fn task(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -
     let Ok(mut fs) = Filesystem::mount(alloc, adapter) else {
         defmt::error!("storage: mount failed after retries, running without filesystem");
         loop {
-            let mut grant = consumer.wait_for_log().await;
+            let grant = consumer.wait_for_log().await;
             let len = grant.buf().len();
             grant.release(len);
         }
@@ -170,9 +171,8 @@ pub async fn task(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -
     READY.signal(());
     info!("storage: ready");
 
-    let defmt_path = workdir_path("defmt.bin").unwrap_or_else(|| {
-        PathBuf::try_from(b"/defmt.bin".as_slice()).unwrap()
-    });
+    let defmt_path = workdir_path("defmt.bin")
+        .unwrap_or_else(|| PathBuf::try_from(b"/defmt.bin".as_slice()).unwrap());
 
     let mut staging = DefmtStaging::new();
 

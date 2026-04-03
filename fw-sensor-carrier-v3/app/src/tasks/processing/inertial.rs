@@ -38,9 +38,9 @@ impl ImuConfig {
 
         ImuSample {
             sensor_id: sample.sensor_id,
-            data: Timestamped {
-                ts: sample.data.ts,
-                value: ImuData {
+            data: Timestamped::at(
+                sample.data.ts,
+                ImuData {
                     accel: Acceleration {
                         x: accel.x,
                         y: accel.y,
@@ -52,7 +52,7 @@ impl ImuConfig {
                         z: gyro.z,
                     },
                 },
-            },
+            ),
         }
     }
 }

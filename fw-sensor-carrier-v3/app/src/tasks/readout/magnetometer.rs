@@ -4,11 +4,11 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{MagData, MagSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::MagnetometerId;
 use crate::signals;
+use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(100); // 10 Hz, matches MagOutputDataRate::Hz10
 
@@ -62,9 +62,7 @@ struct Inactive<I2C> {
 }
 
 impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
-    async fn run(
-        mut self,
-    ) -> Active<I2C> {
+    async fn run(mut self) -> Active<I2C> {
         loop {
             match initialise(self.i2c).await {
                 Ok(sensor) => {
@@ -114,11 +112,19 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                         ),
                     };
                     signals::submit_mag_sample(sample);
-                    trace!("mag: x={} y={} z={}", field.x_raw(), field.y_raw(), field.z_raw());
+                    trace!(
+                        "mag: x={} y={} z={}",
+                        field.x_raw(),
+                        field.y_raw(),
+                        field.z_raw()
+                    );
                 }
                 Err(_) => {
                     errors = errors.saturating_add(1);
-                    warn!("magnetometer: read error ({}/{})", errors, MAX_CONSECUTIVE_ERRORS);
+                    warn!(
+                        "magnetometer: read error ({}/{})",
+                        errors, MAX_CONSECUTIVE_ERRORS
+                    );
                     if errors >= MAX_CONSECUTIVE_ERRORS {
                         break;
                     }

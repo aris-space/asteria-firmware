@@ -30,9 +30,13 @@ impl Bus1 {
         });
 
         let i2c = i2c::I2c::new(
-            self.periph, self.scl, self.sda,
-            self.tx_dma, self.rx_dma,
-            Bus1Irqs, config(),
+            self.periph,
+            self.scl,
+            self.sda,
+            self.tx_dma,
+            self.rx_dma,
+            Bus1Irqs,
+            config(),
         );
         SHARED_I2C_BUS_1.init(Mutex::new(i2c))
     }
@@ -48,9 +52,13 @@ impl Bus2 {
         });
 
         let i2c = i2c::I2c::new(
-            self.periph, self.scl, self.sda,
-            self.tx_dma, self.rx_dma,
-            Bus2Irqs, config(),
+            self.periph,
+            self.scl,
+            self.sda,
+            self.tx_dma,
+            self.rx_dma,
+            Bus2Irqs,
+            config(),
         );
         SHARED_I2C_BUS_2.init(Mutex::new(i2c))
     }

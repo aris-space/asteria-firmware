@@ -28,9 +28,14 @@ impl Imu1 {
         });
 
         let spi = Spi::new(
-            self.periph, self.sck, self.mosi, self.miso,
-            self.tx_dma, self.rx_dma,
-            Imu1Irqs, config(),
+            self.periph,
+            self.sck,
+            self.mosi,
+            self.miso,
+            self.tx_dma,
+            self.rx_dma,
+            Imu1Irqs,
+            config(),
         );
         let cs = Output::new(self.cs, Level::High, Speed::VeryHigh);
         let int1 = ExtiInput::new(self.int1, self.exti, Pull::None, Imu1Irqs);
@@ -50,9 +55,14 @@ impl Imu2 {
         });
 
         let spi = Spi::new(
-            self.periph, self.sck, self.mosi, self.miso,
-            self.tx_dma, self.rx_dma,
-            Imu2Irqs, config(),
+            self.periph,
+            self.sck,
+            self.mosi,
+            self.miso,
+            self.tx_dma,
+            self.rx_dma,
+            Imu2Irqs,
+            config(),
         );
         let cs = Output::new(self.cs, Level::High, Speed::VeryHigh);
         let int1 = ExtiInput::new(self.int1, self.exti, Pull::None, Imu2Irqs);

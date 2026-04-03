@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use embassy_time::{Duration, Instant};
 use lsm6dso32::types::{Acceleration, AngularRate};
 
@@ -12,10 +14,6 @@ pub struct Timestamped<T> {
 impl<T> Timestamped<T> {
     pub fn new(ts: Instant, value: T) -> Self {
         Self { ts, value }
-    }
-
-    pub fn now(value: T) -> Self {
-        Self::new(Instant::now(), value)
     }
 
     pub fn now_with_delay(value: T, delay: Duration) -> Self {

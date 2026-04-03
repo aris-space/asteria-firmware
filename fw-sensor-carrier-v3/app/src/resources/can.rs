@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use embassy_stm32::can::Can;
 use embassy_stm32::{bind_interrupts, peripherals};
 

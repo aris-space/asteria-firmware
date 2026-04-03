@@ -15,22 +15,27 @@ macro_rules! define_signal {
         cap = $cap:expr, subs = $subs:expr, pubs = $pubs:expr,
         count = $count:expr, watchers = $watchers:expr
     ) => {
-        pub static $channels: [PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, $pubs>; $count] =
-            [const { PubSubChannel::new() }; $count];
+        pub static $channels: [PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, $pubs>;
+            $count] = [const { PubSubChannel::new() }; $count];
 
         pub static $watches: [Watch<CriticalSectionRawMutex, $T, $watchers>; $count] =
             [const { Watch::new() }; $count];
 
+        #[allow(dead_code)]
         pub fn $watch_getter(id: $id_ty) -> &'static Watch<CriticalSectionRawMutex, $T, $watchers> {
             &$watches[id.index()]
         }
 
+        #[allow(dead_code)]
         pub fn $submit(sample: $T) {
             let idx = sample.sensor_id.index();
-            $channels[idx].immediate_publisher().publish_immediate(sample);
+            $channels[idx]
+                .immediate_publisher()
+                .publish_immediate(sample);
             $watches[idx].sender().send(sample);
         }
 
+        #[allow(dead_code)]
         pub fn $submit_batch(samples: &[$T]) {
             let Some(last) = samples.last() else { return };
             let idx = last.sensor_id.index();

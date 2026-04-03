@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use embassy_stm32::peripherals::USB_OTG_HS;
 use embassy_stm32::{bind_interrupts, usb as embassy_usb};
 use static_cell::StaticCell;

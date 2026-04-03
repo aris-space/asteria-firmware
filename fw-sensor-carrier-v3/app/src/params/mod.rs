@@ -34,6 +34,12 @@ impl<T: Clone> Table<T> {
 }
 
 impl<T: Clone + Serialize + for<'de> Deserialize<'de>> Table<T> {
+    fn restore_from_bytes(&self, bytes: &[u8]) {
+        if let Ok(data) = postcard::from_bytes::<T>(bytes) {
+            self.update(|table| *table = data);
+        }
+    }
+
     fn param_path(&self) -> Option<PathBuf> {
         let mut s = heapless::String::<64>::new();
         write!(s, "/params/{}.bin", self.name).ok()?;
@@ -44,7 +50,9 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> Table<T> {
         &self,
         fs: &littlefs2::fs::Filesystem<'_, S>,
     ) {
-        let Some(path) = self.param_path() else { return };
+        let Some(path) = self.param_path() else {
+            return;
+        };
         let mut buf = [0u8; 256];
         let mut len = 0usize;
         let Ok(()) = fs.open_file_and_then(&path, |file| {
@@ -53,13 +61,14 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> Table<T> {
         }) else {
             return;
         };
-        if let Ok(data) = postcard::from_bytes::<T>(&buf[..len]) {
-            self.update(|t| *t = data);
-        }
+        self.restore_from_bytes(&buf[..len]);
     }
 
+    #[allow(dead_code)]
     pub async fn save(&'static self) {
-        let Some(path) = self.param_path() else { return };
+        let Some(path) = self.param_path() else {
+            return;
+        };
         let data = self.snapshot();
         let mut buf = [0u8; 256];
         let Ok(bytes) = postcard::to_slice(&data, &mut buf) else {
@@ -73,29 +82,32 @@ impl<T: Clone + Serialize + for<'de> Deserialize<'de>> Table<T> {
                 let _ = fs.open_file_with_options_and_then(
                     |o| o.create(true).truncate(true),
                     &path,
-                    |file| Ok(file.write(&buf[..len])?),
+                    |file| file.write(&buf[..len]),
                 );
             })
             .await;
     }
 
+    #[allow(dead_code)]
     pub async fn load(&'static self) {
-        let Some(path) = self.param_path() else { return };
+        let Some(path) = self.param_path() else {
+            return;
+        };
 
         let result: Option<([u8; 256], usize)> = storage::FS
             .call(move |fs| -> Option<([u8; 256], usize)> {
                 let mut buf = [0u8; 256];
                 let len = fs
-                    .open_file_and_then(&path, |file| Ok(file.read(&mut buf)?))
+                    .open_file_and_then(&path, |file| file.read(&mut buf))
                     .ok()?;
                 Some((buf, len))
             })
             .await;
 
-        if let Some((buf, len)) = result {
-            if let Ok(data) = postcard::from_bytes::<T>(&buf[..len]) {
-                self.update(|t| *t = data);
-            }
+        if let Some((buf, len)) = result
+            && let Ok(data) = postcard::from_bytes::<T>(&buf[..len])
+        {
+            self.update(|table| *table = data);
         }
     }
 }
