@@ -2,13 +2,21 @@
 #![no_main]
 
 use core::future::pending;
-mod built;
-mod clocks;
-mod tasks;
-mod resources;
-mod macros;
 
-use embassy_executor::{InterruptExecutor, Spawner};
+use embassy_executor::Spawner;
+
+mod built;
+mod macros;
+mod resources;
+mod startup;
+mod tasks;
+
+mod clocks {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../shared/stm32h723_clocks.rs"
+    ));
+}
 
 #[allow(unused_imports)]
 use panic_reset as _;
@@ -16,16 +24,13 @@ use panic_reset as _;
 #[allow(unused_imports)]
 use defmt_rtt as _;
 
-
-pub static INTERRUPT_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
-
 #[embassy_executor::main]
 async fn main(level_t_spawner: Spawner) -> ! {
     let p = embassy_stm32::init(clocks::clocks_config());
-
+    let board = startup::prepare(resources::split(p));
     let level_0_spawner = interrupt_executor!(TIM2, P6);
 
-    level_0_spawner.must_spawn(tasks::blinky::run());
+    startup::spawn_tasks(board, level_t_spawner, level_0_spawner);
 
     loop {
         pending::<()>().await;
