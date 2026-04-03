@@ -34,13 +34,13 @@ impl<T> ConfigSnapshot<T> {
 
 pub struct Config<T: Clone, const BYTES: usize, const WATCHERS: usize = DEFAULT_WATCHERS> {
     key: &'static str,
-    default: T,
+    default: fn() -> T,
     state: Watch<CriticalSectionRawMutex, ConfigSnapshot<T>, WATCHERS>,
 }
 
 #[allow(dead_code)]
 impl<T: Clone, const BYTES: usize, const WATCHERS: usize> Config<T, BYTES, WATCHERS> {
-    pub const fn new(key: StorageKey, default: T) -> Self {
+    pub const fn new(key: StorageKey, default: fn() -> T) -> Self {
         Self {
             key,
             default,
@@ -49,7 +49,7 @@ impl<T: Clone, const BYTES: usize, const WATCHERS: usize> Config<T, BYTES, WATCH
     }
 
     pub fn default_value(&self) -> T {
-        self.default.clone()
+        (self.default)()
     }
 
     pub fn snapshot(&self) -> ConfigSnapshot<T> {

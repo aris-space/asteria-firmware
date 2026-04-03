@@ -9,33 +9,22 @@ const BYTES: usize = 128;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ImuCalib {
-    pub gyr_bias: [f32; 3],
-    pub fine_rot: [[f32; 3]; 3],
+    pub gyr_bias: Vector3<f32>,
+    pub fine_rot: Matrix3<f32>,
     pub valid: bool,
 }
 
-impl ImuCalib {
-    pub const DEFAULT: Self = Self {
-        gyr_bias: [0.0; 3],
-        fine_rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+fn default_imu_calib() -> ImuCalib {
+    ImuCalib {
+        gyr_bias: Vector3::zeros(),
+        fine_rot: Matrix3::identity(),
         valid: false,
-    };
-
-    pub fn fine_rot_matrix(&self) -> Matrix3<f32> {
-        let r = &self.fine_rot;
-        Matrix3::new(
-            r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], r[2][0], r[2][1], r[2][2],
-        )
-    }
-
-    pub fn bias_vector(&self) -> Vector3<f32> {
-        Vector3::from_column_slice(&self.gyr_bias)
     }
 }
 
 pub static IMU_CALS: [Config<ImuCalib, BYTES>; IMU_COUNT] = [
-    Config::new("imu_cal_0", ImuCalib::DEFAULT),
-    Config::new("imu_cal_1", ImuCalib::DEFAULT),
+    Config::new("imu_cal_0", default_imu_calib),
+    Config::new("imu_cal_1", default_imu_calib),
 ];
 
 pub async fn load_all(backend: &mut impl KeyStorage) {

@@ -16,16 +16,16 @@ struct ImuConfig {
 }
 
 impl ImuConfig {
-    fn new(mount: &ImuMount, cal: &ImuCalib) -> Self {
-        let mount = mount.rotation_matrix();
+    fn new(mount: ImuMount, cal: ImuCalib) -> Self {
+        let mount_rotation = mount.rotation;
         if cal.valid {
             Self {
-                full_rot: cal.fine_rot_matrix() * mount,
-                bias: cal.bias_vector(),
+                full_rot: cal.fine_rot * mount_rotation,
+                bias: cal.gyr_bias,
             }
         } else {
             Self {
-                full_rot: mount,
+                full_rot: mount_rotation,
                 bias: Vector3::zeros(),
             }
         }
@@ -77,7 +77,7 @@ fn startup_value<T: Clone, const BYTES: usize, const WATCHERS: usize>(
 fn config_for(id: ImuId) -> ImuConfig {
     let mount = startup_value(mount::imu_mount(id));
     let calib = startup_value(calibration::imu_cal(id));
-    ImuConfig::new(&mount, &calib)
+    ImuConfig::new(mount, calib)
 }
 
 async fn run(id: ImuId, cfg: &ImuConfig) -> ! {

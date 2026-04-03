@@ -55,7 +55,7 @@ embedded-io-async = { version = "0.7.0", default-features = false, features = ["
 defmt = { version = "1.0.1" }
 defmt-brtt = { version = "0.1.1", default-features = false, features = ["async-await", "bbq", "rtt"] }
 
-nalgebra = { version = "0.33", default-features = false, features = ["libm"] }
+nalgebra = { version = "0.33", default-features = false, features = ["libm", "serde-serialize-no-std"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 postcard = { version = "1", default-features = false }
 
