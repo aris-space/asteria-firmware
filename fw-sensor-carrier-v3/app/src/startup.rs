@@ -128,6 +128,6 @@ pub fn spawn_tasks(
 
     level_0_spawner.must_spawn(tasks::processing::inertial::task());
 
-    // Storage/config init runs on thread-mode so blocking flash I/O never starves readouts.
+    // Storage/config init runs separately from the sensor readout tasks.
     thread_spawner.must_spawn(storage::task(board.flash, defmt_consumer));
 }

@@ -32,40 +32,6 @@ impl<T> ConfigSnapshot<T> {
     }
 }
 
-pub(crate) struct RegistryEntry {
-    load: fn(&mut dyn KeyStorage),
-}
-
-impl RegistryEntry {
-    pub const fn new(load: fn(&mut dyn KeyStorage)) -> Self {
-        Self { load }
-    }
-
-    fn load(&self, backend: &mut dyn KeyStorage) {
-        (self.load)(backend);
-    }
-}
-
-macro_rules! indexed_loaders {
-    ($configs:ident, $($loader:ident => $index:expr),+ $(,)?) => {
-        $(
-            fn $loader(backend: &mut dyn $crate::storage::KeyStorage) {
-                $configs[$index].load_from_backend(backend);
-            }
-        )+
-    };
-}
-
-pub(crate) use indexed_loaders;
-
-macro_rules! registry_entries {
-    ($($loader:path),+ $(,)?) => {
-        [$(RegistryEntry::new($loader)),+]
-    };
-}
-
-pub(crate) use registry_entries;
-
 pub struct Config<T: Clone, const BYTES: usize, const WATCHERS: usize = DEFAULT_WATCHERS> {
     key: &'static str,
     default: T,
@@ -108,10 +74,10 @@ impl<T, const BYTES: usize, const WATCHERS: usize> Config<T, BYTES, WATCHERS>
 where
     T: Clone + Serialize + for<'de> Deserialize<'de> + Send,
 {
-    pub fn load_from_backend(&self, backend: &mut dyn KeyStorage) {
+    pub async fn load_from_backend(&self, backend: &mut impl KeyStorage) {
         let mut buf = [0u8; BYTES];
 
-        match backend.read_key(self.key, &mut buf) {
+        match backend.read_key(self.key, &mut buf).await {
             KeyRead::Found(len) => match postcard::from_bytes::<T>(&buf[..len]) {
                 Ok(value) => {
                     self.set_snapshot(ConfigSnapshot::new(ConfigSource::Persisted, Some(value)));
@@ -147,8 +113,7 @@ where
     }
 }
 
-pub fn load_all(backend: &mut dyn KeyStorage) {
-    for entry in calibration::REGISTRY.iter().chain(mount::REGISTRY.iter()) {
-        entry.load(backend);
-    }
+pub async fn load_all(backend: &mut impl KeyStorage) {
+    calibration::load_all(backend).await;
+    mount::load_all(backend).await;
 }

@@ -1,7 +1,9 @@
 #[cfg(feature = "storage")]
 mod imp {
+    use embassy_stm32::bind_interrupts;
     use embassy_stm32::gpio::{Level, Output, Speed};
-    use embassy_stm32::mode::Blocking;
+    use embassy_stm32::mode::Async;
+    use embassy_stm32::peripherals;
     use embassy_stm32::spi::Spi;
     use embassy_stm32::spi::mode::Master as SpiMaster;
     use embassy_time::Delay;
@@ -12,7 +14,7 @@ mod imp {
 
     use crate::resources::Flash;
 
-    type FlashSpi = Spi<'static, Blocking, SpiMaster>;
+    type FlashSpi = Spi<'static, Async, SpiMaster>;
     pub type FlashDevice = ExclusiveDevice<FlashSpi, Output<'static>, Delay>;
     pub type BoardFlash = W25q256jv<FlashDevice, FixedHighPin, FixedHighPin>;
 
@@ -28,7 +30,21 @@ mod imp {
 
     impl Flash {
         pub fn setup(self) -> &'static mut BoardFlash {
-            let spi = Spi::new_blocking(self.periph, self.sck, self.mosi, self.miso, config());
+            bind_interrupts!(struct FlashIrqs {
+                DMA2_STREAM3 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH3>;
+                DMA2_STREAM4 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH4>;
+            });
+
+            let spi = Spi::new(
+                self.periph,
+                self.sck,
+                self.mosi,
+                self.miso,
+                self.tx_dma,
+                self.rx_dma,
+                FlashIrqs,
+                config(),
+            );
             let cs = Output::new(self.cs, Level::High, Speed::VeryHigh);
             let device = ExclusiveDevice::new(spi, cs, Delay).expect("spi exclusive");
             let flash = W25q256jv::new(device, FixedHighPin, FixedHighPin).expect("w25q256jv init");

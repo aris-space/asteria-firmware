@@ -1,8 +1,9 @@
 use nalgebra::Matrix3;
 use serde::{Deserialize, Serialize};
 
-use super::{Config, RegistryEntry, indexed_loaders, registry_entries};
+use super::Config;
 use crate::sensors::{IMU_COUNT, ImuId};
+use crate::storage::KeyStorage;
 
 const BYTES: usize = 64;
 
@@ -30,14 +31,11 @@ pub static IMU_MOUNTS: [Config<ImuMount, BYTES>; IMU_COUNT] = [
     Config::new("imu_mount_1", ImuMount::DEFAULT),
 ];
 
-indexed_loaders!(
-    IMU_MOUNTS,
-    load_imu_mount_0 => 0,
-    load_imu_mount_1 => 1,
-);
-
-pub static REGISTRY: [RegistryEntry; IMU_COUNT] =
-    registry_entries![load_imu_mount_0, load_imu_mount_1];
+pub async fn load_all(backend: &mut impl KeyStorage) {
+    for config in &IMU_MOUNTS {
+        config.load_from_backend(backend).await;
+    }
+}
 
 pub fn imu_mount(id: ImuId) -> &'static Config<ImuMount, BYTES> {
     &IMU_MOUNTS[id.index()]

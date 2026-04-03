@@ -82,6 +82,8 @@ assign_resources! {
         sck: PB13,
         miso: PB14,
         mosi: PB15,
+        tx_dma: DMA2_CH3,
+        rx_dma: DMA2_CH4,
         cs: PB12,
     }
     usb: Usb {
