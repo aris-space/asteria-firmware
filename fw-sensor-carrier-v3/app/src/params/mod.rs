@@ -130,18 +130,13 @@ where
     }
 
     pub async fn set_and_save(&'static self, value: T) -> SaveStatus {
-        self.set_runtime(value.clone());
-
-        let snapshot = self.snapshot();
-        let Some(value) = snapshot.value else {
-            return SaveStatus::RuntimeOnly;
-        };
-
         let mut buf = [0u8; BYTES];
         let len = match postcard::to_slice(&value, &mut buf) {
             Ok(bytes) => bytes.len(),
             Err(_) => return SaveStatus::RuntimeOnly,
         };
+
+        self.set_runtime(value.clone());
 
         let status = storage::save(self.key, buf, len).await;
         if matches!(status, SaveStatus::Persisted) {
