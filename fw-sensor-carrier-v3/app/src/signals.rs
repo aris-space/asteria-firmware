@@ -2,8 +2,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 
-use crate::measurements::{ImuSample, PressureSample};
-use crate::sensors::{BAROMETER_COUNT, BarometerId, IMU_COUNT, ImuId};
+use crate::measurements::{GnssSample, ImuSample, PressureSample};
+use crate::sensors::{BAROMETER_COUNT, BarometerId, GNSS_COUNT, GnssId, IMU_COUNT, ImuId};
 
 macro_rules! define_signal {
     (
@@ -52,4 +52,11 @@ define_signal!(
     PressureSample, BarometerId,
     cap = 16, subs = 4, pubs = 2,
     count = BAROMETER_COUNT, watchers = 4
+);
+
+define_signal!(
+    GNSS_CHANNELS, GNSS_WATCHES, submit_gnss_sample, submit_gnss_samples, gnss_watch:
+    GnssSample, GnssId,
+    cap = 8, subs = 4, pubs = 2,
+    count = GNSS_COUNT, watchers = 4
 );

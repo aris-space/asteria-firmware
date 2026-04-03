@@ -1,7 +1,7 @@
 use embassy_time::{Duration, Instant};
 use lsm6dso32::types::{Acceleration, AngularRate};
 
-use crate::sensors::{BarometerId, ImuId};
+use crate::sensors::{BarometerId, GnssId, ImuId};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Timestamped<T> {
@@ -49,4 +49,30 @@ pub struct PressureSample {
 pub struct PressureData {
     pub pressure_mbar: f32,
     pub temperature_c: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GnssSample {
+    pub sensor_id: GnssId,
+    pub data: Timestamped<PvtData>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PvtData {
+    pub lon_deg: f64,
+    pub lat_deg: f64,
+    pub fix_type: ublox::GpsFix,
+    pub height_msl: f32,
+    pub num_satellites: u8,
+    pub heading_deg: f32,
+    pub heading_accuracy_estimate: f32,
+    pub heading_of_vehicle_deg: f32,
+    pub vel_north: f32,
+    pub vel_east: f32,
+    pub vel_down: f32,
+    pub pdop: u16,
+    pub vert_accuracy: u32,
+    pub horiz_accuracy: u32,
+    pub magnetic_declination_deg: f32,
+    pub magnetic_declination_accuracy_deg: f32,
 }

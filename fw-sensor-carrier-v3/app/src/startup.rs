@@ -7,7 +7,7 @@ use embassy_stm32::usart::UartRx;
 
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
-use crate::sensors::{BAROMETER_0, BAROMETER_1, IMU_0, IMU_1};
+use crate::sensors::{BAROMETER_0, BAROMETER_1, GNSS_0, GNSS_1, IMU_0, IMU_1};
 use crate::{resources, tasks};
 
 pub struct PreparedBoard {
@@ -78,7 +78,11 @@ pub fn spawn_tasks(
     level_t_spawner.must_spawn(tasks::imu::task(imu1_spi, imu1_int1, IMU_0));
     level_t_spawner.must_spawn(tasks::imu::task(imu2_spi, imu2_int1, IMU_1));
 
-    let baro_delay = Duration::from_millis(0); // TODO: calibrate
+    let baro_delay = Duration::from_millis(20); // TODO: calibrate
     level_t_spawner.must_spawn(tasks::barometer::task(board.sensors.bus1, BAROMETER_0, baro_delay));
     level_t_spawner.must_spawn(tasks::barometer::task(board.sensors.bus2, BAROMETER_1, baro_delay));
+
+    let gnss_delay = Duration::from_millis(100); // TODO: calibrate
+    level_t_spawner.must_spawn(tasks::gnss::task(board.sensors.gps1_rx, GNSS_0, gnss_delay));
+    level_t_spawner.must_spawn(tasks::gnss::task(board.sensors.gps2_rx, GNSS_1, gnss_delay));
 }
