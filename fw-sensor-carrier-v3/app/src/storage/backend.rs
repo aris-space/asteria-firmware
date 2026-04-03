@@ -252,8 +252,7 @@ mod imp {
             .unwrap_or(SaveStatus::RuntimeOnly)
     }
 
-    #[embassy_executor::task]
-    pub(crate) async fn task(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -> ! {
+    pub(crate) async fn run(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -> ! {
         let Some(mut state) = init_state(flash).await else {
             defmt::warn!("storage: sequential regions invalid, continuing with in-memory defaults");
             let mut unavailable = UnavailableStorage;
@@ -327,8 +326,7 @@ mod imp {
         SaveStatus::RuntimeOnly
     }
 
-    #[embassy_executor::task]
-    pub(crate) async fn task(_flash: &'static mut BoardFlash, consumer: DefmtConsumer) -> ! {
+    pub(crate) async fn run(_flash: &'static mut BoardFlash, consumer: DefmtConsumer) -> ! {
         let mut unavailable = UnavailableStorage;
         crate::params::load_all(&mut unavailable).await;
         CONFIG_READY.signal(());
@@ -337,4 +335,4 @@ mod imp {
     }
 }
 
-pub(crate) use imp::{persist_key, task};
+pub(crate) use imp::{persist_key, run};

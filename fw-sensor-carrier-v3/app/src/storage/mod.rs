@@ -58,7 +58,7 @@ pub(crate) async fn persist_key<const N: usize>(
     backend::persist_key(key, data, len).await
 }
 
-pub(crate) use backend::task;
+pub(crate) use backend::run;
 
 struct UnavailableStorage;
 

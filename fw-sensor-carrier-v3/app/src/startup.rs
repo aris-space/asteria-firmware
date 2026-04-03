@@ -11,7 +11,6 @@ use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
     BAROMETER_0, BAROMETER_1, GNSS_0, GNSS_1, IMU_0, IMU_1, MAGNETOMETER_0, MAGNETOMETER_1,
 };
-use crate::storage;
 use defmt_brtt::DefmtConsumer;
 
 use crate::{resources, tasks};
@@ -129,5 +128,5 @@ pub fn spawn_tasks(
     level_0_spawner.must_spawn(tasks::processing::inertial::task());
 
     // Storage/config init runs separately from the sensor readout tasks.
-    thread_spawner.must_spawn(storage::task(board.flash, defmt_consumer));
+    thread_spawner.must_spawn(tasks::storage::task(board.flash, defmt_consumer));
 }
