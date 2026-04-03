@@ -1,5 +1,5 @@
 use core::fmt::Write as _;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use defmt::info;
 use defmt_brtt::DefmtConsumer;
@@ -22,8 +22,13 @@ pub static FS: RpcService<CriticalSectionRawMutex, Fs, 512> = RpcService::new();
 
 use embassy_sync::signal::Signal;
 
+static AVAILABLE: AtomicBool = AtomicBool::new(false);
 static SESSION_INDEX: AtomicU32 = AtomicU32::new(u32::MAX);
 pub static READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+pub fn is_available() -> bool {
+    AVAILABLE.load(Ordering::Relaxed)
+}
 
 fn session_idx() -> Option<u32> {
     match SESSION_INDEX.load(Ordering::Relaxed) {
@@ -153,13 +158,16 @@ pub async fn task(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -
         let _ = Filesystem::format(adapter);
     }
     let Ok(mut fs) = Filesystem::mount(alloc, adapter) else {
-        defmt::error!("storage: mount failed after retries, running without filesystem");
+        defmt::warn!("storage: unavailable, continuing with in-memory defaults");
+        READY.signal(());
         loop {
             let grant = consumer.wait_for_log().await;
             let len = grant.buf().len();
             grant.release(len);
         }
     };
+
+    AVAILABLE.store(true, Ordering::Relaxed);
     info!("storage: filesystem mounted");
 
     crate::params::load_all(&fs);

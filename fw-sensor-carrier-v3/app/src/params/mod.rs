@@ -131,11 +131,17 @@ where
 
     #[allow(dead_code)]
     pub async fn load(&'static self) {
+        if !storage::is_available() {
+            return;
+        }
         storage::FS.call(move |fs| self.load_from_fs(fs)).await;
     }
 
     #[allow(dead_code)]
     pub async fn save(&'static self) {
+        if !storage::is_available() {
+            return;
+        }
         storage::FS.call(move |fs| self.save_to_fs(fs)).await;
     }
 
@@ -161,6 +167,9 @@ pub fn load_all(fs: &storage::Fs) {
 
 #[allow(dead_code)]
 pub async fn save_all() {
+    if !storage::is_available() {
+        return;
+    }
     storage::FS
         .call(|fs| {
             for entry in calibration::REGISTRY.iter().chain(mount::REGISTRY.iter()) {
