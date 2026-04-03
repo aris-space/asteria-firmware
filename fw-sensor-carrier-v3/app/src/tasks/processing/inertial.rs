@@ -8,7 +8,7 @@ use crate::params::mount::{self, ImuMount};
 use crate::params::{Config, ConfigSnapshot, ConfigSource};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
-use crate::tasks::storage;
+use crate::storage;
 
 struct ImuConfig {
     full_rot: Matrix3<f32>,

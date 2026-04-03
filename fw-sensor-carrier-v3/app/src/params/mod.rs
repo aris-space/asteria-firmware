@@ -5,7 +5,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use serde::{Deserialize, Serialize};
 
-use crate::tasks::storage;
+use crate::storage::{self, BackendLoad, KeyStorage, SaveStatus};
 
 pub const DEFAULT_WATCHERS: usize = 4;
 
@@ -32,34 +32,16 @@ impl<T> ConfigSnapshot<T> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
-#[allow(dead_code)]
-pub enum SaveStatus {
-    Persisted,
-    RuntimeOnly,
-}
-
-#[allow(dead_code)]
-pub enum BackendLoad {
-    Loaded(usize),
-    Missing,
-    Unavailable,
-}
-
-pub trait ConfigBackend {
-    fn load(&self, key: &str, out: &mut [u8]) -> BackendLoad;
-}
-
 pub(crate) struct RegistryEntry {
-    load: fn(&dyn ConfigBackend),
+    load: fn(&dyn KeyStorage),
 }
 
 impl RegistryEntry {
-    pub const fn new(load: fn(&dyn ConfigBackend)) -> Self {
+    pub const fn new(load: fn(&dyn KeyStorage)) -> Self {
         Self { load }
     }
 
-    fn load(&self, backend: &dyn ConfigBackend) {
+    fn load(&self, backend: &dyn KeyStorage) {
         (self.load)(backend);
     }
 }
@@ -67,7 +49,7 @@ impl RegistryEntry {
 macro_rules! indexed_loaders {
     ($configs:ident, $($loader:ident => $index:expr),+ $(,)?) => {
         $(
-            fn $loader(backend: &dyn ConfigBackend) {
+            fn $loader(backend: &dyn $crate::storage::KeyStorage) {
                 $configs[$index].load_from_backend(backend);
             }
         )+
@@ -126,7 +108,7 @@ impl<T, const BYTES: usize, const WATCHERS: usize> Config<T, BYTES, WATCHERS>
 where
     T: Clone + Serialize + for<'de> Deserialize<'de> + Send,
 {
-    pub fn load_from_backend(&self, backend: &dyn ConfigBackend) {
+    pub fn load_from_backend(&self, backend: &dyn KeyStorage) {
         let mut buf = [0u8; BYTES];
 
         match backend.load(self.key, &mut buf) {
@@ -170,7 +152,7 @@ where
     }
 }
 
-pub fn load_all(backend: &dyn ConfigBackend) {
+pub fn load_all(backend: &dyn KeyStorage) {
     for entry in calibration::REGISTRY.iter().chain(mount::REGISTRY.iter()) {
         entry.load(backend);
     }

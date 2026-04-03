@@ -1,7 +1,7 @@
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use super::{Config, ConfigBackend, RegistryEntry, indexed_loaders, registry_entries};
+use super::{Config, RegistryEntry, indexed_loaders, registry_entries};
 use crate::sensors::{IMU_COUNT, ImuId};
 
 const BYTES: usize = 128;
