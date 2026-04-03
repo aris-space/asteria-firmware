@@ -5,7 +5,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use serde::{Deserialize, Serialize};
 
-use crate::storage::{self, KeyRead, KeyStorage, SaveStatus};
+use crate::storage::{self, KeyRead, KeyStorage, SaveStatus, StorageKey};
 
 pub const DEFAULT_WATCHERS: usize = 4;
 
@@ -33,15 +33,15 @@ impl<T> ConfigSnapshot<T> {
 }
 
 pub(crate) struct RegistryEntry {
-    load: fn(&dyn KeyStorage),
+    load: fn(&mut dyn KeyStorage),
 }
 
 impl RegistryEntry {
-    pub const fn new(load: fn(&dyn KeyStorage)) -> Self {
+    pub const fn new(load: fn(&mut dyn KeyStorage)) -> Self {
         Self { load }
     }
 
-    fn load(&self, backend: &dyn KeyStorage) {
+    fn load(&self, backend: &mut dyn KeyStorage) {
         (self.load)(backend);
     }
 }
@@ -49,7 +49,7 @@ impl RegistryEntry {
 macro_rules! indexed_loaders {
     ($configs:ident, $($loader:ident => $index:expr),+ $(,)?) => {
         $(
-            fn $loader(backend: &dyn $crate::storage::KeyStorage) {
+            fn $loader(backend: &mut dyn $crate::storage::KeyStorage) {
                 $configs[$index].load_from_backend(backend);
             }
         )+
@@ -74,7 +74,7 @@ pub struct Config<T: Clone, const BYTES: usize, const WATCHERS: usize = DEFAULT_
 
 #[allow(dead_code)]
 impl<T: Clone, const BYTES: usize, const WATCHERS: usize> Config<T, BYTES, WATCHERS> {
-    pub const fn new(key: &'static str, default: T) -> Self {
+    pub const fn new(key: StorageKey, default: T) -> Self {
         Self {
             key,
             default,
@@ -108,7 +108,7 @@ impl<T, const BYTES: usize, const WATCHERS: usize> Config<T, BYTES, WATCHERS>
 where
     T: Clone + Serialize + for<'de> Deserialize<'de> + Send,
 {
-    pub fn load_from_backend(&self, backend: &dyn KeyStorage) {
+    pub fn load_from_backend(&self, backend: &mut dyn KeyStorage) {
         let mut buf = [0u8; BYTES];
 
         match backend.read_key(self.key, &mut buf) {
@@ -147,7 +147,7 @@ where
     }
 }
 
-pub fn load_all(backend: &dyn KeyStorage) {
+pub fn load_all(backend: &mut dyn KeyStorage) {
     for entry in calibration::REGISTRY.iter().chain(mount::REGISTRY.iter()) {
         entry.load(backend);
     }
