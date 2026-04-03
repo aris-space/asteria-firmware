@@ -887,6 +887,7 @@ dependencies = [
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io-async 0.7.0",
+ "heapless 0.9.2",
  "lsm303agr",
  "lsm6dso32",
  "ms5607",

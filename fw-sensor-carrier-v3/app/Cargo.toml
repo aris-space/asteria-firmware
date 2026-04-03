@@ -50,6 +50,7 @@ defmt-rtt = { version = "1.1.0", features = ["disable-blocking-mode"] }
 
 panic-probe = { version = "1.0.0" }
 panic-reset = "0.1.1"
+heapless = "0.9.2"
 
 [build-dependencies]
 built = { version = "0.8", features = ["git2"] }
