@@ -24,32 +24,45 @@ pub(crate) enum SaveStatus {
 }
 
 #[cfg_attr(not(feature = "storage"), allow(dead_code))]
-pub(crate) enum BackendLoad {
-    Loaded(usize),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StorageUnavailable;
+
+#[cfg_attr(not(feature = "storage"), allow(dead_code))]
+pub(crate) type StorageResult<T = ()> = Result<T, StorageUnavailable>;
+
+#[cfg_attr(not(feature = "storage"), allow(dead_code))]
+pub(crate) enum KeyRead {
+    Found(usize),
     Missing,
     Unavailable,
 }
 
 #[cfg_attr(not(feature = "storage"), allow(dead_code))]
 pub(crate) trait KeyStorage {
-    fn load(&self, key: &str, out: &mut [u8]) -> BackendLoad;
-    fn save(&self, key: &str, data: &[u8]) -> SaveStatus;
+    fn read_key(&self, key: &str, out: &mut [u8]) -> KeyRead;
+    fn write_key(&self, key: &str, data: &[u8]) -> StorageResult;
+}
+
+#[cfg_attr(not(feature = "storage"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileWriteMode {
+    Overwrite,
+    Append,
 }
 
 #[cfg_attr(not(feature = "storage"), allow(dead_code))]
 pub(crate) trait FileStorage {
-    fn read_dir(&self, path: &str, visitor: &mut dyn FnMut(&str)) -> bool;
-    fn create_dir(&self, path: &str) -> bool;
-    fn write_file(&self, path: &str, data: &[u8]) -> bool;
-    fn append_file(&self, path: &str, data: &[u8]) -> bool;
+    fn visit_dir(&self, path: &str, visitor: &mut dyn FnMut(&str)) -> StorageResult;
+    fn ensure_dir(&self, path: &str) -> StorageResult;
+    fn write_file(&self, path: &str, data: &[u8], mode: FileWriteMode) -> StorageResult;
 }
 
-pub(crate) async fn save<const N: usize>(
+pub(crate) async fn persist_key<const N: usize>(
     key: &'static str,
     data: [u8; N],
     len: usize,
 ) -> SaveStatus {
-    backend::save(key, data, len).await
+    backend::persist_key(key, data, len).await
 }
 
 pub(crate) use backend::task;
@@ -57,30 +70,26 @@ pub(crate) use backend::task;
 struct UnavailableStorage;
 
 impl KeyStorage for UnavailableStorage {
-    fn load(&self, _key: &str, _out: &mut [u8]) -> BackendLoad {
-        BackendLoad::Unavailable
+    fn read_key(&self, _key: &str, _out: &mut [u8]) -> KeyRead {
+        KeyRead::Unavailable
     }
 
-    fn save(&self, _key: &str, _data: &[u8]) -> SaveStatus {
-        SaveStatus::RuntimeOnly
+    fn write_key(&self, _key: &str, _data: &[u8]) -> StorageResult {
+        Err(StorageUnavailable)
     }
 }
 
 impl FileStorage for UnavailableStorage {
-    fn read_dir(&self, _path: &str, _visitor: &mut dyn FnMut(&str)) -> bool {
-        false
+    fn visit_dir(&self, _path: &str, _visitor: &mut dyn FnMut(&str)) -> StorageResult {
+        Err(StorageUnavailable)
     }
 
-    fn create_dir(&self, _path: &str) -> bool {
-        false
+    fn ensure_dir(&self, _path: &str) -> StorageResult {
+        Err(StorageUnavailable)
     }
 
-    fn write_file(&self, _path: &str, _data: &[u8]) -> bool {
-        false
-    }
-
-    fn append_file(&self, _path: &str, _data: &[u8]) -> bool {
-        false
+    fn write_file(&self, _path: &str, _data: &[u8], _mode: FileWriteMode) -> StorageResult {
+        Err(StorageUnavailable)
     }
 }
 

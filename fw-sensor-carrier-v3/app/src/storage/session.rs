@@ -2,7 +2,7 @@ use core::fmt::Write as _;
 
 use defmt_brtt::DefmtConsumer;
 
-use super::{FileStorage, session_index};
+use super::{FileStorage, FileWriteMode, session_index};
 
 fn session_dir_path(index: u32) -> Option<heapless::String<32>> {
     let mut path = heapless::String::<32>::new();
@@ -36,7 +36,7 @@ fn next_session_index(files: &dyn FileStorage) -> u32 {
             max_index = Some(max_index.map_or(index, |current| current.max(index)));
         }
     };
-    let _ = files.read_dir("/", &mut visit);
+    let _ = files.visit_dir("/", &mut visit);
     max_index.map_or(0, |index| index + 1)
 }
 
@@ -63,13 +63,13 @@ fn write_build_info(files: &dyn FileStorage, session: u32) {
         built::FEATURES_LOWERCASE_STR,
     );
 
-    let _ = files.write_file(&path, buf.as_bytes());
+    let _ = files.write_file(&path, buf.as_bytes(), FileWriteMode::Overwrite);
 }
 
 pub(super) fn prepare_session(files: &dyn FileStorage) -> Option<u32> {
     let session = next_session_index(files);
     let dir = session_dir_path(session)?;
-    files.create_dir(&dir).then_some(())?;
+    files.ensure_dir(&dir).ok()?;
     write_build_info(files, session);
     defmt::info!("storage: session {}", dir.as_str());
     Some(session)
@@ -105,7 +105,7 @@ impl DefmtStaging {
             return;
         }
 
-        let _ = files.append_file(path, &self.buf[..self.len]);
+        let _ = files.write_file(path, &self.buf[..self.len], FileWriteMode::Append);
         self.len = 0;
     }
 

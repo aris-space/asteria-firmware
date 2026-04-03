@@ -5,7 +5,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use serde::{Deserialize, Serialize};
 
-use crate::storage::{self, BackendLoad, KeyStorage, SaveStatus};
+use crate::storage::{self, KeyRead, KeyStorage, SaveStatus};
 
 pub const DEFAULT_WATCHERS: usize = 4;
 
@@ -111,8 +111,8 @@ where
     pub fn load_from_backend(&self, backend: &dyn KeyStorage) {
         let mut buf = [0u8; BYTES];
 
-        match backend.load(self.key, &mut buf) {
-            BackendLoad::Loaded(len) => match postcard::from_bytes::<T>(&buf[..len]) {
+        match backend.read_key(self.key, &mut buf) {
+            KeyRead::Found(len) => match postcard::from_bytes::<T>(&buf[..len]) {
                 Ok(value) => {
                     self.set_snapshot(ConfigSnapshot::new(ConfigSource::Persisted, Some(value)));
                 }
@@ -120,10 +120,10 @@ where
                     self.set_snapshot(ConfigSnapshot::new(ConfigSource::Invalid, None));
                 }
             },
-            BackendLoad::Missing => {
+            KeyRead::Missing => {
                 self.set_snapshot(ConfigSnapshot::new(ConfigSource::Missing, None));
             }
-            BackendLoad::Unavailable => {
+            KeyRead::Unavailable => {
                 self.set_snapshot(ConfigSnapshot::new(ConfigSource::Unavailable, None));
             }
         }
@@ -138,7 +138,7 @@ where
 
         self.set_runtime(value.clone());
 
-        let status = storage::save(self.key, buf, len).await;
+        let status = storage::persist_key(self.key, buf, len).await;
         if matches!(status, SaveStatus::Persisted) {
             self.set_snapshot(ConfigSnapshot::new(ConfigSource::Persisted, Some(value)));
         }

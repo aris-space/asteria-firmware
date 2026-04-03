@@ -29,8 +29,8 @@ mod imp {
     };
 
     use super::super::{
-        BackendLoad, CONFIG_READY, FileStorage, KeyStorage, SaveStatus, UnavailableStorage,
-        is_available, set_available, set_session_index,
+        CONFIG_READY, FileStorage, FileWriteMode, KeyRead, KeyStorage, SaveStatus, StorageResult,
+        UnavailableStorage, is_available, set_available, set_session_index,
     };
     use super::{BoardFlash, DefmtConsumer, discard_logs_forever};
 
@@ -59,21 +59,21 @@ mod imp {
     }
 
     impl KeyStorage for MountedStorage<'_> {
-        fn load(&self, key: &str, out: &mut [u8]) -> BackendLoad {
+        fn read_key(&self, key: &str, out: &mut [u8]) -> KeyRead {
             let Some(path) = Self::config_path(key) else {
-                return BackendLoad::Unavailable;
+                return KeyRead::Unavailable;
             };
 
             match self.fs.open_file_and_then(&path, |file| file.read(out)) {
-                Ok(len) => BackendLoad::Loaded(len),
-                Err(Error::NO_SUCH_ENTRY) => BackendLoad::Missing,
-                Err(_) => BackendLoad::Unavailable,
+                Ok(len) => KeyRead::Found(len),
+                Err(Error::NO_SUCH_ENTRY) => KeyRead::Missing,
+                Err(_) => KeyRead::Unavailable,
             }
         }
 
-        fn save(&self, key: &str, data: &[u8]) -> SaveStatus {
+        fn write_key(&self, key: &str, data: &[u8]) -> StorageResult {
             let Some(path) = Self::config_path(key) else {
-                return SaveStatus::RuntimeOnly;
+                return Err(super::super::StorageUnavailable);
             };
 
             let _ = self.fs.create_dir_all(path!("/params"));
@@ -82,16 +82,16 @@ mod imp {
                 &path,
                 |file| file.write(data),
             ) {
-                Ok(_) => SaveStatus::Persisted,
-                Err(_) => SaveStatus::RuntimeOnly,
+                Ok(_) => Ok(()),
+                Err(_) => Err(super::super::StorageUnavailable),
             }
         }
     }
 
     impl FileStorage for MountedStorage<'_> {
-        fn read_dir(&self, path: &str, visitor: &mut dyn FnMut(&str)) -> bool {
+        fn visit_dir(&self, path: &str, visitor: &mut dyn FnMut(&str)) -> StorageResult {
             let Some(path) = Self::path(path) else {
-                return false;
+                return Err(super::super::StorageUnavailable);
             };
 
             self.fs
@@ -103,47 +103,44 @@ mod imp {
                     }
                     Ok(())
                 })
-                .is_ok()
+                .map(|_| ())
+                .map_err(|_| super::super::StorageUnavailable)
         }
 
-        fn create_dir(&self, path: &str) -> bool {
+        fn ensure_dir(&self, path: &str) -> StorageResult {
             let Some(path) = Self::path(path) else {
-                return false;
+                return Err(super::super::StorageUnavailable);
             };
 
-            self.fs.create_dir(&path).is_ok()
+            self.fs
+                .create_dir(&path)
+                .map(|_| ())
+                .map_err(|_| super::super::StorageUnavailable)
         }
 
-        fn write_file(&self, path: &str, data: &[u8]) -> bool {
+        fn write_file(&self, path: &str, data: &[u8], mode: FileWriteMode) -> StorageResult {
             let Some(path) = Self::path(path) else {
-                return false;
+                return Err(super::super::StorageUnavailable);
             };
 
             self.fs
                 .open_file_with_options_and_then(
-                    |options| options.create(true).truncate(true),
+                    |options| {
+                        options.create(true);
+                        match mode {
+                            FileWriteMode::Overwrite => options.truncate(true),
+                            FileWriteMode::Append => options.append(true),
+                        }
+                    },
                     &path,
                     |file| file.write(data),
                 )
-                .is_ok()
-        }
-
-        fn append_file(&self, path: &str, data: &[u8]) -> bool {
-            let Some(path) = Self::path(path) else {
-                return false;
-            };
-
-            self.fs
-                .open_file_with_options_and_then(
-                    |options| options.append(true).create(true),
-                    &path,
-                    |file| file.write(data),
-                )
-                .is_ok()
+                .map(|_| ())
+                .map_err(|_| super::super::StorageUnavailable)
         }
     }
 
-    pub(crate) async fn save<const N: usize>(
+    pub(crate) async fn persist_key<const N: usize>(
         key: &'static str,
         data: [u8; N],
         len: usize,
@@ -152,8 +149,10 @@ mod imp {
             return SaveStatus::RuntimeOnly;
         }
 
-        FS.call(move |fs| MountedStorage { fs }.save(key, &data[..len]))
+        FS.call(move |fs| MountedStorage { fs }.write_key(key, &data[..len]))
             .await
+            .map(|_| SaveStatus::Persisted)
+            .unwrap_or(SaveStatus::RuntimeOnly)
     }
 
     #[embassy_executor::task]
@@ -217,7 +216,7 @@ mod imp {
     use super::{BoardFlash, DefmtConsumer, discard_logs_forever};
     use crate::storage::{CONFIG_READY, SaveStatus, UnavailableStorage};
 
-    pub(crate) async fn save<const N: usize>(
+    pub(crate) async fn persist_key<const N: usize>(
         _key: &'static str,
         _data: [u8; N],
         _len: usize,
@@ -234,4 +233,4 @@ mod imp {
     }
 }
 
-pub(crate) use imp::{save, task};
+pub(crate) use imp::{persist_key, task};
