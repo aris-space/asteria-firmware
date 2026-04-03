@@ -1,10 +1,10 @@
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use super::{Config, ConfigBackend, RegistryEntry};
+use super::{Config, ConfigBackend, RegistryEntry, indexed_loaders, registry_entries};
 use crate::sensors::{IMU_COUNT, ImuId};
 
-const IMU_CAL_BYTES: usize = 128;
+const BYTES: usize = 128;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ImuCalib {
@@ -32,24 +32,19 @@ impl ImuCalib {
     }
 }
 
-pub static IMU_CAL: [Config<ImuCalib, IMU_CAL_BYTES>; IMU_COUNT] = [
+pub static IMU_CALS: [Config<ImuCalib, BYTES>; IMU_COUNT] = [
     Config::new("imu_cal_0", ImuCalib::DEFAULT),
     Config::new("imu_cal_1", ImuCalib::DEFAULT),
 ];
 
-fn load_imu_cal_0(backend: &dyn ConfigBackend) {
-    IMU_CAL[0].load_from_backend(backend);
-}
+indexed_loaders!(
+    IMU_CALS,
+    load_imu_cal_0 => 0,
+    load_imu_cal_1 => 1,
+);
 
-fn load_imu_cal_1(backend: &dyn ConfigBackend) {
-    IMU_CAL[1].load_from_backend(backend);
-}
+pub static REGISTRY: [RegistryEntry; IMU_COUNT] = registry_entries![load_imu_cal_0, load_imu_cal_1];
 
-pub static REGISTRY: [RegistryEntry; IMU_COUNT] = [
-    RegistryEntry::new(load_imu_cal_0),
-    RegistryEntry::new(load_imu_cal_1),
-];
-
-pub fn imu_cal(id: ImuId) -> &'static Config<ImuCalib, IMU_CAL_BYTES> {
-    &IMU_CAL[id.index()]
+pub fn imu_cal(id: ImuId) -> &'static Config<ImuCalib, BYTES> {
+    &IMU_CALS[id.index()]
 }

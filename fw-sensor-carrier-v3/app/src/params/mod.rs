@@ -2,7 +2,7 @@ pub mod calibration;
 pub mod mount;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::watch::{Receiver, Watch};
+use embassy_sync::watch::Watch;
 use serde::{Deserialize, Serialize};
 
 use crate::tasks::storage;
@@ -64,6 +64,26 @@ impl RegistryEntry {
     }
 }
 
+macro_rules! indexed_loaders {
+    ($configs:ident, $($loader:ident => $index:expr),+ $(,)?) => {
+        $(
+            fn $loader(backend: &dyn ConfigBackend) {
+                $configs[$index].load_from_backend(backend);
+            }
+        )+
+    };
+}
+
+pub(crate) use indexed_loaders;
+
+macro_rules! registry_entries {
+    ($($loader:path),+ $(,)?) => {
+        [$(RegistryEntry::new($loader)),+]
+    };
+}
+
+pub(crate) use registry_entries;
+
 pub struct Config<T: Clone, const BYTES: usize, const WATCHERS: usize = DEFAULT_WATCHERS> {
     key: &'static str,
     default: T,
@@ -88,20 +108,6 @@ impl<T: Clone, const BYTES: usize, const WATCHERS: usize> Config<T, BYTES, WATCH
         self.state
             .try_get()
             .expect("config snapshots are always initialized")
-    }
-
-    pub fn effective(&self) -> Option<T> {
-        self.snapshot().value
-    }
-
-    pub fn effective_or_default(&self) -> T {
-        self.effective().unwrap_or_else(|| self.default_value())
-    }
-
-    pub fn receiver(
-        &'static self,
-    ) -> Option<Receiver<'static, CriticalSectionRawMutex, ConfigSnapshot<T>, WATCHERS>> {
-        self.state.receiver()
     }
 
     pub fn set_runtime(&self, value: T) {

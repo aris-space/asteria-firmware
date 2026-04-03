@@ -1,10 +1,10 @@
 use nalgebra::Matrix3;
 use serde::{Deserialize, Serialize};
 
-use super::{Config, ConfigBackend, RegistryEntry};
+use super::{Config, ConfigBackend, RegistryEntry, indexed_loaders, registry_entries};
 use crate::sensors::{IMU_COUNT, ImuId};
 
-const IMU_MOUNT_BYTES: usize = 64;
+const BYTES: usize = 64;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ImuMount {
@@ -25,24 +25,20 @@ impl ImuMount {
     }
 }
 
-pub static IMU_MOUNTS: [Config<ImuMount, IMU_MOUNT_BYTES>; IMU_COUNT] = [
+pub static IMU_MOUNTS: [Config<ImuMount, BYTES>; IMU_COUNT] = [
     Config::new("imu_mount_0", ImuMount::DEFAULT),
     Config::new("imu_mount_1", ImuMount::DEFAULT),
 ];
 
-fn load_imu_mount_0(backend: &dyn ConfigBackend) {
-    IMU_MOUNTS[0].load_from_backend(backend);
-}
+indexed_loaders!(
+    IMU_MOUNTS,
+    load_imu_mount_0 => 0,
+    load_imu_mount_1 => 1,
+);
 
-fn load_imu_mount_1(backend: &dyn ConfigBackend) {
-    IMU_MOUNTS[1].load_from_backend(backend);
-}
+pub static REGISTRY: [RegistryEntry; IMU_COUNT] =
+    registry_entries![load_imu_mount_0, load_imu_mount_1];
 
-pub static REGISTRY: [RegistryEntry; IMU_COUNT] = [
-    RegistryEntry::new(load_imu_mount_0),
-    RegistryEntry::new(load_imu_mount_1),
-];
-
-pub fn imu_mount(id: ImuId) -> &'static Config<ImuMount, IMU_MOUNT_BYTES> {
+pub fn imu_mount(id: ImuId) -> &'static Config<ImuMount, BYTES> {
     &IMU_MOUNTS[id.index()]
 }
