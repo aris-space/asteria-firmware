@@ -50,6 +50,11 @@ mod imp {
     static FLASH: StaticCell<SharedFlash> = StaticCell::new();
     static STATE: Mutex<CriticalSectionRawMutex, Option<StorageState>> = Mutex::new(None);
 
+    async fn load_in_memory_defaults() {
+        let mut unavailable = UnavailableStorage;
+        crate::params::load_all(&mut unavailable).await;
+    }
+
     struct KvState {
         store: KvMap,
         buffer: [u8; KV_BUFFER_SIZE],
@@ -105,6 +110,12 @@ mod imp {
                 .store_item(&mut self.buffer, &key, &data)
                 .await
                 .map_err(|_| StorageUnavailable)
+        }
+    }
+
+    impl KeyStorage for KvState {
+        async fn read_key(&mut self, key: StorageKey, out: &mut [u8]) -> KeyRead {
+            KvState::read_key(self, key, out).await
         }
     }
 
@@ -206,16 +217,6 @@ mod imp {
         }
     }
 
-    impl KeyStorage for StorageState {
-        async fn read_key(&mut self, key: StorageKey, out: &mut [u8]) -> KeyRead {
-            self.kv.read_key(key, out).await
-        }
-
-        async fn write_key(&mut self, key: StorageKey, data: &[u8]) -> StorageResult {
-            self.kv.write_key(key, data).await
-        }
-    }
-
     fn storage_key(key: StorageKey) -> Option<MapKey> {
         let mut storage_key = MapKey::new();
         storage_key.push_str(key).ok()?;
@@ -246,6 +247,7 @@ mod imp {
         };
 
         state
+            .kv
             .write_key(key, &data[..len])
             .await
             .map(|_| SaveStatus::Persisted)
@@ -255,13 +257,12 @@ mod imp {
     pub(crate) async fn run(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -> ! {
         let Some(mut state) = init_state(flash).await else {
             defmt::warn!("storage: sequential regions invalid, continuing with in-memory defaults");
-            let mut unavailable = UnavailableStorage;
-            crate::params::load_all(&mut unavailable).await;
+            load_in_memory_defaults().await;
             CONFIG_READY.signal(());
             discard_logs_forever(consumer).await
         };
 
-        crate::params::load_all(&mut state).await;
+        crate::params::load_all(&mut state.kv).await;
 
         match state.begin_session().await {
             LogWriteStatus::Stored => {
@@ -274,8 +275,7 @@ mod imp {
             }
             LogWriteStatus::Unavailable => {
                 defmt::warn!("storage: unavailable, continuing with in-memory defaults");
-                let mut unavailable = UnavailableStorage;
-                crate::params::load_all(&mut unavailable).await;
+                load_in_memory_defaults().await;
                 CONFIG_READY.signal(());
                 discard_logs_forever(consumer).await
             }
@@ -318,6 +318,11 @@ mod imp {
     use super::{BoardFlash, DefmtConsumer, discard_logs_forever};
     use crate::storage::{CONFIG_READY, SaveStatus, StorageKey, UnavailableStorage};
 
+    async fn load_in_memory_defaults() {
+        let mut unavailable = UnavailableStorage;
+        crate::params::load_all(&mut unavailable).await;
+    }
+
     pub(crate) async fn persist_key<const N: usize>(
         _key: StorageKey,
         _data: [u8; N],
@@ -327,8 +332,7 @@ mod imp {
     }
 
     pub(crate) async fn run(_flash: &'static mut BoardFlash, consumer: DefmtConsumer) -> ! {
-        let mut unavailable = UnavailableStorage;
-        crate::params::load_all(&mut unavailable).await;
+        load_in_memory_defaults().await;
         CONFIG_READY.signal(());
         defmt::info!("storage: disabled, using in-memory defaults");
         discard_logs_forever(consumer).await

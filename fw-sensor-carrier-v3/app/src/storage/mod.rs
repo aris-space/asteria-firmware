@@ -39,7 +39,6 @@ pub(crate) enum KeyRead {
 #[cfg_attr(not(feature = "storage"), allow(dead_code))]
 pub(crate) trait KeyStorage {
     async fn read_key(&mut self, key: StorageKey, out: &mut [u8]) -> KeyRead;
-    async fn write_key(&mut self, key: StorageKey, data: &[u8]) -> StorageResult;
 }
 
 #[cfg_attr(not(feature = "storage"), allow(dead_code))]
@@ -65,10 +64,6 @@ struct UnavailableStorage;
 impl KeyStorage for UnavailableStorage {
     async fn read_key(&mut self, _key: StorageKey, _out: &mut [u8]) -> KeyRead {
         KeyRead::Unavailable
-    }
-
-    async fn write_key(&mut self, _key: StorageKey, _data: &[u8]) -> StorageResult {
-        Err(StorageUnavailable)
     }
 }
 
