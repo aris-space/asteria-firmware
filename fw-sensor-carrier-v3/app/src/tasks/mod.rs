@@ -10,6 +10,7 @@ pub mod barometer;
 pub mod blinky;
 pub mod gnss;
 pub mod imu;
+pub mod magnetometer;
 
 pub const MAX_CONSECUTIVE_ERRORS: u8 = 10;
 const BASE_BACKOFF_MS: u64 = 100;

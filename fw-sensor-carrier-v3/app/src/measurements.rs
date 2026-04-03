@@ -1,7 +1,7 @@
 use embassy_time::{Duration, Instant};
 use lsm6dso32::types::{Acceleration, AngularRate};
 
-use crate::sensors::{BarometerId, GnssId, ImuId};
+use crate::sensors::{BarometerId, GnssId, ImuId, MagnetometerId};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Timestamped<T> {
@@ -55,6 +55,19 @@ pub struct PressureData {
 pub struct GnssSample {
     pub sensor_id: GnssId,
     pub data: Timestamped<PvtData>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MagSample {
+    pub sensor_id: MagnetometerId,
+    pub data: Timestamped<MagData>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MagData {
+    pub x: i16,
+    pub y: i16,
+    pub z: i16,
 }
 
 #[derive(Clone, Copy, Debug)]

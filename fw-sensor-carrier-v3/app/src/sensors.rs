@@ -36,6 +36,12 @@ define_sensor_family! {
 }
 
 define_sensor_family! {
+    pub struct MagnetometerId;
+    count: MAGNETOMETER_COUNT = 2;
+    all: MAGNETOMETER_IDS = [MAGNETOMETER_0 = 0, MAGNETOMETER_1 = 1];
+}
+
+define_sensor_family! {
     pub struct GnssId;
     count: GNSS_COUNT = 2;
     all: GNSS_IDS = [GNSS_0 = 0, GNSS_1 = 1];
