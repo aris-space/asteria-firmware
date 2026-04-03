@@ -14,7 +14,7 @@ use defmt_brtt::DefmtConsumer;
 
 use crate::resources::flash::BoardFlash;
 
-use crate::{resources, storage, tasks};
+use crate::{resources, tasks};
 
 pub struct PreparedBoard {
     pub services: ServiceResources,
@@ -99,6 +99,8 @@ pub fn spawn_tasks(
     level_0_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0, gnss_delay));
     level_0_spawner.must_spawn(tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1, gnss_delay));
 
+    level_0_spawner.must_spawn(tasks::processing::inertial::task());
+
     // Storage runs on thread-mode — blocking flash I/O won't starve sensor readouts
-    level_t_spawner.must_spawn(storage::task(board.flash, defmt_consumer));
+    level_t_spawner.must_spawn(tasks::storage::task(board.flash, defmt_consumer));
 }

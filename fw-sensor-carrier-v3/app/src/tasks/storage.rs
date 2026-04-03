@@ -18,25 +18,18 @@ use crate::resources::flash::{BoardFlash, FixedHighPin, FlashDevice};
 type Adapter = LittlefsAdapter<'static, FlashDevice, FixedHighPin, FixedHighPin, U256, U1>;
 type Fs = Filesystem<'static, Adapter>;
 
-pub static FS: RpcService<CriticalSectionRawMutex, Fs, 256> = RpcService::new();
+pub static FS: RpcService<CriticalSectionRawMutex, Fs, 512> = RpcService::new();
+
+use embassy_sync::signal::Signal;
 
 static SESSION_INDEX: AtomicU32 = AtomicU32::new(u32::MAX);
-
-pub fn is_available() -> bool {
-    SESSION_INDEX.load(Ordering::Relaxed) != u32::MAX
-}
+pub static READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 fn session_idx() -> Option<u32> {
     match SESSION_INDEX.load(Ordering::Relaxed) {
         u32::MAX => None,
         idx => Some(idx),
     }
-}
-
-pub fn workdir() -> Option<PathBuf> {
-    let mut s = heapless::String::<32>::new();
-    write!(s, "/log_{}", session_idx()?).ok()?;
-    PathBuf::try_from(s.as_bytes()).ok()
 }
 
 pub fn workdir_path(filename: &str) -> Option<PathBuf> {
@@ -151,13 +144,12 @@ pub async fn task(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -
     let adapter = ADAPTER.init(LittlefsAdapter::<_, _, _, U256, U1>::new(flash));
     let alloc = ALLOC.init(Filesystem::allocate());
 
-    // Mount with retry. On first failure, format and try again.
-    // On second failure, run without filesystem.
-    for attempt in 0..2u8 {
-        if Filesystem::mount(alloc, adapter).is_err() {
-            info!("storage: mount failed (attempt {}), formatting", attempt + 1);
-            let _ = Filesystem::format(adapter);
-        }
+    // Mount, format + retry on failure. Successful mount is dropped due to
+    // borrow-checker constraints (can't keep Ok(fs) while formatting in Err arm),
+    // then remounted below.
+    if Filesystem::mount(alloc, adapter).is_err() {
+        info!("storage: mount failed, formatting");
+        let _ = Filesystem::format(adapter);
     }
     let Ok(mut fs) = Filesystem::mount(alloc, adapter) else {
         defmt::error!("storage: mount failed after retries, running without filesystem");
@@ -169,9 +161,14 @@ pub async fn task(flash: &'static mut BoardFlash, mut consumer: DefmtConsumer) -
     };
     info!("storage: filesystem mounted");
 
+    crate::params::load_all(&fs);
+
     if let Some(idx) = prepare_session(&fs) {
         SESSION_INDEX.store(idx, Ordering::Relaxed);
     }
+
+    READY.signal(());
+    info!("storage: ready");
 
     let defmt_path = workdir_path("defmt.bin").unwrap_or_else(|| {
         PathBuf::try_from(b"/defmt.bin".as_slice()).unwrap()

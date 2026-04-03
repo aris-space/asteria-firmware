@@ -7,7 +7,9 @@
 use embassy_time::Duration;
 
 pub mod blinky;
+pub mod processing;
 pub mod readout;
+pub mod storage;
 
 pub const MAX_CONSECUTIVE_ERRORS: u8 = 10;
 const BASE_BACKOFF_MS: u64 = 100;

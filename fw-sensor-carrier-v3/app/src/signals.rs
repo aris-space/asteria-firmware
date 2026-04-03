@@ -65,6 +65,13 @@ define_signal!(
 );
 
 define_signal!(
+    INERTIAL_CHANNELS, INERTIAL_WATCHES, submit_inertial_sample, submit_inertial_samples, inertial_watch:
+    ImuSample, ImuId,
+    cap = 64, subs = 4, pubs = 2,
+    count = IMU_COUNT, watchers = 4
+);
+
+define_signal!(
     GNSS_CHANNELS, GNSS_WATCHES, submit_gnss_sample, submit_gnss_samples, gnss_watch:
     GnssSample, GnssId,
     cap = 8, subs = 4, pubs = 2,
