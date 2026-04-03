@@ -50,70 +50,88 @@ mod imp {
     static FLASH: StaticCell<SharedFlash> = StaticCell::new();
     static STATE: Mutex<CriticalSectionRawMutex, Option<StorageState>> = Mutex::new(None);
 
-    struct StorageState {
-        kv: KvMap,
-        log: LogQueue,
-        kv_buffer: [u8; KV_BUFFER_SIZE],
-        log_record_buffer: [u8; LOG_RECORD_BUFFER_SIZE],
-        current_session_id: Option<u32>,
-        log_full: bool,
-        log_full_warned: bool,
+    struct KvState {
+        store: KvMap,
+        buffer: [u8; KV_BUFFER_SIZE],
     }
 
-    impl StorageState {
+    impl KvState {
         fn new(flash: &'static SharedFlash) -> Self {
-            let kv = MapStorage::new(
-                Partition::new(flash, 0, KV_REGION_SIZE),
-                const { MapConfig::new(0..KV_REGION_SIZE) },
-                NoCache::new(),
-            );
-            let log = QueueStorage::new(
-                Partition::new(flash, LOG_REGION_OFFSET, LOG_REGION_SIZE),
-                const { QueueConfig::new(0..LOG_REGION_SIZE) },
-                NoCache::new(),
-            );
-
             Self {
-                kv,
-                log,
-                kv_buffer: [0; KV_BUFFER_SIZE],
-                log_record_buffer: [0; LOG_RECORD_BUFFER_SIZE],
-                current_session_id: None,
-                log_full: false,
-                log_full_warned: false,
+                store: MapStorage::new(
+                    Partition::new(flash, 0, KV_REGION_SIZE),
+                    const { MapConfig::new(0..KV_REGION_SIZE) },
+                    NoCache::new(),
+                ),
+                buffer: [0; KV_BUFFER_SIZE],
             }
         }
 
-        async fn load_session_id(&mut self) -> u32 {
-            let Some(key) = map_key(SESSION_NEXT_ID_KEY) else {
-                return 0;
-            };
-
-            match self.kv.fetch_item::<u32>(&mut self.kv_buffer, &key).await {
-                Ok(Some(next_id)) => next_id,
-                Ok(None) | Err(_) => 0,
-            }
-        }
-
-        async fn store_session_id(&mut self, next_id: u32) -> bool {
-            let Some(key) = map_key(SESSION_NEXT_ID_KEY) else {
-                return false;
-            };
-
-            self.kv
-                .store_item(&mut self.kv_buffer, &key, &next_id)
+        async fn load_u32(&mut self, key: StorageKey) -> Option<u32> {
+            let key = storage_key(key)?;
+            self.store
+                .fetch_item::<u32>(&mut self.buffer, &key)
                 .await
-                .is_ok()
+                .ok()?
         }
 
-        async fn begin_session(&mut self) -> LogWriteStatus {
-            let session_id = self.load_session_id().await;
-            let next_id = session_id.saturating_add(1);
+        async fn store_u32(&mut self, key: StorageKey, value: u32) -> StorageResult {
+            let key = storage_key(key).ok_or(StorageUnavailable)?;
+            self.store
+                .store_item(&mut self.buffer, &key, &value)
+                .await
+                .map_err(|_| StorageUnavailable)
+        }
 
-            if !self.store_session_id(next_id).await {
-                return LogWriteStatus::Unavailable;
+        async fn read_key(&mut self, key: StorageKey, out: &mut [u8]) -> KeyRead {
+            let Some(key) = storage_key(key) else {
+                return KeyRead::Unavailable;
+            };
+
+            match self.store.fetch_item::<&[u8]>(&mut self.buffer, &key).await {
+                Ok(Some(value)) if value.len() <= out.len() => {
+                    out[..value.len()].copy_from_slice(value);
+                    KeyRead::Found(value.len())
+                }
+                Ok(Some(_)) => KeyRead::Unavailable,
+                Ok(None) => KeyRead::Missing,
+                Err(_) => KeyRead::Unavailable,
             }
+        }
 
+        async fn write_key(&mut self, key: StorageKey, data: &[u8]) -> StorageResult {
+            let key = storage_key(key).ok_or(StorageUnavailable)?;
+            self.store
+                .store_item(&mut self.buffer, &key, &data)
+                .await
+                .map_err(|_| StorageUnavailable)
+        }
+    }
+
+    struct LogState {
+        store: LogQueue,
+        record_buffer: [u8; LOG_RECORD_BUFFER_SIZE],
+        current_session_id: Option<u32>,
+        full: bool,
+        full_warned: bool,
+    }
+
+    impl LogState {
+        fn new(flash: &'static SharedFlash) -> Self {
+            Self {
+                store: QueueStorage::new(
+                    Partition::new(flash, LOG_REGION_OFFSET, LOG_REGION_SIZE),
+                    const { QueueConfig::new(0..LOG_REGION_SIZE) },
+                    NoCache::new(),
+                ),
+                record_buffer: [0; LOG_RECORD_BUFFER_SIZE],
+                current_session_id: None,
+                full: false,
+                full_warned: false,
+            }
+        }
+
+        async fn begin_session(&mut self, session_id: u32) -> LogWriteStatus {
             let status = self
                 .append_record(&LogRecord::SessionStart(session_meta(session_id)))
                 .await;
@@ -134,21 +152,21 @@ mod imp {
         }
 
         async fn append_record(&mut self, record: &LogRecord<'_>) -> LogWriteStatus {
-            if self.log_full {
+            if self.full {
                 return LogWriteStatus::Full;
             }
 
-            let len = match postcard::to_slice(record, &mut self.log_record_buffer) {
+            let len = match postcard::to_slice(record, &mut self.record_buffer) {
                 Ok(bytes) => bytes.len(),
                 Err(_) => return LogWriteStatus::Unavailable,
             };
 
-            match self.log.push(&self.log_record_buffer[..len], false).await {
+            match self.store.push(&self.record_buffer[..len], false).await {
                 Ok(()) => LogWriteStatus::Stored,
                 Err(SeqError::FullStorage) => {
-                    self.log_full = true;
-                    if !self.log_full_warned {
-                        self.log_full_warned = true;
+                    self.full = true;
+                    if !self.full_warned {
+                        self.full_warned = true;
                         defmt::warn!("storage: log region full, dropping future defmt chunks");
                     }
                     LogWriteStatus::Full
@@ -158,36 +176,47 @@ mod imp {
         }
     }
 
-    impl KeyStorage for StorageState {
-        async fn read_key(&mut self, key: StorageKey, out: &mut [u8]) -> KeyRead {
-            let Some(key) = map_key(key) else {
-                return KeyRead::Unavailable;
-            };
+    struct StorageState {
+        kv: KvState,
+        log: LogState,
+    }
 
-            match self.kv.fetch_item::<&[u8]>(&mut self.kv_buffer, &key).await {
-                Ok(Some(value)) if value.len() <= out.len() => {
-                    out[..value.len()].copy_from_slice(value);
-                    KeyRead::Found(value.len())
-                }
-                Ok(Some(_)) => KeyRead::Unavailable,
-                Ok(None) => KeyRead::Missing,
-                Err(_) => KeyRead::Unavailable,
+    impl StorageState {
+        fn new(flash: &'static SharedFlash) -> Self {
+            Self {
+                kv: KvState::new(flash),
+                log: LogState::new(flash),
             }
         }
 
-        async fn write_key(&mut self, key: StorageKey, data: &[u8]) -> StorageResult {
-            let Some(key) = map_key(key) else {
-                return Err(StorageUnavailable);
-            };
+        async fn begin_session(&mut self) -> LogWriteStatus {
+            let session_id = self.kv.load_u32(SESSION_NEXT_ID_KEY).await.unwrap_or(0);
+            let next_id = session_id.saturating_add(1);
 
-            self.kv
-                .store_item(&mut self.kv_buffer, &key, &data)
+            if self
+                .kv
+                .store_u32(SESSION_NEXT_ID_KEY, next_id)
                 .await
-                .map_err(|_| StorageUnavailable)
+                .is_err()
+            {
+                return LogWriteStatus::Unavailable;
+            }
+
+            self.log.begin_session(session_id).await
         }
     }
 
-    fn map_key(key: StorageKey) -> Option<MapKey> {
+    impl KeyStorage for StorageState {
+        async fn read_key(&mut self, key: StorageKey, out: &mut [u8]) -> KeyRead {
+            self.kv.read_key(key, out).await
+        }
+
+        async fn write_key(&mut self, key: StorageKey, data: &[u8]) -> StorageResult {
+            self.kv.write_key(key, data).await
+        }
+    }
+
+    fn storage_key(key: StorageKey) -> Option<MapKey> {
         let mut storage_key = MapKey::new();
         storage_key.push_str(key).ok()?;
         Some(storage_key)
@@ -271,7 +300,7 @@ mod imp {
                 if let Some(state) = state.as_mut() {
                     for chunk in data.chunks(DEFMT_CHUNK_SIZE) {
                         if !matches!(
-                            state.append_defmt_chunk(chunk).await,
+                            state.log.append_defmt_chunk(chunk).await,
                             LogWriteStatus::Stored
                         ) {
                             break;
