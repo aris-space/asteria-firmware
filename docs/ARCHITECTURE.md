@@ -37,7 +37,8 @@ asteria-firmware/
 ├── tools/                # host-side tooling workspace (asteria-tool)
 ├── just/                 # shared just recipes + scripts (flash, artifacts, logs)
 ├── shared/               # source snippets reused via include!(), not a crate
-├── hermes-can/           # git submodule (CAN message library)
+├── hermes-can/           # git submodule (old CAN message library)
+├── data-definitions/     # git submodule (CAN message library)
 ├── .b2.env.example       # template for B2/S3 credentials
 └── justfile              # root workspace orchestration
 ```
