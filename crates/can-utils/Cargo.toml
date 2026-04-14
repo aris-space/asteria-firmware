@@ -1,0 +1,15 @@
+[package]
+name = "can-utils"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embassy-stm32 = { version = "*" }
+embedded-can = "0.4.1"
+embedded-utils = { path = "../embedded-utils" }
+can-hal = { path = "../../data-definitions/can-hal" }
+thiserror = { version = "2.0.18", default-features = false }
+defmt = { version = "0.3", optional = true }
+
+[features]
+defmt = ["dep:defmt"]
