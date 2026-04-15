@@ -3,5 +3,6 @@
 
 #![no_std]
 
+pub mod collector;
 pub mod rxtx;
 pub mod setup;

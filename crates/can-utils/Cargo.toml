@@ -8,6 +8,7 @@ embassy-stm32 = { version = "*" }
 embedded-can = "0.4.1"
 embedded-utils = { path = "../embedded-utils" }
 can-hal = { path = "../../data-definitions/can-hal" }
+collector-derive = { path = "./macros/collector" }
 thiserror = { version = "2.0.18", default-features = false }
 defmt = { version = "0.3", optional = true }
 
