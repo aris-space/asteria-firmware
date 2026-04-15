@@ -1,22 +1,28 @@
 #![no_std]
 #![no_main]
 
-mod can_impl;
+mod can_io;
 mod recovery_actuator_control;
 mod rsbl_servo;
 mod servo;
+
 /// IN THE FINAL VERSION; MAKE SURE THAT SERVO ID 2 IS LEFT, AND SERVO ID 3 IS RIGHT POSITION!!!
 mod watchdog;
 
-use crate::can_impl::{CanReceiver, CanTransmitter, setup_can};
+use crate::can_io::ReceivedMessage;
 use crate::recovery_actuator_control::{
-    ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS, DEPLOYMENT_TARGET_STATE,
-    SEPARATION_OCCURRED, SEPARATION_SERVO_STATUS, SEPARATION_TARGET_STATE, STEERING_POWER,
-    STEERING_STATUS, STEERING_TARGET_POSITIONS, ServoTargetState, SteeringStatus, WATCHDOG_STATE,
-    arming_detection, deployment_task, separation_task, steering_task,
+    ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS, DEPLOYMENT_TARGET_STATE, INPUTS,
+    SEPARATION_OCCURRED, SEPARATION_SERVO_STATUS, SEPARATION_TARGET_STATE, STEERING_STATUS,
+    ServoTargetState, SteeringStatus, WATCHDOG_STATE, arming_detection, deployment_task,
+    separation_task, steering_task,
 };
 use crate::servo::{RecoveryActuator, Servo};
 use crate::watchdog::Watchdog;
+use can_utils::rxtx::{TypedCanReceive as _, TypedCanTransmit as _};
+use can_utils::setup::setup_can;
+use data_core::can::hal::CanDecode;
+use datatypes::status::{ArmingState, StatusCommonMessage};
+use dp_recovery_board::{ActuatorStatus, RecoveryBoardStatus, SteeringPositions, WatchdogState};
 use embassy_executor::Spawner;
 use embassy_futures::join::join4;
 use embassy_stm32::can::CanTx;
@@ -34,8 +40,6 @@ use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant};
 use embassy_time::{Timer, with_timeout};
 use embedded_utils::fmt::*;
-use hermes_can::messages::Message;
-use hermes_can::messages::board_status::{ActuatorStatus, ArmingState, WatchdogState};
 
 mod clocks {
     include!(concat!(
@@ -67,7 +71,7 @@ const STATUS_CREATION_INTERVAL: Duration = Duration::from_millis(1000);
 
 /* END TIMER CONSTANTS */
 
-const THIS_BOARD_ID: hermes_can::messages::BoardId = hermes_can::messages::BoardId::RecoveryBoard;
+const THIS_BOARD_ID: datatypes::status::BoardId = datatypes::status::BoardId::RecoveryBoard;
 /* END CONSTANTS */
 
 mod built_info {
@@ -246,7 +250,7 @@ async fn main(spawner: Spawner) -> ! {
     // CAN FD
     // CAN.Rx is on PB8
     // CAN.Tx is on PB9
-    let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs);
+    let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (can_tx, mut can_rx, _prop) = can.split();
 
     /* END CAN BUS */
@@ -282,31 +286,31 @@ async fn main(spawner: Spawner) -> ! {
     //now start with CAN tx stuff
     let separation_target_state_tx = SEPARATION_TARGET_STATE.sender();
     let deployment_target_state_tx = DEPLOYMENT_TARGET_STATE.sender();
-    let steering_target_pos_tx = STEERING_TARGET_POSITIONS.sender();
-    let steering_pwr_tx = STEERING_POWER.sender();
+    let steering_target_pos_tx = INPUTS.steering_target_positions.sender();
+    let steering_pwr_tx = INPUTS.steering_power.sender();
     loop {
         match can_rx.recv().await {
-            Ok((msg, _tsp)) => {
+            Ok(msg) => {
                 led_red.set_low();
                 //handle received messages. They are already filtered
                 match msg {
-                    Message::ResetAll(_) => {
+                    ReceivedMessage::ResetAll(_) => {
                         info!("Resetting Recovery Board");
                         cortex_m::peripheral::SCB::sys_reset();
                     }
 
-                    Message::ResetSpecific(x) => {
-                        if x.board_id == THIS_BOARD_ID {
+                    ReceivedMessage::ResetSpecific(board) => {
+                        if board == THIS_BOARD_ID {
                             info!("Resetting Recovery Board");
                             cortex_m::peripheral::SCB::sys_reset();
                         }
                     }
 
-                    Message::UTCTimeUpdate(x) => {
+                    ReceivedMessage::UTCTimeUpdate(x) => {
                         info!("UTCTimeUpdate: {}", x);
                     }
 
-                    Message::RecoveryPowerConfig(x) => {
+                    ReceivedMessage::RecoveryPowerConfig(x) => {
                         info!("RecoveryPowerConfig: {}", x);
 
                         if x.steering_enabled {
@@ -328,17 +332,17 @@ async fn main(spawner: Spawner) -> ! {
                         }
                     }
 
-                    Message::SeparationTrigger(_) => {
+                    ReceivedMessage::SeparationTrigger(_) => {
                         info!("SeparationTrigger");
                         separation_target_state_tx.send(ServoTargetState::Actuated);
                     }
 
-                    Message::DeploymentTrigger(_) => {
+                    ReceivedMessage::DeploymentTrigger(_) => {
                         info!("DeploymentTrigger");
                         deployment_target_state_tx.send(ServoTargetState::Actuated);
                     }
 
-                    Message::SteeringTargetPositions(x) => {
+                    ReceivedMessage::SteeringTargetPositions(x) => {
                         info!("SteeringTargetPositions: {}", x);
                         // THIS IS IMPORTANT! Positive positions from FC mean pulling line in, resulting in negative positions
                         // to the steering motors
@@ -352,8 +356,6 @@ async fn main(spawner: Spawner) -> ! {
                             Err(_e) => {}
                         }
                     }
-
-                    _ => {}
                 }
             }
             Err(e) => {
@@ -397,7 +399,7 @@ async fn can_tx_task(can_tx: CanTx<'static>) {
         let mut steering_right_connected = false;
         let mut steering_watchdog_status = WatchdogState::default();
         let mut arming_state = ArmingState::default();
-        let mut common = hermes_can::messages::board_status::StatusCommonMessage::default();
+        let mut common = StatusCommonMessage::default();
 
         loop {
             if last + STATUS_CREATION_INTERVAL <= Instant::now() {
@@ -458,21 +460,26 @@ async fn can_tx_task(can_tx: CanTx<'static>) {
                 common.micros_since_restart = Instant::as_micros(&Instant::now());
 
                 //now actually construct the REC board status message with the data collected
-                let msg = hermes_can::messages::board_status::RecoveryBoardStatus {
+                let msg = RecoveryBoardStatus {
                     common: common.clone(),
-                    sep1_status: sep1_status.clone(),
-                    sep2_status: sep2_status.clone(),
-                    depl1_status: depl1_status.clone(),
-                    depl2_status: depl2_status.clone(),
-                    steering_general: steering_general.clone(),
+                    sep1_status,
+                    sep2_status,
+                    depl1_status,
+                    depl2_status,
+                    steering_general,
                     steering_left_connected,
                     steering_right_connected,
-                    steering_watchdog_status: steering_watchdog_status.clone(),
-                    arming_state: arming_state.clone(),
+                    steering_watchdog_status,
+                    arming_state,
                 };
                 info!("status: {}", msg);
                 let mut tx = can_tx.lock().await;
-                match with_timeout(CAN_TX_TIMEOUT, tx.transmit(msg)).await {
+                match with_timeout(
+                    CAN_TX_TIMEOUT,
+                    tx.transmit(dp_recovery_board::Message::BoardStatus(msg)),
+                )
+                .await
+                {
                     Ok(Ok(_)) => {
                         trace!("sent REC Board status message");
                     }
@@ -509,13 +516,18 @@ async fn can_tx_task(can_tx: CanTx<'static>) {
                         positions[1] = -right_data.angle;
                     };
 
-                    let msg = hermes_can::messages::event_messages::SteeringActualPositions {
+                    let msg = SteeringPositions {
                         left_pos: positions[0],
                         right_pos: positions[1],
                     };
                     info!("msg: {}", msg);
                     let mut tx = can_tx.lock().await;
-                    match with_timeout(CAN_TX_TIMEOUT, tx.transmit(msg)).await {
+                    match with_timeout(
+                        CAN_TX_TIMEOUT,
+                        tx.transmit(dp_recovery_board::Message::SteeringActualPositions(msg)),
+                    )
+                    .await
+                    {
                         Ok(Ok(_)) => {
                             trace!("sent steering actual positions");
                         }
@@ -538,9 +550,13 @@ async fn can_tx_task(can_tx: CanTx<'static>) {
         loop {
             let rx = separation_triggered_rx.changed().await;
             if rx {
-                let msg = hermes_can::messages::event_messages::SeparationOccurred {};
                 let mut tx = can_tx.lock().await;
-                match with_timeout(CAN_TX_TIMEOUT, tx.transmit(msg)).await {
+                match with_timeout(
+                    CAN_TX_TIMEOUT,
+                    tx.transmit(dp_recovery_board::Message::SeparationOccurred),
+                )
+                .await
+                {
                     Ok(Ok(_)) => {
                         trace!("sent Separation Occurred");
                     }
@@ -561,9 +577,13 @@ async fn can_tx_task(can_tx: CanTx<'static>) {
         loop {
             let rx = deployment_triggered_rx.changed().await;
             if rx {
-                let msg = hermes_can::messages::event_messages::DeploymentOccurred {};
                 let mut tx = can_tx.lock().await;
-                match with_timeout(CAN_TX_TIMEOUT, tx.transmit(msg)).await {
+                match with_timeout(
+                    CAN_TX_TIMEOUT,
+                    tx.transmit(dp_recovery_board::Message::DeploymentOccurred),
+                )
+                .await
+                {
                     Ok(Ok(_)) => {
                         trace!("sent Deployment Occurred");
                     }

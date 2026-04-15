@@ -2,6 +2,7 @@
 #![allow(clippy::collapsible_else_if)]
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
+use datatypes::status::ArmingState;
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Level, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
@@ -20,7 +21,7 @@ use crate::{
     SAFETY_SPIRAL_POS_RIGHT, SEPARATION_INITIAL_ANGLE, SEPARATION_SERVO_ANGLE, rsbl_servo,
     watchdog,
 };
-use hermes_can::messages::board_status::{ActuatorStatus, ArmingState, WatchdogState};
+use dp_recovery_board::{ActuatorStatus, WatchdogState};
 
 #[allow(unused_imports)]
 #[cfg(feature = "defmt")]
@@ -44,12 +45,20 @@ pub enum SteeringStatus {
     /// any data could be read or not
     Responsive([Option<RsblData>; 2]),
 }
-/// watch for giving steering target positions to steering_task
-pub static STEERING_TARGET_POSITIONS: Channel<CriticalSectionRawMutex, [i32; 2], 3> =
-    Channel::new();
 
-/// watch for setting steering power
-pub static STEERING_POWER: Watch<CriticalSectionRawMutex, bool, 1> = Watch::new();
+// TODO: collector
+pub struct Inputs {
+    /// watch for giving steering target positions to steering_task
+    pub steering_target_positions: Channel<CriticalSectionRawMutex, [i32; 2], 3>,
+
+    /// watch for setting steering power
+    pub steering_power: Watch<CriticalSectionRawMutex, bool, 1>,
+}
+
+pub static INPUTS: Inputs = Inputs {
+    steering_target_positions: Channel::new(),
+    steering_power: Watch::new(),
+};
 
 /// status that also includes the data read from the motors
 pub static STEERING_STATUS: Watch<CriticalSectionRawMutex, SteeringStatus, 2> = Watch::new();
@@ -68,8 +77,8 @@ pub async fn steering_task(
     steering_actuator_detect: Input<'static>,
     mut watchdog: watchdog::Watchdog,
 ) {
-    let motor_targets_rx = STEERING_TARGET_POSITIONS.receiver();
-    let mut motor_power = STEERING_POWER.receiver().unwrap();
+    let motor_targets_rx = INPUTS.steering_target_positions.receiver();
+    let mut motor_power = INPUTS.steering_power.receiver().unwrap();
     let steering_status = STEERING_STATUS.sender();
     let watchdog_state_tx = WATCHDOG_STATE.sender();
 
