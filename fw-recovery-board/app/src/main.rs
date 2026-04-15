@@ -18,6 +18,7 @@ use crate::recovery_actuator_control::{
 };
 use crate::servo::{RecoveryActuator, Servo};
 use crate::watchdog::Watchdog;
+use can_utils::collector::Collector as _;
 use can_utils::rxtx::{TypedCanReceive as _, TypedCanTransmit as _};
 use can_utils::setup::setup_can;
 use data_core::can::hal::CanDecode;
@@ -286,7 +287,6 @@ async fn main(spawner: Spawner) -> ! {
     //now start with CAN tx stuff
     let separation_target_state_tx = SEPARATION_TARGET_STATE.sender();
     let deployment_target_state_tx = DEPLOYMENT_TARGET_STATE.sender();
-    let steering_target_pos_tx = INPUTS.steering_target_positions.sender();
     let steering_pwr_tx = INPUTS.steering_power.sender();
     loop {
         match can_rx.recv().await {
@@ -341,20 +341,9 @@ async fn main(spawner: Spawner) -> ! {
                         info!("DeploymentTrigger");
                         deployment_target_state_tx.send(ServoTargetState::Actuated);
                     }
-
-                    ReceivedMessage::SteeringTargetPositions(x) => {
-                        info!("SteeringTargetPositions: {}", x);
-                        // THIS IS IMPORTANT! Positive positions from FC mean pulling line in, resulting in negative positions
-                        // to the steering motors
-                        match with_timeout(
-                            Duration::from_millis(100),
-                            steering_target_pos_tx.send([0 - x.left_pos, 0 - x.right_pos]),
-                        )
-                        .await
-                        {
-                            Ok(_) => {}
-                            Err(_e) => {}
-                        }
+                    msg => {
+                        // update the collected inputs and ignore if the message is irrelevant
+                        let _ = INPUTS.update_from(msg);
                     }
                 }
             }

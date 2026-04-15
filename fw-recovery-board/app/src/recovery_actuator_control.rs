@@ -1,5 +1,6 @@
 #![allow(clippy::single_match)]
 #![allow(clippy::collapsible_else_if)]
+use can_utils::collector::Collector;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
 use datatypes::status::ArmingState;
@@ -7,12 +8,12 @@ use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Level, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant};
 use embassy_time::{Timer, with_timeout};
 use embedded_utils::fmt::*;
 // this is maybe not nice, think about using another enum?
+use crate::can_io::ReceivedMessage;
 use crate::recovery_actuator_control::SteeringStatus::{Connected, NotConnected, Responsive};
 use crate::rsbl_servo::{LEFT, RIGHT, RsblData};
 use crate::servo::RecoveryActuator;
@@ -21,7 +22,7 @@ use crate::{
     SAFETY_SPIRAL_POS_RIGHT, SEPARATION_INITIAL_ANGLE, SEPARATION_SERVO_ANGLE, rsbl_servo,
     watchdog,
 };
-use dp_recovery_board::{ActuatorStatus, WatchdogState};
+use dp_recovery_board::{ActuatorStatus, SteeringPositions, WatchdogState};
 
 #[allow(unused_imports)]
 #[cfg(feature = "defmt")]
@@ -46,17 +47,22 @@ pub enum SteeringStatus {
     Responsive([Option<RsblData>; 2]),
 }
 
-// TODO: collector
+#[derive(Collector)]
+#[collector(
+    message_type = "ReceivedMessage",
+    update_expr = "#field.sender().send(#value);"
+)]
 pub struct Inputs {
     /// watch for giving steering target positions to steering_task
-    pub steering_target_positions: Channel<CriticalSectionRawMutex, [i32; 2], 3>,
+    #[collector(pattern = "ReceivedMessage::SteeringTargetPositions(#value)")]
+    pub steering_target_positions: Watch<CriticalSectionRawMutex, SteeringPositions, 3>,
 
     /// watch for setting steering power
     pub steering_power: Watch<CriticalSectionRawMutex, bool, 1>,
 }
 
 pub static INPUTS: Inputs = Inputs {
-    steering_target_positions: Channel::new(),
+    steering_target_positions: Watch::new(),
     steering_power: Watch::new(),
 };
 
@@ -77,7 +83,7 @@ pub async fn steering_task(
     steering_actuator_detect: Input<'static>,
     mut watchdog: watchdog::Watchdog,
 ) {
-    let motor_targets_rx = INPUTS.steering_target_positions.receiver();
+    let mut motor_targets_rx = INPUTS.steering_target_positions.receiver().unwrap();
     let mut motor_power = INPUTS.steering_power.receiver().unwrap();
     let steering_status = STEERING_STATUS.sender();
     let watchdog_state_tx = WATCHDOG_STATE.sender();
@@ -123,8 +129,8 @@ pub async fn steering_task(
                 // check that the watchdog is still active
                 if watchdog.check() {
                     // check if new values are available
-                    match motor_targets_rx.try_receive() {
-                        Ok(target_positions) => {
+                    match motor_targets_rx.try_changed() {
+                        Some(target_positions) => {
                             //on first value reception, activate watchdog
                             if !watchdog_active {
                                 watchdog.start();
@@ -133,9 +139,12 @@ pub async fn steering_task(
                             }
                             // pet the watchdog
                             watchdog.update();
-                            // set target positions to steering
+                            // set target positions to steering (flip as motors are counting revolutions the other way around)
                             match steering
-                                .steer_parachutes(target_positions[0], target_positions[1])
+                                .steer_parachutes(
+                                    -target_positions.left_pos,
+                                    -target_positions.right_pos,
+                                )
                                 .await
                             {
                                 Ok(()) => {}
@@ -144,7 +153,7 @@ pub async fn steering_task(
                                 }
                             }
                         }
-                        Err(_) => {}
+                        None => {}
                     }
                 } else {
                     if !safety_spiral_active {
