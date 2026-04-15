@@ -12,4 +12,4 @@ thiserror = { version = "2.0.18", default-features = false }
 defmt = { version = "0.3", optional = true }
 
 [features]
-defmt = ["dep:defmt"]
+defmt = ["dep:defmt", "embassy-stm32/defmt"]
