@@ -3,8 +3,8 @@ use crate::actuators::dpr::{
     PRESSURIZATION_ABORT_WATCH, PRESSURIZATION_INFO_WATCH, PRESSURIZATION_KP,
 };
 use crate::actuators::valves::{FSS_VENT_CONTROL, PRZ_VENT_CONTROL};
-use crate::drivers::digital_pressure::{
-    DIGITAL_PRESSURE_WATCH, DPR_PRESSURE_WATCH, KELLER_BUS_ERROR_WATCH,
+use crate::drivers::analog_pressure::{
+    DPR_PRESSURE_WATCH, FSS_TNK_P1_WATCH, FSS_TNK_P2_WATCH, PRZ_MNL_P_WATCH, get_filtered_tank_p,
 };
 use crate::sensors::{CAN_BOARD_STATUS_FREQ_HZ, CAN_PRESSURE_FREQ_HZ, CAN_VALVE_STATES_FREQ_HZ};
 use core::future::pending;
@@ -300,13 +300,6 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
 
 #[embassy_executor::task]
 pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
-    let mut pressure_watch = DIGITAL_PRESSURE_WATCH
-        .receiver()
-        .expect("[CAN Task] failed to get pressure watch");
-
-    let mut dpr_pressure_watch = DPR_PRESSURE_WATCH
-        .receiver()
-        .expect("[CAN Task] failed to get dpr pressure watch");
 
     // Our transmission policy is as follows:
     // Send new data when available, but only if a minimum period has elapsed since the last
@@ -319,41 +312,71 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
     const TX_TIMEOUT_MS: u64 = 100;
     const WATCH_TIMEOUT_MS: u64 = 5000;
 
-    // DigitalPressure (≈20 Hz)
+    // AnalogPressure (≈20 Hz)
     let pressure_task = async {
         let mut ticker = Ticker::every(Duration::from_millis(1000 / CAN_PRESSURE_FREQ_HZ as u64));
+
+        let mut prz_mnl_p_watch = PRZ_MNL_P_WATCH
+            .receiver()
+            .expect("[CAN Task] failed to get PRZ_MNL_P watch");
+
+        let mut fss_tnk_p1_watch = FSS_TNK_P1_WATCH
+            .receiver()
+            .expect("[CAN Task] failed to get FSS_TNK_P1 watch");
+
+        let mut fss_tnk_p2_watch = FSS_TNK_P2_WATCH
+            .receiver()
+            .expect("[CAN Task] failed to get FSS_TNK_P2 watch");
+
+        let dpr_pressure_sender = DPR_PRESSURE_WATCH.sender();
+
         loop {
-            let p = loop {
+            let prz_mnl_p = loop {
                 if let Ok(p) = with_timeout(
                     Duration::from_millis(WATCH_TIMEOUT_MS),
-                    pressure_watch.changed(),
+                    prz_mnl_p_watch.changed(),
                 )
                 .await
                 {
                     break p;
                 }
-                error!("[CAN Task] Timeout waiting for pressure data");
+                error!("[CAN Task] Timeout waiting for PRZ_MNL_P data");
             };
 
-            let fss_tnk_p_filtered = loop {
+            let fss_tnk_p1 = loop {
                 if let Ok(p) = with_timeout(
                     Duration::from_millis(WATCH_TIMEOUT_MS),
-                    dpr_pressure_watch.changed(),
+                    fss_tnk_p1_watch.changed(),
                 )
                 .await
                 {
                     break p;
                 }
-                error!("[CAN Task] Timeout waiting for dpr pressure data");
+                error!("[CAN Task] Timeout waiting for FSS_TNK_P1 data");
             };
+
+            let fss_tnk_p2 = loop {
+                if let Ok(p) = with_timeout(
+                    Duration::from_millis(WATCH_TIMEOUT_MS),
+                    fss_tnk_p2_watch.changed(),
+                )
+                .await
+                {
+                    break p;
+                }
+                error!("[CAN Task] Timeout waiting for FSS_TNK_P2 data");
+            };
+
+            let fss_tnk_p_filtered = get_filtered_tank_p(fss_tnk_p1, fss_tnk_p2);
+            dpr_pressure_sender.send(fss_tnk_p_filtered);
 
             let fuel_tank_pressure = FuelTankPressure {
-                fss_tnk_p1: p.fss_tnk_p1,
-                fss_tnk_p2: p.fss_tnk_p2,
+                fss_tnk_p1,
+                fss_tnk_p2,
                 fss_tnk_p_filtered,
             };
             let pressurization_line_pressure = PressurizationLinePressure {
-                prz_mnl_p: p.prz_mnl_p,
+                prz_mnl_p,
             };
 
             {
@@ -456,12 +479,10 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
 
     // Board Status Task (≈1 Hz)
     let board_status_task = async {
-        let mut keller_watcher = KELLER_BUS_ERROR_WATCH.receiver().unwrap();
-
         let mut data = FuelControlBoardStatus {
             common: Default::default(),
             thermocouple_status: Online,
-            pressure_bus: Default::default(),
+            pressure_bus: Online,
         };
 
         let start = Instant::now();
@@ -469,10 +490,6 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
             1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,
         ));
         loop {
-            if let Some(status) = keller_watcher.try_changed() {
-                data.pressure_bus = status;
-            }
-
             data.common.micros_since_restart = (Instant::now() - start).as_micros();
 
             {

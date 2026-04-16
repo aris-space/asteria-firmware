@@ -1,3 +1,5 @@
+pub(crate) mod analog_p;
+
 pub(crate) const ACQ_PRESSURE_FREQUENCY_HZ: f32 = 60.0; // max stable possible ~ 60 Hz
 
 pub(crate) const CAN_PRESSURE_FREQ_HZ: f32 = 20.0;

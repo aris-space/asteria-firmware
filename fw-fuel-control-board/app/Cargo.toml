@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Domenic Nebiker <dnebiker@aris-space.ch>"]
 
 [dependencies]
-keller-pressure = { path = "../../crates/devices/keller-pressure" }
+filters = { path = "../../crates/filters" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 hermes-can = { path = "../../hermes-can", version = "=0.3", features = [
     "defmt",
@@ -37,6 +37,7 @@ embassy-stm32 = { version = "*", features = [
     "unstable-pac",
     "exti",
     "single-bank",
+    "adc",
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768"] }
 embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread"] }
@@ -70,7 +71,6 @@ defmt = [
     "embassy-stm32/defmt",
     "embedded-hal-async/defmt-03",
     "embedded-hal-bus/defmt-03",
-    "keller-pressure/defmt",
 ]
 
 [[bin]]

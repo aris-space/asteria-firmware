@@ -1,80 +1,35 @@
 use crate::drivers::WATCH;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::watch::{Sender, Watch};
-use filters::GaussianMovingAverage;
+use embassy_sync::watch::Watch;
 
-const FILTER_WINDOW: usize = 10;
-const FILTER_MEAN: f32 = 3.0;
-const FILTER_SIGMA: f32 = 9.0;
+// 4-20 mA through 150 Ω shunt → 0.6 V … 3.0 V
+pub const V_MIN: f32 = 0.6;
+pub const V_MAX: f32 = 3.0;
 
-pub static ANALOG_PRESSURE_WATCH: Watch<ThreadModeRawMutex, AnalogPressureMeasurementFiltered, WATCH,> = Watch::new();
+// Sensor pressure range [bar] — Keller sensor datasheet
+pub const P_MIN_BAR: f32 = 0.0;
+pub const P_MAX_BAR: f32 = 200.0;
+
+// VREF used on the board
+pub const VREF: f32 = 3.3;
+
+pub const FILTER_WINDOW: usize = 10;
+pub const FILTER_MEAN: f32 = 3.0;
+pub const FILTER_SIGMA: f32 = 9.0;
+
+pub static PRZ_MNL_P_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
+pub static FSS_TNK_P1_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
+pub static FSS_TNK_P2_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
 pub static DPR_PRESSURE_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
 
-
-#[derive(Clone, Copy)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AnalogPressureMeasurementRaw {
-    pub prz_mnl_p: f32,
-    pub fss_tnk_p1: f32,
-    pub fss_tnk_p2: f32,
+pub fn raw_to_bar(raw: u16) -> f32 {
+    let voltage = raw as f32 * VREF / 4095.0;
+    P_MIN_BAR + (P_MAX_BAR - P_MIN_BAR) / (V_MAX - V_MIN) * (voltage - V_MIN)
 }
 
-#[derive(Clone, Copy)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AnalogPressureMeasurementFiltered {
-    pub prz_mnl_p: f32,
-    pub fss_tnk_p1: f32,
-    pub fss_tnk_p2: f32,
-}
-
-impl From<AnalogPressureMeasurementRaw> for AnalogPressureMeasurementFiltered {
-    fn from(raw: AnalogPressureMeasurementRaw) -> Self {
-        AnalogPressureMeasurementFiltered {
-            prz_mnl_p: raw.prz_mnl_p,
-            fss_tnk_p1: raw.fss_tnk_p1,
-            fss_tnk_p2: raw.fss_tnk_p2,
-        }
-    }
-}
-
-pub struct AnalogPressureDriver<'a> {
-    analog_watch_handle: Sender<'a, ThreadModeRawMutex, AnalogPressureMeasurementFiltered, WATCH>,
-    dpr_watch_handle: Sender<'a, ThreadModeRawMutex, f32, WATCH>,
-    prz_mnl_p_avg: GaussianMovingAverage<FILTER_WINDOW>,
-    fss_tnk_p1_avg: GaussianMovingAverage<FILTER_WINDOW>,
-    fss_tnk_p2_avg: GaussianMovingAverage<FILTER_WINDOW>,
-}
-
-impl<'a> AnalogPressureDriver<'a> {
-    pub fn new() -> Self {
-        let analog_watch_handle = ANALOG_PRESSURE_WATCH.sender();
-        let dpr_watch_handle = DPR_PRESSURE_WATCH.sender();
-
-        AnalogPressureDriver {
-            analog_watch_handle,
-            dpr_watch_handle,
-            prz_mnl_p_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
-            fss_tnk_p1_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
-            fss_tnk_p2_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
-        }
-    }
-
-    pub fn update(&mut self, mut value: AnalogPressureMeasurementRaw) {
-        // Apply filtering to the raw sensor data
-        value.prz_mnl_p = self.prz_mnl_p_avg.update(value.prz_mnl_p);
-        value.fss_tnk_p1 = self.fss_tnk_p1_avg.update(value.fss_tnk_p1);
-        value.fss_tnk_p2 = self.fss_tnk_p2_avg.update(value.fss_tnk_p2);
-
-        // Send the value to the watch channel
-        self.analog_watch_handle.send(value.into());
-
-        // Update DPR watch channel
-        let filtered_p = get_filtered_tank_p(value.fss_tnk_p1, value.fss_tnk_p2);
-        self.dpr_watch_handle.send(filtered_p);
-    }
-}
-
-fn get_filtered_tank_p(p1: f32, p2: f32) -> f32 {
+/// Returns the best available tank pressure from the two redundant sensors.
+/// Prefers the higher reading; falls back to whichever sensor is valid if one is NaN.
+pub fn get_filtered_tank_p(p1: f32, p2: f32) -> f32 {
     if p1.is_nan() && p2.is_nan() {
         f32::INFINITY
     } else if p1.is_nan() {
@@ -85,4 +40,3 @@ fn get_filtered_tank_p(p1: f32, p2: f32) -> f32 {
         f32::max(p1, p2)
     }
 }
-
