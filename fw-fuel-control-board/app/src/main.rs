@@ -37,8 +37,8 @@ use {defmt_rtt as _, panic_probe as _};
 use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::can_impl::{can_rx_task, can_tx_task, setup_can};
-use crate::drivers::analog_pressure::{FSS_TNK_P1_WATCH, FSS_TNK_P2_WATCH, PRZ_MNL_P_WATCH};
-use crate::sensors::analog_p::analog_pressure_sensor;
+use crate::drivers::analog_pressure::PRZ_MNL_P_WATCH;
+use crate::sensors::analog_p::{analog_pressure_sensor, fss_tank_pressure_task};
 
 use crate::buzzer::buzzer_task;
 #[allow(unused_imports)]
@@ -109,34 +109,21 @@ async fn main(spawner: Spawner) -> ! {
         .spawn(pid_controller(dpr_pin))
         .expect("dpr task failed");
 
-    spawner.spawn(valve_task(prz_vnt, fss_vnt).expect("valve task failed"));
+    spawner
+        .spawn(valve_task(prz_vnt, fss_vnt))
+        .expect("valve task failed");
 
-    spawner.spawn(can_rx_task(rx).unwrap());
-    spawner.spawn(can_tx_task(tx).unwrap());
+    spawner.spawn(can_rx_task(rx)).unwrap();
+    spawner.spawn(can_tx_task(tx)).unwrap();
+
+
 
     spawner.spawn(activity_blinky(green, yellow, red)).unwrap();
+
     spawner.spawn(buzzer_task(buzzer_pwm)).unwrap();
-    spawner
-        .spawn(analog_pressure_sensor(
-            adc1,
-            prz_mnl_p_ch,
-            PRZ_MNL_P_WATCH.sender(),
-        ))
-        .unwrap();
-    spawner
-        .spawn(analog_pressure_sensor(
-            adc2,
-            fss_tnk_p1_ch,
-            FSS_TNK_P1_WATCH.sender(),
-        ))
-        .unwrap();
-    spawner
-        .spawn(analog_pressure_sensor(
-            adc3,
-            fss_tnk_p2_ch,
-            FSS_TNK_P2_WATCH.sender(),
-        ))
-        .unwrap();
+    
+    spawner.spawn(analog_pressure_sensor(adc1, prz_mnl_p_ch, PRZ_MNL_P_WATCH.sender())).unwrap();
+    spawner.spawn(fss_tank_pressure_task(adc2, fss_tnk_p1_ch, adc3, fss_tnk_p2_ch)).unwrap();
 
     #[allow(unreachable_code)]
     loop {

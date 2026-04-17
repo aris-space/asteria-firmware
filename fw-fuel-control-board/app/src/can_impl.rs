@@ -3,9 +3,7 @@ use crate::actuators::dpr::{
     PRESSURIZATION_ABORT_WATCH, PRESSURIZATION_INFO_WATCH, PRESSURIZATION_KP,
 };
 use crate::actuators::valves::{FSS_VENT_CONTROL, PRZ_VENT_CONTROL};
-use crate::drivers::analog_pressure::{
-    DPR_PRESSURE_WATCH, FSS_TNK_P1_WATCH, FSS_TNK_P2_WATCH, PRZ_MNL_P_WATCH, get_filtered_tank_p,
-};
+use crate::drivers::analog_pressure::{FSS_TNK_P_WATCH, PRZ_MNL_P_WATCH};
 use crate::sensors::{CAN_BOARD_STATUS_FREQ_HZ, CAN_PRESSURE_FREQ_HZ, CAN_VALVE_STATES_FREQ_HZ};
 use core::future::pending;
 use core::panic;
@@ -320,15 +318,9 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
             .receiver()
             .expect("[CAN Task] failed to get PRZ_MNL_P watch");
 
-        let mut fss_tnk_p1_watch = FSS_TNK_P1_WATCH
+        let mut fss_tnk_p_watch = FSS_TNK_P_WATCH
             .receiver()
-            .expect("[CAN Task] failed to get FSS_TNK_P1 watch");
-
-        let mut fss_tnk_p2_watch = FSS_TNK_P2_WATCH
-            .receiver()
-            .expect("[CAN Task] failed to get FSS_TNK_P2 watch");
-
-        let dpr_pressure_sender = DPR_PRESSURE_WATCH.sender();
+            .expect("[CAN Task] failed to get FSS_TNK_P watch");
 
         loop {
             let prz_mnl_p = loop {
@@ -343,37 +335,22 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
                 error!("[CAN Task] Timeout waiting for PRZ_MNL_P data");
             };
 
-            let fss_tnk_p1 = loop {
+            let fss_tnk = loop {
                 if let Ok(p) = with_timeout(
                     Duration::from_millis(WATCH_TIMEOUT_MS),
-                    fss_tnk_p1_watch.changed(),
+                    fss_tnk_p_watch.changed(),
                 )
                 .await
                 {
                     break p;
                 }
-                error!("[CAN Task] Timeout waiting for FSS_TNK_P1 data");
+                error!("[CAN Task] Timeout waiting for FSS_TNK_P data");
             };
-
-            let fss_tnk_p2 = loop {
-                if let Ok(p) = with_timeout(
-                    Duration::from_millis(WATCH_TIMEOUT_MS),
-                    fss_tnk_p2_watch.changed(),
-                )
-                .await
-                {
-                    break p;
-                }
-                error!("[CAN Task] Timeout waiting for FSS_TNK_P2 data");
-            };
-
-            let fss_tnk_p_filtered = get_filtered_tank_p(fss_tnk_p1, fss_tnk_p2);
-            dpr_pressure_sender.send(fss_tnk_p_filtered);
 
             let fuel_tank_pressure = FuelTankPressure {
-                fss_tnk_p1,
-                fss_tnk_p2,
-                fss_tnk_p_filtered,
+                fss_tnk_p1: fss_tnk.fss_tnk_p1,
+                fss_tnk_p2: fss_tnk.fss_tnk_p2,
+                fss_tnk_p_filtered: fss_tnk.dpr_pressure,
             };
             let pressurization_line_pressure = PressurizationLinePressure {
                 prz_mnl_p,

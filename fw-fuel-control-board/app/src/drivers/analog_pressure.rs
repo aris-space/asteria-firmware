@@ -18,9 +18,13 @@ pub const FILTER_MEAN: f32 = 3.0;
 pub const FILTER_SIGMA: f32 = 9.0;
 
 pub static PRZ_MNL_P_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
-pub static FSS_TNK_P1_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
-pub static FSS_TNK_P2_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
-pub static DPR_PRESSURE_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
+pub static  FSS_TNK_P_WATCH: Watch<ThreadModeRawMutex, FuelTankPressureMeasurement, WATCH> = Watch::new();
+
+pub struct FuelTankPressureMeasurement{
+    pub fss_tnk_p1: f32,
+    pub fss_tnk_p2: f32,
+    pub dpr_pressure: f32,
+}
 
 pub fn raw_to_bar(raw: u16) -> f32 {
     let voltage = raw as f32 * VREF / 4095.0;

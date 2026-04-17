@@ -3,7 +3,7 @@
 use crate::actuators::{CYCLE_TIME_MS, KD, KI, KP, SAFETY_LIMIT_BARG};
 use crate::buzzer::{BUZZER_WATCH, BuzzerState};
 use crate::drivers::WATCH;
-use crate::drivers::digital_pressure::DPR_PRESSURE_WATCH;
+use crate::drivers::analog_pressure::FSS_TNK_P_WATCH;
 use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -32,7 +32,7 @@ pub static PRESSURIZATION_KP: Mutex<ThreadModeRawMutex, f32> = Mutex::new(1.0);
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
-    let mut p_watcher = DPR_PRESSURE_WATCH.receiver().unwrap();
+    let mut p_watcher = FSS_TNK_P_WATCH.receiver().unwrap();
     let mut dpr_control_loop_receiver = DPR_CONTROL_LOOP_WATCH.receiver().unwrap();
     let mut pressurization_receiver = DPR_PRESSURIZATION_WATCH.receiver().unwrap();
     let pressurization_info = PRESSURIZATION_INFO_WATCH.sender();
@@ -95,7 +95,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
                     }
 
                     // Read current pressure
-                    let current_pressure = p_watcher.get().await;
+                    let current_pressure = p_watcher.get().await.dpr_pressure;
 
                     // Exit if target is reached
                     if current_pressure >= target_pressure {
@@ -127,7 +127,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         }
 
         // Update pressure reading with available data
-        pressure = p_watcher.get().await;
+        pressure = p_watcher.get().await.dpr_pressure;
 
         // Safety check
         if pressure >= SAFETY_LIMIT_BARG {
