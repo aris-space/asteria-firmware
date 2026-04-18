@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use crate::drivers::WATCH;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::{Sender, Watch};

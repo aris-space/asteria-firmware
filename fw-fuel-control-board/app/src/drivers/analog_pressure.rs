@@ -1,4 +1,5 @@
 use crate::drivers::WATCH;
+use datatypes::units::BarG;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 
@@ -17,13 +18,15 @@ pub const FILTER_WINDOW: usize = 10;
 pub const FILTER_MEAN: f32 = 3.0;
 pub const FILTER_SIGMA: f32 = 9.0;
 
-pub static PRZ_MNL_P_WATCH: Watch<ThreadModeRawMutex, f32, WATCH> = Watch::new();
-pub static  FSS_TNK_P_WATCH: Watch<ThreadModeRawMutex, FuelTankPressureMeasurement, WATCH> = Watch::new();
+pub static PRESSURIZATION_PRESSURE_WATCH: Watch<ThreadModeRawMutex, BarG, WATCH> = Watch::new();
+pub static FUEL_TANK_PRESSURE_WATCH: Watch<ThreadModeRawMutex, FuelTankPressureMeasurement, WATCH> =
+    Watch::new();
 
-pub struct FuelTankPressureMeasurement{
-    pub fss_tnk_p1: f32,
-    pub fss_tnk_p2: f32,
-    pub dpr_pressure: f32,
+#[derive(Clone, Copy)]
+pub struct FuelTankPressureMeasurement {
+    pub fuel_tank_pressure_1: BarG,
+    pub fuel_tank_pressure_2: BarG,
+    pub dpr_pressure: BarG,
 }
 
 pub fn raw_to_bar(raw: u16) -> f32 {

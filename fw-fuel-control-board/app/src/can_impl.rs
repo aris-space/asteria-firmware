@@ -3,7 +3,7 @@ use crate::actuators::dpr::{
     PRESSURIZATION_ABORT_WATCH, PRESSURIZATION_INFO_WATCH, PRESSURIZATION_KP,
 };
 use crate::actuators::valves::{FSS_VENT_CONTROL, PRZ_VENT_CONTROL};
-use crate::drivers::analog_pressure::{FSS_TNK_P_WATCH, PRZ_MNL_P_WATCH};
+use crate::drivers::analog_pressure::{FUEL_TANK_PRESSURE_WATCH, PRESSURIZATION_PRESSURE_WATCH};
 use crate::sensors::{CAN_BOARD_STATUS_FREQ_HZ, CAN_PRESSURE_FREQ_HZ, CAN_VALVE_STATES_FREQ_HZ};
 use core::future::pending;
 use core::panic;
@@ -314,13 +314,13 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
     let pressure_task = async {
         let mut ticker = Ticker::every(Duration::from_millis(1000 / CAN_PRESSURE_FREQ_HZ as u64));
 
-        let mut prz_mnl_p_watch = PRZ_MNL_P_WATCH
+        let mut prz_mnl_p_watch = PRESSURIZATION_PRESSURE_WATCH
             .receiver()
-            .expect("[CAN Task] failed to get PRZ_MNL_P watch");
+            .expect("[CAN Task] failed to get PRESSURIZATION_COPV_PRESSURE watch");
 
-        let mut fss_tnk_p_watch = FSS_TNK_P_WATCH
+        let mut fss_tnk_p_watch = FUEL_TANK_PRESSURE_WATCH
             .receiver()
-            .expect("[CAN Task] failed to get FSS_TNK_P watch");
+            .expect("[CAN Task] failed to get FUEL_TANK_PRESSURE watch");
 
         loop {
             let prz_mnl_p = loop {
@@ -332,10 +332,10 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
                 {
                     break p;
                 }
-                error!("[CAN Task] Timeout waiting for PRZ_MNL_P data");
+                error!("[CAN Task] Timeout waiting for PRESSURIZATION_COPV_PRESSURE data");
             };
 
-            let fss_tnk = loop {
+            let fss_tnk_p = loop {
                 if let Ok(p) = with_timeout(
                     Duration::from_millis(WATCH_TIMEOUT_MS),
                     fss_tnk_p_watch.changed(),
@@ -344,16 +344,16 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
                 {
                     break p;
                 }
-                error!("[CAN Task] Timeout waiting for FSS_TNK_P data");
+                error!("[CAN Task] Timeout waiting for FUEL_TANK_PRESSURE data");
             };
 
             let fuel_tank_pressure = FuelTankPressure {
-                fss_tnk_p1: fss_tnk.fss_tnk_p1,
-                fss_tnk_p2: fss_tnk.fss_tnk_p2,
-                fss_tnk_p_filtered: fss_tnk.dpr_pressure,
+                fss_tnk_p1: fss_tnk_p.fuel_tank_pressure_1.0,
+                fss_tnk_p2: fss_tnk_p.fuel_tank_pressure_2.0,
+                fss_tnk_p_filtered: fss_tnk_p.dpr_pressure.0,
             };
             let pressurization_line_pressure = PressurizationLinePressure {
-                prz_mnl_p,
+                prz_mnl_p: prz_mnl_p.0,
             };
 
             {

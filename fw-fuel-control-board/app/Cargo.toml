@@ -6,6 +6,7 @@ authors = ["Domenic Nebiker <dnebiker@aris-space.ch>"]
 
 [dependencies]
 filters = { path = "../../crates/filters" }
+datatypes = { path = "../../../asteria-data-definitions/datatypes", features = ["derive_defmt"] }
 embedded-utils = { path = "../../crates/embedded-utils" }
 hermes-can = { path = "../../hermes-can", version = "=0.3", features = [
     "defmt",
@@ -37,7 +38,6 @@ embassy-stm32 = { version = "*", features = [
     "unstable-pac",
     "exti",
     "single-bank",
-    "adc",
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768"] }
 embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread"] }

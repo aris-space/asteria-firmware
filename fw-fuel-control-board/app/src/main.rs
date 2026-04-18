@@ -37,7 +37,6 @@ use {defmt_rtt as _, panic_probe as _};
 use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::can_impl::{can_rx_task, can_tx_task, setup_can};
-use crate::drivers::analog_pressure::PRZ_MNL_P_WATCH;
 use crate::sensors::analog_p::{analog_pressure_sensor, fss_tank_pressure_task};
 
 use crate::buzzer::buzzer_task;
@@ -92,14 +91,9 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // Keller pressure sensors (analog)
-    let adc1 = embassy_stm32::adc::Adc::new(p.ADC1);
-    let prz_mnl_p_ch = p.PC0.degrade_adc();
-   
-    let adc2 = embassy_stm32::adc::Adc::new(p.ADC2);
-    let fss_tnk_p1_ch = p.PC1.degrade_adc();
-    
-    let adc3 = embassy_stm32::adc::Adc::new(p.ADC3);
-    let fss_tnk_p2_ch = p.PB13.degrade_adc();
+    let adc1 = embassy_stm32::adc::Adc::new(p.ADC1, Default::default());
+    let adc2 = embassy_stm32::adc::Adc::new(p.ADC2, Default::default());
+    let adc3 = embassy_stm32::adc::Adc::new(p.ADC3, Default::default());
 
     // Can Bus
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs);
@@ -116,14 +110,14 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(can_rx_task(rx)).unwrap();
     spawner.spawn(can_tx_task(tx)).unwrap();
 
-
-
     spawner.spawn(activity_blinky(green, yellow, red)).unwrap();
 
     spawner.spawn(buzzer_task(buzzer_pwm)).unwrap();
-    
-    spawner.spawn(analog_pressure_sensor(adc1, prz_mnl_p_ch, PRZ_MNL_P_WATCH.sender())).unwrap();
-    spawner.spawn(fss_tank_pressure_task(adc2, fss_tnk_p1_ch, adc3, fss_tnk_p2_ch)).unwrap();
+
+    spawner.spawn(analog_pressure_sensor(adc1, p.PC0)).unwrap();
+    spawner
+        .spawn(fss_tank_pressure_task(adc2, p.PC1, adc3, p.PB13))
+        .unwrap();
 
     #[allow(unreachable_code)]
     loop {
