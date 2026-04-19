@@ -1,6 +1,7 @@
 use crate::buzzer::BuzzerState;
 use crate::drivers::WATCH;
 use crate::drivers::analog_pressure::FuelTankPressureMeasurement;
+use crate::drivers::solenoid_detection::SolenoidStates;
 use datatypes::units::BarG;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -25,6 +26,8 @@ pub struct BoardState {
     pub fuel_vent_control: Watch<ThreadModeRawMutex, ValveState, WATCH>,
     // Buzzer
     pub buzzer: Watch<ThreadModeRawMutex, BuzzerState, WATCH>,
+    // Solenoid detection
+    pub solenoid_states: Watch<ThreadModeRawMutex, SolenoidStates, WATCH>,
 }
 
 impl BoardState {
@@ -40,6 +43,7 @@ impl BoardState {
             pressurization_vent_control: Watch::new(),
             fuel_vent_control: Watch::new(),
             buzzer: Watch::new(),
+            solenoid_states: Watch::new(),
         }
     }
 }

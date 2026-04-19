@@ -38,6 +38,7 @@ use {defmt_rtt as _, panic_probe as _};
 use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::can_impl::{can_rx_task, can_tx_task, setup_can};
+use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::sensors::analog_p::{analog_pressure_sensor, fss_tank_pressure_task};
 
 use crate::buzzer::buzzer_task;
@@ -75,10 +76,10 @@ async fn main(spawner: Spawner) -> ! {
     let red = Output::new(p.PB2, Level::High, Speed::Low);
 
     // Solenoids
-    let prz_vnt = Output::new(p.PB5, Level::Low, Speed::Medium);
-    let fss_vnt = Output::new(p.PB4, Level::Low, Speed::Medium);
+    let pressurization_vent_valve = Output::new(p.PB5, Level::Low, Speed::Medium);
+    let fuel_vent_valve = Output::new(p.PB4, Level::Low, Speed::Medium);
 
-    let dpr_pin = Output::new(p.PB6, Level::Low, Speed::VeryHigh);
+    let fuel_dpr_valve = Output::new(p.PB6, Level::Low, Speed::VeryHigh);
 
     let buzzer_pwm_pin = PwmPin::new(p.PB10, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
@@ -101,11 +102,11 @@ async fn main(spawner: Spawner) -> ! {
     let (tx, rx, _) = can.split();
 
     spawner
-        .spawn(pid_controller(dpr_pin))
+        .spawn(pid_controller(fuel_dpr_valve))
         .expect("dpr task failed");
 
     spawner
-        .spawn(valve_task(prz_vnt, fss_vnt))
+        .spawn(valve_task(pressurization_vent_valve, fuel_vent_valve))
         .expect("valve task failed");
 
     spawner.spawn(can_rx_task(rx)).unwrap();
@@ -118,6 +119,11 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(analog_pressure_sensor(adc1, p.PC0)).unwrap();
     spawner
         .spawn(fss_tank_pressure_task(adc2, p.PC1, adc3, p.PB13))
+        .unwrap();
+
+    // TODO: Replace PA0/PA1/PA2 with the correct solenoid detection pins
+    spawner
+        .spawn(solenoid_detection_task(p.PA0, p.PA1, p.PA2))
         .unwrap();
 
     #[allow(unreachable_code)]
