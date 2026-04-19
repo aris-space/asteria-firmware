@@ -117,6 +117,7 @@ name = "can-hal"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "defmt 1.0.1",
  "embedded-can",
  "thiserror",
 ]
@@ -128,7 +129,9 @@ dependencies = [
  "can-hal",
  "collector-derive",
  "defmt 0.3.100",
+ "embassy-executor",
  "embassy-stm32",
+ "embassy-sync",
  "embedded-can",
  "embedded-utils",
  "thiserror",
@@ -388,6 +391,7 @@ version = "0.3.0"
 dependencies = [
  "data-core",
  "datatypes",
+ "defmt 1.0.1",
  "gated-derive",
 ]
 
@@ -683,6 +687,7 @@ dependencies = [
 name = "embedded-utils"
 version = "0.1.0"
 dependencies = [
+ "defmt 0.3.100",
  "embassy-time",
 ]
 

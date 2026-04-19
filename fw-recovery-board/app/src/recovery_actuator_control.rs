@@ -7,7 +7,7 @@ use datatypes::status::ArmingState;
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Level, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant};
 use embassy_time::{Timer, with_timeout};
@@ -15,7 +15,7 @@ use embedded_utils::fmt::*;
 // this is maybe not nice, think about using another enum?
 use crate::can_io::ReceivedMessage;
 use crate::recovery_actuator_control::SteeringStatus::{Connected, NotConnected, Responsive};
-use crate::rsbl_servo::{LEFT, RIGHT, RsblData};
+use crate::rsbl_servo::{LEFT, RIGHT};
 use crate::servo::RecoveryActuator;
 use crate::{
     DEPLOYMENT_INITIAL_ANGLE, DEPLOYMENT_SERVO_ANGLE, SAFETY_SPIRAL_POS_LEFT,
@@ -41,10 +41,8 @@ pub enum SteeringStatus {
     /// This state is only possible before power is on
     Connected,
 
-    /// in this array is saved the Motor data from the REC board. In data0 is the array containing the left data,
-    /// while in data1 is the array containing the right data. The data is wrapped in an option to indicate if
-    /// any data could be read or not
-    Responsive([Option<RsblData>; 2]),
+    /// Indicates if data from the motors could be read or not for [left, right].
+    Responsive([bool; 2]),
 }
 
 #[derive(Collector)]
@@ -66,7 +64,16 @@ pub static INPUTS: Inputs = Inputs {
     steering_power: Watch::new(),
 };
 
-/// status that also includes the data read from the motors
+pub struct Outputs {
+    /// Position data read from the motors
+    pub steering_actual_positions: Watch<ThreadModeRawMutex, Option<SteeringPositions>, 2>,
+}
+
+pub static OUTPUTS: Outputs = Outputs {
+    steering_actual_positions: Watch::new(),
+};
+
+/// status that of the motors
 pub static STEERING_STATUS: Watch<CriticalSectionRawMutex, SteeringStatus, 2> = Watch::new();
 
 /// indicator for power for steering (setting target positions etc. just won't do anything if this is not true)
@@ -86,6 +93,7 @@ pub async fn steering_task(
     let mut motor_targets_rx = INPUTS.steering_target_positions.receiver().unwrap();
     let mut motor_power = INPUTS.steering_power.receiver().unwrap();
     let steering_status = STEERING_STATUS.sender();
+    let steering_positions = OUTPUTS.steering_actual_positions.sender();
     let watchdog_state_tx = WATCHDOG_STATE.sender();
 
     let power_task = async {
@@ -174,13 +182,16 @@ pub async fn steering_task(
                     }
                 }
 
-                let mut angles = [None, None];
+                let mut positions = SteeringPositions::default();
+                let mut connectedness = [false; 2];
                 // read out position data for both servos roughly every 100 ms
                 if Instant::now() - last >= Duration::from_millis(100) {
                     last = Instant::now();
                     match steering.read_steering_data(LEFT).await {
                         Ok(left_val) => {
-                            angles[0] = left_val;
+                            // SteeringPositions is flipped from what the driver outputs.
+                            positions.left_pos = -left_val.map(|d| d.angle).unwrap_or_default();
+                            connectedness[0] = left_val.is_some();
                         }
                         Err(e) => {
                             error!("Error in reading left steering data: {:?}", e)
@@ -188,13 +199,20 @@ pub async fn steering_task(
                     }
                     match steering.read_steering_data(RIGHT).await {
                         Ok(right_val) => {
-                            angles[1] = right_val;
+                            // SteeringPositions is flipped from what the driver outputs.
+                            positions.right_pos = -right_val.map(|d| d.angle).unwrap_or_default();
+                            connectedness[1] = right_val.is_some();
                         }
                         Err(e) => {
                             error!("Error in reading right steering data: {:?}", e)
                         }
                     }
-                    steering_status.send(Responsive(angles));
+                    steering_positions.send(if connectedness[0] && connectedness[1] {
+                        Some(positions)
+                    } else {
+                        None
+                    });
+                    steering_status.send(Responsive(connectedness));
                 }
             } else {
                 // deactivate steering, make sure to wait a bit...

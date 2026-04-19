@@ -45,6 +45,7 @@ defmt = [
     "dep:defmt",
     "dep:defmt-rtt",
     "can-utils/defmt",
+    "data-core/defmt",
     "dp-recovery-board/derive_defmt",
     "dp-system-management/derive_defmt",
     "panic-probe/defmt",
@@ -58,6 +59,7 @@ defmt = [
     "embassy-stm32/defmt",
     "embedded-hal-async/defmt-03",
     "embedded-hal-bus/defmt-03",
+    "embedded-utils/defmt",
 ]
 
 [[bin]]
