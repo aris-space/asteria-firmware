@@ -7,28 +7,35 @@ use embassy_stm32::can::{
     frame::{FdFrame, Header},
 };
 use embedded_can::Id;
-use embedded_utils::fmt::warn;
+use embedded_utils::fmt::{Format, warn};
 
 /// Trait for types that can transmit CAN messages asynchronously.
 pub trait TypedCanTransmit {
-    type Error: core::error::Error;
+    type Error: core::error::Error + Format;
 
     /// Transmit a CAN message.
     ///
     /// Returns `Err(CanError)` if encoding or bus transmission fails.
-    #[allow(async_fn_in_trait)] // We'll try and maybe change it later
-    async fn transmit<M: CanEncode>(&mut self, msg: M) -> Result<(), Self::Error>;
+    fn transmit<M: CanEncode + Send>(
+        &mut self,
+        msg: M,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> + Send
+    where
+        M::Error: Format;
 }
 
 /// Trait for types that can receive CAN messages asynchronously.
 pub trait TypedCanReceive {
-    type Error: core::error::Error;
+    type Error: core::error::Error + Format;
 
     /// Receive the next CAN message.
     ///
     /// Returns `Err(CanError)` if the frame is invalid or bus read fails.
-    #[allow(async_fn_in_trait)] // We'll try and maybe change it later
-    async fn recv<M: CanDecode>(&mut self) -> Result<M, Self::Error>;
+    fn recv<M: CanDecode>(
+        &mut self,
+    ) -> impl core::future::Future<Output = Result<M, Self::Error>> + Send
+    where
+        M::Error: Format;
 }
 
 /// Error type for CAN TX operations.
@@ -59,7 +66,10 @@ pub enum RxError {
 impl<'a> TypedCanTransmit for CanTx<'a> {
     type Error = TxError;
 
-    async fn transmit<M: CanEncode>(&mut self, msg: M) -> Result<(), Self::Error> {
+    async fn transmit<M: CanEncode>(&mut self, msg: M) -> Result<(), Self::Error>
+    where
+        M::Error: Format,
+    {
         let mut buf = [0u8; 64];
         let (id, len) = msg.encode_into(&mut buf).map_err(|e| {
             warn!("cannot encode: {}", e);
@@ -82,7 +92,10 @@ impl<'a> TypedCanTransmit for CanTx<'a> {
 }
 impl<'a> TypedCanReceive for CanRx<'a> {
     type Error = RxError;
-    async fn recv<M: CanDecode>(&mut self) -> Result<M, Self::Error> {
+    async fn recv<M: CanDecode>(&mut self) -> Result<M, Self::Error>
+    where
+        M::Error: Format,
+    {
         let envelope = self.read_fd().await.map_err(RxError::Bus)?;
         let frame = envelope.frame;
 
