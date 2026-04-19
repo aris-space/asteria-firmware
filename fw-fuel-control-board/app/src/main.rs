@@ -5,6 +5,7 @@ mod build_info;
 mod buzzer;
 mod can_impl;
 mod drivers;
+mod globals;
 mod sensors;
 
 use core::future::pending;

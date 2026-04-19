@@ -1,7 +1,4 @@
-use crate::drivers::WATCH;
 use datatypes::units::BarG;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::watch::Watch;
 
 // 4-20 mA through 150 Ω shunt → 0.6 V … 3.0 V
 pub const V_MIN: f32 = 0.6;
@@ -17,10 +14,6 @@ pub const VREF: f32 = 3.3;
 pub const FILTER_WINDOW: usize = 10;
 pub const FILTER_MEAN: f32 = 3.0;
 pub const FILTER_SIGMA: f32 = 9.0;
-
-pub static PRESSURIZATION_PRESSURE_WATCH: Watch<ThreadModeRawMutex, BarG, WATCH> = Watch::new();
-pub static FUEL_TANK_PRESSURE_WATCH: Watch<ThreadModeRawMutex, FuelTankPressureMeasurement, WATCH> =
-    Watch::new();
 
 #[derive(Clone, Copy)]
 pub struct FuelTankPressureMeasurement {

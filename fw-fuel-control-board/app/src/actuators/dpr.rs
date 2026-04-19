@@ -1,45 +1,26 @@
 #![allow(unused_assignments)]
 
 use crate::actuators::{CYCLE_TIME_MS, KD, KI, KP, SAFETY_LIMIT_BARG};
-use crate::buzzer::{BUZZER_WATCH, BuzzerState};
-use crate::drivers::WATCH;
-use crate::drivers::analog_pressure::FUEL_TANK_PRESSURE_WATCH;
+use crate::buzzer::BuzzerState;
+use crate::globals::STATE;
 use embassy_stm32::gpio::Output;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::mutex::Mutex;
-use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Ticker, Timer, with_timeout};
 use embedded_utils::fmt::warn;
 use embedded_utils::trace;
 use hermes_can::messages::board_status::ValveState::{Active, Inactive};
 use hermes_can::messages::event_messages::DprState::{Disabled, Enabled};
-use hermes_can::messages::event_messages::{
-    DprState, FuelPressurization, FuelPressurizationAbort, FuelPressurizationCompleted,
-};
-
-pub static DPR_CONTROL_LOOP_WATCH: Watch<ThreadModeRawMutex, DprState, WATCH> = Watch::new();
-pub static DPR_PRESSURIZATION_WATCH: Watch<ThreadModeRawMutex, FuelPressurization, WATCH> =
-    Watch::new();
-pub static PRESSURIZATION_INFO_WATCH: Watch<
-    ThreadModeRawMutex,
-    FuelPressurizationCompleted,
-    WATCH,
-> = Watch::new();
-pub static PRESSURIZATION_ABORT_WATCH: Watch<ThreadModeRawMutex, FuelPressurizationAbort, WATCH> =
-    Watch::new();
-
-pub static PRESSURIZATION_KP: Mutex<ThreadModeRawMutex, f32> = Mutex::new(1.0);
+use hermes_can::messages::event_messages::{DprState, FuelPressurization, FuelPressurizationCompleted};
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
-    let mut p_watcher = FUEL_TANK_PRESSURE_WATCH.receiver().unwrap();
-    let mut dpr_control_loop_receiver = DPR_CONTROL_LOOP_WATCH.receiver().unwrap();
-    let mut pressurization_receiver = DPR_PRESSURIZATION_WATCH.receiver().unwrap();
-    let pressurization_info = PRESSURIZATION_INFO_WATCH.sender();
-    let mut pressurization_abort_receiver = PRESSURIZATION_ABORT_WATCH.receiver().unwrap();
+    let mut p_watcher = STATE.fuel_tank_pressure.receiver().unwrap();
+    let mut dpr_control_loop_receiver = STATE.dpr_control_loop.receiver().unwrap();
+    let mut pressurization_receiver = STATE.dpr_pressurization.receiver().unwrap();
+    let pressurization_info = STATE.pressurization_info.sender();
+    let mut pressurization_abort_receiver = STATE.pressurization_abort.receiver().unwrap();
 
-    let dpr_control_loop_sender = DPR_CONTROL_LOOP_WATCH.sender();
-    let buzzer_error_sender = BUZZER_WATCH.sender();
+    let dpr_control_loop_sender = STATE.dpr_control_loop.sender();
+    let buzzer_error_sender = STATE.buzzer.sender();
 
     let mut setpoint = 0.0;
     let mut error_p = 0.0;
@@ -79,7 +60,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
             valve_pin.set_low();
 
             // Get the current proportional gain
-            let kp = *PRESSURIZATION_KP.lock().await;
+            let kp = *STATE.pressurization_kp.lock().await;
 
             let target_margin = (1.0 + pressurization_alpha) * target_pressure;
 

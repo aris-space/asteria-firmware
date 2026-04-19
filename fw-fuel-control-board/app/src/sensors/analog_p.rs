@@ -1,7 +1,8 @@
 use crate::drivers::analog_pressure::{
-    FILTER_MEAN, FILTER_SIGMA, FILTER_WINDOW, FUEL_TANK_PRESSURE_WATCH,
-    FuelTankPressureMeasurement, PRESSURIZATION_PRESSURE_WATCH, get_filtered_tank_p, raw_to_bar,
+    FILTER_MEAN, FILTER_SIGMA, FILTER_WINDOW, FuelTankPressureMeasurement, get_filtered_tank_p,
+    raw_to_bar,
 };
+use crate::globals::STATE;
 use crate::sensors::ACQ_PRESSURE_FREQUENCY_HZ;
 use datatypes::units::BarG;
 use embassy_stm32::Peri;
@@ -16,7 +17,7 @@ pub async fn analog_pressure_sensor(
     mut adc: Adc<'static, ADC1>,
     mut channel: Peri<'static, PC0>,
 ) -> ! {
-    let p_sender = PRESSURIZATION_PRESSURE_WATCH.sender();
+    let p_sender = STATE.pressurization_pressure.sender();
 
     let mut filter: GaussianMovingAverage<FILTER_WINDOW> =
         GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN);
@@ -40,7 +41,7 @@ pub async fn fss_tank_pressure_task(
     mut adc_b: Adc<'static, ADC3>,
     mut ch_b: Peri<'static, PB13>,
 ) -> ! {
-    let p_sender = FUEL_TANK_PRESSURE_WATCH.sender();
+    let p_sender = STATE.fuel_tank_pressure.sender();
 
     let mut filter_a: GaussianMovingAverage<FILTER_WINDOW> =
         GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN);

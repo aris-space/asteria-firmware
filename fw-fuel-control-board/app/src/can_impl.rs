@@ -1,9 +1,4 @@
-use crate::actuators::dpr::{DPR_CONTROL_LOOP_WATCH, DPR_PRESSURIZATION_WATCH};
-use crate::actuators::dpr::{
-    PRESSURIZATION_ABORT_WATCH, PRESSURIZATION_INFO_WATCH, PRESSURIZATION_KP,
-};
-use crate::actuators::valves::{FSS_VENT_CONTROL, PRZ_VENT_CONTROL};
-use crate::drivers::analog_pressure::{FUEL_TANK_PRESSURE_WATCH, PRESSURIZATION_PRESSURE_WATCH};
+use crate::globals::STATE;
 use crate::sensors::{CAN_BOARD_STATUS_FREQ_HZ, CAN_PRESSURE_FREQ_HZ, CAN_VALVE_STATES_FREQ_HZ};
 use core::future::pending;
 use core::panic;
@@ -165,11 +160,11 @@ const THIS_BOARD_ID: hermes_can::messages::BoardId =
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
-    let dpr_ctrl_sender = DPR_CONTROL_LOOP_WATCH.sender();
-    let prz_vnt_sender = PRZ_VENT_CONTROL.sender();
-    let fuel_vnt_sender = FSS_VENT_CONTROL.sender();
-    let pressurization_sender = DPR_PRESSURIZATION_WATCH.sender();
-    let pressurization_abort_sender = PRESSURIZATION_ABORT_WATCH.sender();
+    let dpr_ctrl_sender = STATE.dpr_control_loop.sender();
+    let prz_vnt_sender = STATE.prz_vent_control.sender();
+    let fuel_vnt_sender = STATE.fss_vent_control.sender();
+    let pressurization_sender = STATE.dpr_pressurization.sender();
+    let pressurization_abort_sender = STATE.pressurization_abort.sender();
 
     loop {
         match can_rx.recv().await {
@@ -281,7 +276,7 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
                             gain
                         );
 
-                        *PRESSURIZATION_KP.lock().await = gain.kp;
+                        *STATE.pressurization_kp.lock().await = gain.kp;
                     }
                     _ => {
                         warn!("[CAN Task] Received unknown CAN message: {}", msg);
@@ -314,11 +309,13 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
     let pressure_task = async {
         let mut ticker = Ticker::every(Duration::from_millis(1000 / CAN_PRESSURE_FREQ_HZ as u64));
 
-        let mut prz_mnl_p_watch = PRESSURIZATION_PRESSURE_WATCH
+        let mut prz_mnl_p_watch = STATE
+            .pressurization_pressure
             .receiver()
             .expect("[CAN Task] failed to get PRESSURIZATION_COPV_PRESSURE watch");
 
-        let mut fss_tnk_p_watch = FUEL_TANK_PRESSURE_WATCH
+        let mut fss_tnk_p_watch = STATE
+            .fuel_tank_pressure
             .receiver()
             .expect("[CAN Task] failed to get FUEL_TANK_PRESSURE watch");
 
@@ -401,9 +398,9 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
 
     // Valve States Task (≈5 Hz)
     let valve_states_task = async {
-        let mut dpr_ctrl_watcher = DPR_CONTROL_LOOP_WATCH.receiver().unwrap();
-        let mut prz_vnt_watcher = PRZ_VENT_CONTROL.receiver().unwrap();
-        let mut fss_vnt_watcher = FSS_VENT_CONTROL.receiver().unwrap();
+        let mut dpr_ctrl_watcher = STATE.dpr_control_loop.receiver().unwrap();
+        let mut prz_vnt_watcher = STATE.prz_vent_control.receiver().unwrap();
+        let mut fss_vnt_watcher = STATE.fss_vent_control.receiver().unwrap();
 
         let mut data = FuelControlBoardValveStates {
             fss_dpr: Default::default(),
@@ -523,7 +520,7 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
     };
 
     let pressurization_info_task = async {
-        let mut pressurization_info_watcher = PRESSURIZATION_INFO_WATCH.receiver().unwrap();
+        let mut pressurization_info_watcher = STATE.pressurization_info.receiver().unwrap();
 
         loop {
             let info = pressurization_info_watcher.changed().await;
