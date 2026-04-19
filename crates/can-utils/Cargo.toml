@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-embassy-stm32 = { version = "*" }
+embassy-stm32 = "*"
+embassy-sync = "*"
+embassy-executor = "*"
 embedded-can = "0.4.1"
 embedded-utils = { path = "../embedded-utils" }
 can-hal = { path = "../../data-definitions/can-hal" }

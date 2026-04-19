@@ -3,6 +3,7 @@
 
 #![no_std]
 
+pub mod broadcast;
 pub mod collector;
 pub mod rxtx;
 pub mod setup;
