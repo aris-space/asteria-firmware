@@ -9,8 +9,8 @@ use hermes_can::messages::board_status::ValveState;
 
 #[embassy_executor::task]
 pub(crate) async fn valve_task(prz_vnt_vlv: Output<'static>, fue_vnt_vlv: Output<'static>) {
-    let prz_vnt_watcher = STATE.prz_vent_control.receiver().unwrap();
-    let fue_vnt_watcher = STATE.fss_vent_control.receiver().unwrap();
+    let prz_vnt_watcher = STATE.pressurization_vent_control.receiver().unwrap();
+    let fue_vnt_watcher = STATE.fuel_vent_control.receiver().unwrap();
     let prz_vnt_task = valve_task_impl(prz_vnt_vlv, prz_vnt_watcher);
     let fue_vnt_task = valve_task_impl(fue_vnt_vlv, fue_vnt_watcher);
 

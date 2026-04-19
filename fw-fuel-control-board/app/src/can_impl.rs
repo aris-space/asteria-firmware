@@ -161,8 +161,8 @@ const THIS_BOARD_ID: hermes_can::messages::BoardId =
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
     let dpr_ctrl_sender = STATE.dpr_control_loop.sender();
-    let prz_vnt_sender = STATE.prz_vent_control.sender();
-    let fuel_vnt_sender = STATE.fss_vent_control.sender();
+    let prz_vnt_sender = STATE.pressurization_vent_control.sender();
+    let fuel_vnt_sender = STATE.fuel_vent_control.sender();
     let pressurization_sender = STATE.dpr_pressurization.sender();
     let pressurization_abort_sender = STATE.pressurization_abort.sender();
 
@@ -293,7 +293,6 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
 
 #[embassy_executor::task]
 pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
-
     // Our transmission policy is as follows:
     // Send new data when available, but only if a minimum period has elapsed since the last
     // transmission. Otherwise, discard and wait for the next data.
@@ -399,8 +398,8 @@ pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
     // Valve States Task (≈5 Hz)
     let valve_states_task = async {
         let mut dpr_ctrl_watcher = STATE.dpr_control_loop.receiver().unwrap();
-        let mut prz_vnt_watcher = STATE.prz_vent_control.receiver().unwrap();
-        let mut fss_vnt_watcher = STATE.fss_vent_control.receiver().unwrap();
+        let mut prz_vnt_watcher = STATE.pressurization_vent_control.receiver().unwrap();
+        let mut fss_vnt_watcher = STATE.fuel_vent_control.receiver().unwrap();
 
         let mut data = FuelControlBoardValveStates {
             fss_dpr: Default::default(),

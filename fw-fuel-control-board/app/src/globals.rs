@@ -21,8 +21,8 @@ pub struct BoardState {
     pub pressurization_abort: Watch<ThreadModeRawMutex, FuelPressurizationAbort, WATCH>,
     pub pressurization_kp: Mutex<ThreadModeRawMutex, f32>,
     // Valves
-    pub prz_vent_control: Watch<ThreadModeRawMutex, ValveState, WATCH>,
-    pub fss_vent_control: Watch<ThreadModeRawMutex, ValveState, WATCH>,
+    pub pressurization_vent_control: Watch<ThreadModeRawMutex, ValveState, WATCH>,
+    pub fuel_vent_control: Watch<ThreadModeRawMutex, ValveState, WATCH>,
     // Buzzer
     pub buzzer: Watch<ThreadModeRawMutex, BuzzerState, WATCH>,
 }
@@ -37,8 +37,8 @@ impl BoardState {
             pressurization_info: Watch::new(),
             pressurization_abort: Watch::new(),
             pressurization_kp: Mutex::new(1.0),
-            prz_vent_control: Watch::new(),
-            fss_vent_control: Watch::new(),
+            pressurization_vent_control: Watch::new(),
+            fuel_vent_control: Watch::new(),
             buzzer: Watch::new(),
         }
     }
