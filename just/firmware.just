@@ -215,6 +215,7 @@ replay-attach:
 # Run checks that will be used in CI
 ci-checks:
     cargo clippy \
+        --locked \
         --target {{target}} \
         -- -D warnings
 

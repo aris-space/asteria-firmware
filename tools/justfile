@@ -5,7 +5,7 @@ build *args:
     cargo build {{args}}
 
 ci-checks:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --locked --workspace --all-targets -- -D warnings
 
 # Run clippy with optional extra args
 clippy *args:
