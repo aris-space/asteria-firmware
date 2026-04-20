@@ -1,3 +1,5 @@
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
 # List of all workspaces
 workspaces := "fw-engine-board fw-sensor-carrier fw-sensor-carrier-v3 fw-power-board fw-communication-board fw-fuel-control-board fw-oxidizer-control-board fw-lox-valve-control-board fw-recovery-board fw-test-board crates tools"
 # Workspaces to skip when running commands across all workspaces
