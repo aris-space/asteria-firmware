@@ -5,7 +5,7 @@ workspaces := "fw-engine-board fw-sensor-carrier fw-sensor-carrier-v3 fw-power-b
 # Workspaces to skip when running commands across all workspaces
 exclude_workspaces := "hermes-can"
 # Workspaces that can run tests
-test_workspaces := "tools"
+test_workspaces := "crates tools"
 # Workspaces that have docs
 doc_workspaces := "crates tools"
 
