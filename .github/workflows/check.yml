@@ -15,6 +15,30 @@ env:
   RUST_TOOLCHAIN: nightly-2026-02-03
 
 jobs:
+  pre-commit:
+    runs-on: self-hosted
+    name: 🪝 pre-commit
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.ASTERIA_CI_TOKEN }}
+          submodules: true
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt
+      - name: Install just
+        uses: extractions/setup-just@v1
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: taplo-cli
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: pre-commit/action@v3.0.1
+
   test:
     runs-on: self-hosted
     name: ⚙️ test (host std)
@@ -29,7 +53,21 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates
+            tools
+            fw-engine-board
+            fw-sensor-carrier
+            fw-sensor-carrier-v3
+            fw-power-board
+            fw-communication-board
+            fw-fuel-control-board
+            fw-oxidizer-control-board
+            fw-lox-valve-control-board
+            fw-recovery-board
+            fw-test-board
       - name: just test
         run: just test
 
@@ -71,7 +109,21 @@ jobs:
           targets: thumbv7em-none-eabihf
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates
+            tools
+            fw-engine-board
+            fw-sensor-carrier
+            fw-sensor-carrier-v3
+            fw-power-board
+            fw-communication-board
+            fw-fuel-control-board
+            fw-oxidizer-control-board
+            fw-lox-valve-control-board
+            fw-recovery-board
+            fw-test-board
       - name: just ci-checks
         run: just ci-checks
 
@@ -92,7 +144,21 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates
+            tools
+            fw-engine-board
+            fw-sensor-carrier
+            fw-sensor-carrier-v3
+            fw-power-board
+            fw-communication-board
+            fw-fuel-control-board
+            fw-oxidizer-control-board
+            fw-lox-valve-control-board
+            fw-recovery-board
+            fw-test-board
       - name: Build docs
         # Not quite sure anymore about these flags. But --workspace is important.
         run: just doc
