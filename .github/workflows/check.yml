@@ -31,8 +31,9 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v1
       - uses: Swatinem/rust-cache@v2
-      - name: Install taplo
-        run: cargo install taplo-cli --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: taplo-cli
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
