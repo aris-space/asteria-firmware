@@ -13,8 +13,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: nightly-2026-02-03
-  # Stable across rotating self-hosted workdirs so rust-cache keys match.
-  CARGO_HOME: /home/ubuntu/.cargo-ci
 
 jobs:
   pre-commit:
