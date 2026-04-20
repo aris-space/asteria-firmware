@@ -20,7 +20,7 @@ clippy *args:
 # note: it is important that we test on an std-supported target, else
 # CI might complain about pulling in std.
 test *args:
-    cargo test --locked --workspace --all-features -- --skip skipci {{args}}
+    cargo test --workspace --all-features -- --skip skipci {{args}}
 
 # Build docs for shared crates
 doc *args:
