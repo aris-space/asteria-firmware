@@ -17,7 +17,7 @@ git merge --allow-unrelated-histories ci/main
 
 The repository and all its submodules must be added to the PAT token `HERMES_CI_TOKEN`, contact @Indeximal.
 
-Sources: 
-- <https://www.youtube.com/watch?v=xUH-4y92jPg&t=491s&ab_channel=JonGjengset> (05.10.2024) 
+Sources:
+- <https://www.youtube.com/watch?v=xUH-4y92jPg&t=491s&ab_channel=JonGjengset> (05.10.2024)
 - <https://github.com/jonhoo/rust-ci-conf/tree/main> (05.10.2024)
 - <https://github.com/actions/checkout/issues/116#issuecomment-644419389> (13.2.2025)
