@@ -52,7 +52,21 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates
+            tools
+            fw-engine-board
+            fw-sensor-carrier
+            fw-sensor-carrier-v3
+            fw-power-board
+            fw-communication-board
+            fw-fuel-control-board
+            fw-oxidizer-control-board
+            fw-lox-valve-control-board
+            fw-recovery-board
+            fw-test-board
       - name: just test
         run: just test
 
@@ -94,7 +108,21 @@ jobs:
           targets: thumbv7em-none-eabihf
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates
+            tools
+            fw-engine-board
+            fw-sensor-carrier
+            fw-sensor-carrier-v3
+            fw-power-board
+            fw-communication-board
+            fw-fuel-control-board
+            fw-oxidizer-control-board
+            fw-lox-valve-control-board
+            fw-recovery-board
+            fw-test-board
       - name: just ci-checks
         run: just ci-checks
 
@@ -115,7 +143,21 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
-      - uses: Swatinem/rust-cache@v2 # Cache Rust build artifacts
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates
+            tools
+            fw-engine-board
+            fw-sensor-carrier
+            fw-sensor-carrier-v3
+            fw-power-board
+            fw-communication-board
+            fw-fuel-control-board
+            fw-oxidizer-control-board
+            fw-lox-valve-control-board
+            fw-recovery-board
+            fw-test-board
       - name: Build docs
         # Not quite sure anymore about these flags. But --workspace is important.
         run: just doc
