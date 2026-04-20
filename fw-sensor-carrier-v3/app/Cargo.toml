@@ -23,7 +23,11 @@ embassy-stm32 = { version = "*", features = [
     "exti",
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768"] }
-embassy-executor = { version = "*", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", ] }
+embassy-executor = { version = "*", features = [
+    "arch-cortex-m",
+    "executor-thread",
+    "executor-interrupt",
+] }
 
 embassy-futures = "*"
 embassy-sync = "*"
@@ -52,7 +56,11 @@ embedded-hal-bus = { version = "0.3.0", features = ["async"] }
 embedded-io-async = { version = "0.7.0", default-features = false, features = ["defmt"] }
 
 defmt = { version = "1.0.1" }
-defmt-brtt = { version = "0.1.1", default-features = false, features = ["async-await", "bbq", "rtt"] }
+defmt-brtt = { version = "0.1.1", default-features = false, features = [
+    "async-await",
+    "bbq",
+    "rtt",
+] }
 
 nalgebra = { version = "0.33", default-features = false, features = ["libm"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
