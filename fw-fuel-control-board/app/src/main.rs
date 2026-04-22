@@ -75,7 +75,7 @@ async fn main(spawner: Spawner) -> ! {
     let yellow = Output::new(p.PB1, Level::High, Speed::Low);
     let red = Output::new(p.PB2, Level::High, Speed::Low);
 
-    // Solenoids
+    // Solenoids (TODO: Change to correct pins!!)
     let pressurization_vent_valve = Output::new(p.PB5, Level::Low, Speed::Medium);
     let fuel_vent_valve = Output::new(p.PB4, Level::Low, Speed::Medium);
 

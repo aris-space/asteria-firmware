@@ -6,7 +6,7 @@ use embassy_stm32::peripherals::{PA0, PA1, PA2};
 use embassy_time::{Duration, Ticker};
 
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
+#[allow(dead_code)] //temporary until I add a consumer in the CAN implementation
 pub struct SolenoidStates {
     pub dpr: bool,
     pub pressurization_vent: bool,
