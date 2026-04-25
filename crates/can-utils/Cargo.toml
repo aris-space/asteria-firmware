@@ -7,6 +7,7 @@ edition = "2024"
 embassy-stm32 = "*"
 embassy-sync = "*"
 embassy-executor = "*"
+embassy-time = "*"
 embedded-can = "0.4.1"
 embedded-utils = { path = "../embedded-utils" }
 can-hal = { path = "../../data-definitions/can-hal" }
@@ -16,4 +17,10 @@ thiserror = { version = "2.0.18", default-features = false }
 defmt = { version = "0.3", optional = true }
 
 [features]
-defmt = ["dep:defmt", "embassy-stm32/defmt"]
+defmt = [
+    "dep:defmt",
+    "embassy-stm32/defmt",
+    "can-hal/defmt",
+    "embedded-utils/defmt",
+    "embassy-time/defmt",
+]
