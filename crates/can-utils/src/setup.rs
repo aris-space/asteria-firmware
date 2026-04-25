@@ -1,9 +1,12 @@
 //! This module provides a way to setup a Can abstraction from hardware pins.
 
 use embassy_stm32::can::filter::{Action, FilterType, StandardFilter};
-use embassy_stm32::can::{Can, CanConfigurator, OperatingMode, RxPin, TxPin};
+use embassy_stm32::can::{Can, CanConfigurator, CanTx, OperatingMode, RxPin, TxPin};
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::{Peri, can};
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::mutex::Mutex;
+use embassy_sync::once_lock::OnceLock;
 
 /// Sets up a can instance on the given pins and configures it to only receive messages with the given ids.
 pub fn setup_can<'a, T: can::Instance>(
@@ -44,4 +47,19 @@ pub fn setup_can<'a, T: can::Instance>(
     can.set_config(config);
      */
     can.start(OperatingMode::NormalOperationMode)
+}
+
+/// Moves the can tx instance behind a singleton mutex.
+///
+/// Only call this once! And only use this on single-core MCUs.
+pub async fn make_multiplexable(
+    can_tx: CanTx<'static>,
+) -> &'static Mutex<ThreadModeRawMutex, CanTx<'static>> {
+    let can_tx = Mutex::<ThreadModeRawMutex, _>::new(can_tx);
+    static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
+    CAN_TX
+        .init(can_tx)
+        .ok()
+        .expect("Failed to set CAN TX mutex");
+    CAN_TX.get().await
 }
