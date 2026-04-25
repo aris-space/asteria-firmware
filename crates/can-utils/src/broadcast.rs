@@ -4,6 +4,8 @@ use embassy_stm32::can::CanTx;
 use embassy_sync::blocking_mutex::raw::{RawMutex, ThreadModeRawMutex};
 use embassy_sync::mutex::Mutex;
 
+pub use broadcast_derive::Broadcast;
+
 /// Spawns a CAN broadcast task for all tracked values in the struct.
 ///
 /// This is best derived by [`Broadcast`][macro@Broadcast].
