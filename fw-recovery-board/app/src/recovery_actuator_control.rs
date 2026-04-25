@@ -1,5 +1,6 @@
 #![allow(clippy::single_match)]
 #![allow(clippy::collapsible_else_if)]
+use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
@@ -64,8 +65,15 @@ pub static INPUTS: Inputs = Inputs {
     steering_power: Watch::new(),
 };
 
+#[derive(Broadcast)]
+#[broadcast(loop_type = "can_utils::broadcast::ResponsiveLoop")]
 pub struct Outputs {
     /// Position data read from the motors
+    #[broadcast(
+        filter_map = "#value.map(dp_recovery_board::Message::SteeringActualPositions)",
+        min_freq_hz = 0.1,
+        max_freq_hz = 15.
+    )]
     pub steering_actual_positions: Watch<ThreadModeRawMutex, Option<SteeringPositions>, 2>,
 }
 

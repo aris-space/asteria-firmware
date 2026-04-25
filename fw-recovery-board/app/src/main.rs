@@ -12,20 +12,20 @@ mod watchdog;
 use crate::can_io::ReceivedMessage;
 use crate::recovery_actuator_control::{
     ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS, DEPLOYMENT_TARGET_STATE, INPUTS,
-    OUTPUTS, Outputs, SEPARATION_OCCURRED, SEPARATION_SERVO_STATUS, SEPARATION_TARGET_STATE,
+    OUTPUTS, SEPARATION_OCCURRED, SEPARATION_SERVO_STATUS, SEPARATION_TARGET_STATE,
     STEERING_STATUS, ServoTargetState, SteeringStatus, WATCHDOG_STATE, arming_detection,
     deployment_task, separation_task, steering_task,
 };
 use crate::servo::{RecoveryActuator, Servo};
 use crate::watchdog::Watchdog;
-use can_utils::broadcast::{Broadcast, BroadcastLoop};
+use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector as _;
 use can_utils::rxtx::{TypedCanReceive as _, TypedCanTransmit};
 use can_utils::setup::setup_can;
-use data_core::can::hal::{CanDecode, CanEncode};
+use data_core::can::hal::CanDecode;
 use datatypes::status::{ArmingState, StatusCommonMessage};
-use dp_recovery_board::{ActuatorStatus, RecoveryBoardStatus, SteeringPositions, WatchdogState};
-use embassy_executor::{SpawnError, Spawner};
+use dp_recovery_board::{ActuatorStatus, RecoveryBoardStatus, WatchdogState};
+use embassy_executor::Spawner;
 use embassy_futures::join::join3;
 use embassy_stm32::can::CanTx;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
@@ -382,75 +382,6 @@ async fn blink(mut led: Output<'static>) {
         led.set_low();
         Timer::after_millis(900).await;
     }
-}
-
-struct Loooooop;
-
-impl<M> BroadcastLoop<M> for Loooooop
-where
-    M: CanEncode + Format + Send,
-    <M as data_core::can::hal::CanEncode>::Error: Format,
-{
-    async fn broadcast_loop<
-        T: Send + Sync + 'static + Clone,
-        MTX: embassy_sync::blocking_mutex::raw::RawMutex + Sync,
-        const N: usize,
-    >(
-        mut field: embassy_sync::watch::Receiver<'static, MTX, T, N>,
-        mut filter_map: impl FnMut(T) -> Option<M> + Send + 'static,
-        transmit: &'static Mutex<MTX, impl TypedCanTransmit>,
-        _min_freq_hz: f32,
-        _max_freq_hz: f32,
-    ) -> can_utils::broadcast::NeverReturns {
-        loop {
-            let data = field.changed().await;
-            let Some(msg) = filter_map(data) else {
-                continue;
-            };
-            trace!("sending message {:?}", msg);
-            let mut tx = transmit.lock().await;
-            match with_timeout(CAN_TX_TIMEOUT, tx.transmit(msg)).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(err)) => {
-                    error!("CAN TX error: {}", err);
-                }
-                Err(_) => {
-                    error!("CAN TX timed out after {} ms", CAN_TX_TIMEOUT);
-                }
-            };
-        }
-    }
-}
-
-impl Broadcast for Outputs {
-    fn start_broadcasting(
-        &'static self,
-        spawner: Spawner,
-        transmit: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
-    ) -> Result<(), SpawnError> {
-        spawner.spawn(can_tx_task_actual_positions(
-            transmit,
-            self.steering_actual_positions
-                .receiver()
-                .ok_or(SpawnError::Busy)?,
-        ))?;
-        Ok(())
-    }
-}
-
-#[embassy_executor::task]
-async fn can_tx_task_actual_positions(
-    can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
-    value: embassy_sync::watch::Receiver<'static, ThreadModeRawMutex, Option<SteeringPositions>, 2>,
-) {
-    Loooooop::broadcast_loop(
-        value,
-        |val| val.map(dp_recovery_board::Message::SteeringActualPositions),
-        can_tx,
-        1.,
-        10.,
-    )
-    .await;
 }
 
 #[embassy_executor::task]

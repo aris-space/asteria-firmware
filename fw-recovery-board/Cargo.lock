@@ -98,6 +98,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "broadcast-derive"
+version = "0.1.0"
+dependencies = [
+ "darling 0.21.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.116",
+]
+
+[[package]]
 name = "built"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -126,12 +136,14 @@ dependencies = [
 name = "can-utils"
 version = "0.1.0"
 dependencies = [
+ "broadcast-derive",
  "can-hal",
  "collector-derive",
  "defmt 0.3.100",
  "embassy-executor",
  "embassy-stm32",
  "embassy-sync",
+ "embassy-time",
  "embedded-can",
  "embedded-utils",
  "thiserror",
@@ -389,6 +401,7 @@ dependencies = [
 name = "dp-system-management"
 version = "0.3.0"
 dependencies = [
+ "bincode",
  "data-core",
  "datatypes",
  "defmt 1.0.1",
