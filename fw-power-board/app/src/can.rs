@@ -34,30 +34,18 @@ pub async fn spawn_can_tasks(
     let can_tx = CAN_TX.get().await;
 
     // RX task
-    spawner
-        .spawn(can_rx_task(can_rx))
-        .expect("Failed to spawn CAN RX task");
+    spawner.spawn(can_rx_task(can_rx).expect("Failed to spawn CAN RX task"));
 
     // TX tasks
-    spawner
-        .spawn(can_5v_task(can_tx))
-        .expect("Failed to spawn CAN 5V task");
+    spawner.spawn(can_5v_task(can_tx).expect("Failed to spawn CAN 5V task"));
 
-    spawner
-        .spawn(can_24v_task(can_tx))
-        .expect("Failed to spawn CAN 24V task");
+    spawner.spawn(can_24v_task(can_tx).expect("Failed to spawn CAN 24V task"));
 
-    spawner
-        .spawn(board_status(can_tx))
-        .expect("Failed to spawn board status task");
+    spawner.spawn(board_status(can_tx).expect("Failed to spawn board status task"));
 
-    spawner
-        .spawn(camera_status(can_tx))
-        .expect("Failed to spawn camera status task");
+    spawner.spawn(camera_status(can_tx).expect("Failed to spawn camera status task"));
 
-    spawner
-        .spawn(build_information(can_tx))
-        .expect("Failed to spawn build information task");
+    spawner.spawn(build_information(can_tx).expect("Failed to spawn build information task"));
 }
 const CAN_TX_TIMEOUT: Duration = Duration::from_millis(100);
 

@@ -651,27 +651,15 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
     }
 
     // Run all tasks concurrently
-    spawner
-        .spawn(pressure_task(can_tx))
-        .expect("Failed to spawn pressure_task");
-    spawner
-        .spawn(thermocouple_task(can_tx))
-        .expect("Failed to spawn thermocouple_task");
-    spawner
-        .spawn(valve_states_task(can_tx))
-        .expect("Failed to spawn valve_states_task");
-    spawner
-        .spawn(external_valve_command_task(can_tx))
-        .expect("Failed to spawn external_valve_command_task");
-    spawner
-        .spawn(board_status_task(can_tx))
-        .expect("Failed to spawn board_status_task");
-    spawner
-        .spawn(build_information_task(can_tx))
-        .expect("Failed to spawn build_information_task");
-    spawner
-        .spawn(firing_info_task(can_tx))
-        .expect("Failed to spawn firing info_task");
+    spawner.spawn(pressure_task(can_tx).expect("Failed to spawn pressure_task"));
+    spawner.spawn(thermocouple_task(can_tx).expect("Failed to spawn thermocouple_task"));
+    spawner.spawn(valve_states_task(can_tx).expect("Failed to spawn valve_states_task"));
+    spawner.spawn(
+        external_valve_command_task(can_tx).expect("Failed to spawn external_valve_command_task"),
+    );
+    spawner.spawn(board_status_task(can_tx).expect("Failed to spawn board_status_task"));
+    spawner.spawn(build_information_task(can_tx).expect("Failed to spawn build_information_task"));
+    spawner.spawn(firing_info_task(can_tx).expect("Failed to spawn firing info_task"));
 }
 
 /// Resets the system instantly and restarts the firmware.

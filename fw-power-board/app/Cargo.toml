@@ -21,7 +21,7 @@ embassy-stm32 = { version = "*", features = [
     "single-bank",
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768"] }
-embassy-executor = { version = "*", features = ["arch-cortex-m", "executor-thread"] }
+embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread"] }
 embassy-futures = "*"
 embassy-sync = "*"
 embedded-can = "0.4.1"

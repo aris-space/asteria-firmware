@@ -150,27 +150,21 @@ async fn main(spawner: Spawner) -> ! {
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs);
     let (tx, rx, _) = can.split();
 
-    spawner.spawn(keller_acquisition(keller_handle)).unwrap();
+    spawner.spawn(keller_acquisition(keller_handle).unwrap());
 
-    spawner
-        .spawn(thermocouple_task(tc, max, &FSS_TNK_T, &ThermocoupleType::K))
-        .unwrap();
+    spawner.spawn(thermocouple_task(tc, max, &FSS_TNK_T, &ThermocoupleType::K).unwrap());
 
-    spawner
-        .spawn(pid_controller(dpr_pin))
-        .expect("dpr task failed");
+    spawner.spawn(pid_controller(dpr_pin).expect("dpr task failed"));
 
-    spawner
-        .spawn(valve_task(oss_vnt))
-        .expect("valve task failed");
+    spawner.spawn(valve_task(oss_vnt).expect("valve task failed"));
 
-    spawner.spawn(can_rx_task(rx)).unwrap();
+    spawner.spawn(can_rx_task(rx).unwrap());
 
-    spawner.spawn(activity_blinky(green, yellow, red)).unwrap();
+    spawner.spawn(activity_blinky(green, yellow, red).unwrap());
 
     spawn_can_tx_task(tx, spawner).await;
 
-    spawner.spawn(buzzer_task(buzzer_pwm)).unwrap();
+    spawner.spawn(buzzer_task(buzzer_pwm).unwrap());
 
     #[allow(unreachable_code)]
     loop {

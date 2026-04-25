@@ -102,8 +102,8 @@ async fn main(spawner: Spawner) -> ! {
     )
     .unwrap();
 
-    spawner.must_spawn(status_blinky(green, red));
-    spawner.must_spawn(modbus_server_task(modbus_usart));
+    spawner.spawn(status_blinky(green, red).expect("Failed to spawn status blinky task"));
+    spawner.spawn(modbus_server_task(modbus_usart).expect("Failed to spawn Modbus server task"));
 
     match init_lox_valve_motor(motor_usart, endstop).await {
         Ok(()) => {
@@ -111,8 +111,14 @@ async fn main(spawner: Spawner) -> ! {
             clear_status(DeviceStatus::INITIALIZING);
             set_status(DeviceStatus::READY);
 
-            spawner.must_spawn(lox_valve_motor_position_updater_task());
-            spawner.must_spawn(lox_valve_motor_controller_task());
+            spawner.spawn(
+                lox_valve_motor_position_updater_task()
+                    .expect("Failed to spawn LOX valve motor position updater task"),
+            );
+            spawner.spawn(
+                lox_valve_motor_controller_task()
+                    .expect("Failed to spawn LOX valve motor controller task"),
+            );
         }
         Err(e) => {
             error!("Fatal: Failed to initialize LOX valve motor: {:?}", e);

@@ -86,48 +86,51 @@ pub fn spawn_tasks(
     level_0_spawner: SendSpawner,
     defmt_consumer: DefmtConsumer,
 ) {
-    level_0_spawner.must_spawn(tasks::blinky::task(board.services.yellow_led));
+    level_0_spawner.spawn(
+        tasks::blinky::task(board.services.yellow_led).expect("Failed to spawn blinky task"),
+    );
 
     let (imu1_spi, imu1_int1) = board.sensors.imu1;
     let (imu2_spi, imu2_int1) = board.sensors.imu2;
-    level_0_spawner.must_spawn(tasks::readout::imu::task(imu1_spi, imu1_int1, IMU_0));
-    level_0_spawner.must_spawn(tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1));
+    level_0_spawner.spawn(
+        tasks::readout::imu::task(imu1_spi, imu1_int1, IMU_0).expect("Failed to spawn IMU 0 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1).expect("Failed to spawn IMU 1 task"),
+    );
 
-    level_0_spawner.must_spawn(tasks::readout::barometer::task(
-        board.sensors.bus1,
-        BAROMETER_0,
-        BAROMETER_DELAY,
-    ));
-    level_0_spawner.must_spawn(tasks::readout::barometer::task(
-        board.sensors.bus2,
-        BAROMETER_1,
-        BAROMETER_DELAY,
-    ));
+    level_0_spawner.spawn(
+        tasks::readout::barometer::task(board.sensors.bus1, BAROMETER_0, BAROMETER_DELAY)
+            .expect("Failed to spawn barometer 0 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::barometer::task(board.sensors.bus2, BAROMETER_1, BAROMETER_DELAY)
+            .expect("Failed to spawn barometer 1 task"),
+    );
 
-    level_0_spawner.must_spawn(tasks::readout::magnetometer::task(
-        board.sensors.bus1,
-        MAGNETOMETER_0,
-        MAGNETOMETER_DELAY,
-    ));
-    level_0_spawner.must_spawn(tasks::readout::magnetometer::task(
-        board.sensors.bus2,
-        MAGNETOMETER_1,
-        MAGNETOMETER_DELAY,
-    ));
+    level_0_spawner.spawn(
+        tasks::readout::magnetometer::task(board.sensors.bus1, MAGNETOMETER_0, MAGNETOMETER_DELAY)
+            .expect("Failed to spawn magnetometer 0 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::magnetometer::task(board.sensors.bus2, MAGNETOMETER_1, MAGNETOMETER_DELAY)
+            .expect("Failed to spawn magnetometer 1 task"),
+    );
 
-    level_0_spawner.must_spawn(tasks::readout::gnss::task(
-        board.sensors.gps1_rx,
-        GNSS_0,
-        GNSS_DELAY,
-    ));
-    level_0_spawner.must_spawn(tasks::readout::gnss::task(
-        board.sensors.gps2_rx,
-        GNSS_1,
-        GNSS_DELAY,
-    ));
+    level_0_spawner.spawn(
+        tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0, GNSS_DELAY)
+            .expect("Failed to spawn GNSS 0 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1, GNSS_DELAY)
+            .expect("Failed to spawn GNSS 1 task"),
+    );
 
-    level_0_spawner.must_spawn(tasks::processing::inertial::task());
+    level_0_spawner.spawn(
+        tasks::processing::inertial::task().expect("Failed to spawn inertial processing task"),
+    );
 
     // Storage/config init runs on thread-mode so blocking flash I/O never starves readouts.
-    thread_spawner.must_spawn(storage::task(board.flash, defmt_consumer));
+    thread_spawner
+        .spawn(storage::task(board.flash, defmt_consumer).expect("Failed to spawn storage task"));
 }

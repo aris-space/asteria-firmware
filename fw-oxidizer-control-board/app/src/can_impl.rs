@@ -591,13 +591,13 @@ pub async fn spawn_can_tx_task(can_tx: CanTx<'static>, spawner: Spawner) {
         }
     }
 
-    spawner.spawn(pressure_task(can_tx)).unwrap();
-    spawner.spawn(tank_level_task(can_tx)).unwrap();
-    spawner.spawn(tank_temperature_task(can_tx)).unwrap();
-    spawner.spawn(valve_states_task(can_tx)).unwrap();
-    spawner.spawn(board_status_task(can_tx)).unwrap();
-    spawner.spawn(build_information_task(can_tx)).unwrap();
-    spawner.spawn(pressurization_info_task(can_tx)).unwrap();
+    spawner.spawn(pressure_task(can_tx).unwrap());
+    spawner.spawn(tank_level_task(can_tx).unwrap());
+    spawner.spawn(tank_temperature_task(can_tx).unwrap());
+    spawner.spawn(valve_states_task(can_tx).unwrap());
+    spawner.spawn(board_status_task(can_tx).unwrap());
+    spawner.spawn(build_information_task(can_tx).unwrap());
+    spawner.spawn(pressurization_info_task(can_tx).unwrap());
 }
 
 /// Resets the system instantly and restarts the firmware.

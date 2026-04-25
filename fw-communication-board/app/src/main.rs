@@ -47,7 +47,7 @@ async fn main(spawner: Spawner) -> ! {
         built_info::TARGET
     );
 
-    spawner.spawn(blink(yellow)).unwrap();
+    spawner.spawn(blink(yellow).unwrap());
 
     loop {
         info!("Hello, world!");
