@@ -32,9 +32,9 @@ pub enum FiringInfo {
 }
 
 pub async fn initiate_runner_tasks(spawner: Spawner) -> Result<(), SpawnError> {
-    spawner.spawn(firing_task_runner())?;
-    spawner.spawn(abort_task_runner())?;
-    spawner.spawn(watch_task_runner())?;
+    spawner.spawn(firing_task_runner()?);
+    spawner.spawn(abort_task_runner()?);
+    spawner.spawn(watch_task_runner()?);
 
     info!("Firing Task Runners Initiated");
     Ok(())

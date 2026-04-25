@@ -24,7 +24,7 @@ embassy-stm32 = { version = "*", features = [
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768"] }
 embassy-executor = { version = "*", features = [
-    "arch-cortex-m",
+    "platform-cortex-m",
     "executor-thread",
     "executor-interrupt",
 ] }

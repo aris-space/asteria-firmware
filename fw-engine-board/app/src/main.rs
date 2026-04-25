@@ -217,41 +217,31 @@ async fn main(spawner: Spawner) -> ! {
     .spawn(engine_pressure_acquisition(eng_p_handles))
     .expect("Engine Pressure Acquisition Task Failed");*/
 
-    spawner
-        .spawn(keller_acquisition(keller_handle))
-        .expect("could not spawn keller thread");
+    spawner.spawn(keller_acquisition(keller_handle).expect("could not spawn keller thread"));
 
-    spawner
-        .spawn(thermocouple_task(tc, max, &OXD_RNL_T, &OXD_TNK_T))
-        .expect("Thermocouple Task failed");
+    spawner.spawn(
+        thermocouple_task(tc, max, &OXD_RNL_T, &OXD_TNK_T).expect("Thermocouple Task failed"),
+    );
 
-    spawner
-        .spawn(valve_task(oss_mnl_vlv, fss_mnl_vlv))
-        .expect("Valve Task failed");
+    spawner.spawn(valve_task(oss_mnl_vlv, fss_mnl_vlv).expect("Valve Task failed"));
 
-    spawner
-        .spawn(check_main_arming(main_arming_pin))
-        .expect("Check main arming Task failed");
+    spawner.spawn(check_main_arming(main_arming_pin).expect("Check main arming Task failed"));
 
-    spawner
-        .spawn(can_rx_task(rx, yellow))
-        .expect("Can't spawn CAN RX task");
+    spawner.spawn(can_rx_task(rx, yellow).expect("Can't spawn CAN RX task"));
 
     spawn_can_tx_task(tx, spawner).await;
 
-    spawner
-        .spawn(activity_blinky(green))
-        .expect("blinky executor");
+    spawner.spawn(activity_blinky(green).expect("blinky executor"));
 
     initiate_runner_tasks(spawner)
         .await
         .expect("InitiateRunnerTasks failed");
 
-    spawner
-        .spawn(k23_temperature_control(heating_pad_switching))
-        .expect("K23 temperature control failed");
+    spawner.spawn(
+        k23_temperature_control(heating_pad_switching).expect("K23 temperature control failed"),
+    );
 
-    spawner.spawn(buzzer_task(buzzer_pwm)).unwrap();
+    spawner.spawn(buzzer_task(buzzer_pwm).unwrap());
 
     info!("ALL TASKS SPAWNED");
 

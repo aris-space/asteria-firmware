@@ -619,41 +619,24 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
         }
     }
 
-    spawner
-        .spawn(pressure_task(can_tx))
-        .expect("Failed to spawn can pressure data task");
+    spawner.spawn(pressure_task(can_tx).expect("Failed to spawn can pressure data task"));
+
+    spawner.spawn(environmental_task(can_tx).expect("Failed to spawn can environmental data task"));
+
+    spawner.spawn(orientation_task(can_tx).expect("Failed to spawn can orientation data task"));
 
     spawner
-        .spawn(environmental_task(can_tx))
-        .expect("Failed to spawn can environmental data task");
+        .spawn(magnetic_field_task(can_tx).expect("Failed to spawn can magnetic field data task"));
 
-    spawner
-        .spawn(orientation_task(can_tx))
-        .expect("Failed to spawn can orientation data task");
+    spawner.spawn(position_task(can_tx).expect("Failed to spawn can position data task"));
 
-    spawner
-        .spawn(magnetic_field_task(can_tx))
-        .expect("Failed to spawn can magnetic field data task");
+    spawner.spawn(velocity_task(can_tx).expect("Failed to spawn can velocity data task"));
 
-    spawner
-        .spawn(position_task(can_tx))
-        .expect("Failed to spawn can position data task");
+    spawner.spawn(inertial_task(can_tx).expect("Failed to spawn can inertial data task"));
 
-    spawner
-        .spawn(velocity_task(can_tx))
-        .expect("Failed to spawn can velocity data task");
+    spawner.spawn(status_task(can_tx).expect("Failed to spawn can status data task"));
 
-    spawner
-        .spawn(inertial_task(can_tx))
-        .expect("Failed to spawn can inertial data task");
-
-    spawner
-        .spawn(status_task(can_tx))
-        .expect("Failed to spawn can status data task");
-
-    spawner
-        .spawn(build_information(can_tx))
-        .expect("Failed to spawn can build information task");
+    spawner.spawn(build_information(can_tx).expect("Failed to spawn can build information task"));
 }
 
 /// Resets the system instantly and restarts the firmware.

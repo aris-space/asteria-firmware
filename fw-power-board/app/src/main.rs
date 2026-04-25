@@ -109,23 +109,21 @@ async fn main(spawner: Spawner) -> ! {
     let (can_tx, can_rx, _properties) = can.split();
 
     // Spawn activity LED
-    spawner
-        .spawn(blink::blink(led_yellow))
-        .expect("Failed to spawn blink task");
+    spawner.spawn(blink::blink(led_yellow).expect("Failed to spawn blink task"));
 
     // Spawn the buzzer alert task
-    spawner
-        .spawn(buzzer::buzzer_task(pwm))
-        .expect("Failed to spawn buzzer task");
+    spawner.spawn(buzzer::buzzer_task(pwm).expect("Failed to spawn buzzer task"));
 
     // Spawn the two sensor readout tasks
-    spawner
-        .spawn(sensor_readout::sensor_readout_5v_task(ltc_rail_5v))
-        .expect("Failed to spawn 5V sensor task");
+    spawner.spawn(
+        sensor_readout::sensor_readout_5v_task(ltc_rail_5v)
+            .expect("Failed to spawn 5V sensor task"),
+    );
 
-    spawner
-        .spawn(sensor_readout::sensor_readout_24v_task(ltc_rail_24v))
-        .expect("Failed to spawn 24V sensor task");
+    spawner.spawn(
+        sensor_readout::sensor_readout_24v_task(ltc_rail_24v)
+            .expect("Failed to spawn 24V sensor task"),
+    );
 
     // Spawn the CAN tasks
     spawn_can_tasks(&spawner, can_rx, can_tx).await;

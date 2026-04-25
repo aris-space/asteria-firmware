@@ -329,90 +329,86 @@ async fn main(spawner: Spawner) -> ! {
     // === Spawn Sensor Tasks ===
 
     // --- IMU ---
-    spawner
-        .spawn(imu_task(
+    spawner.spawn(
+        imu_task(
             Lsm6Dso32SpiInterface { spi: imu1_spi },
             orientation_driver,
             SensorId::Imu1,
             imu1_int1,
-        ))
-        .expect("Error spawning IMU 1 task.");
+        )
+        .expect("Error spawning IMU 1 task."),
+    );
 
-    spawner
-        .spawn(imu_task(
+    spawner.spawn(
+        imu_task(
             Lsm6Dso32SpiInterface { spi: imu2_spi },
             orientation_driver,
             SensorId::Imu2,
             imu2_int1,
-        ))
-        .expect("Error spawning IMU 2 task.");
+        )
+        .expect("Error spawning IMU 2 task."),
+    );
 
     // --- Magnetometer ---
-    spawner
-        .spawn(magnetometer_task(
-            compass_bus1,
-            magfield_driver,
-            SensorId::MagnetometerBus1,
-        ))
-        .expect("Error spawning magnetometer 1 task.");
+    spawner.spawn(
+        magnetometer_task(compass_bus1, magfield_driver, SensorId::MagnetometerBus1)
+            .expect("Error spawning magnetometer 1 task."),
+    );
 
-    spawner
-        .spawn(magnetometer_task(
-            compass_bus2,
-            magfield_driver,
-            SensorId::MagnetometerBus2,
-        ))
-        .expect("Error spawning magnetometer 2 task.");
+    spawner.spawn(
+        magnetometer_task(compass_bus2, magfield_driver, SensorId::MagnetometerBus2)
+            .expect("Error spawning magnetometer 2 task."),
+    );
 
     // --- Barometer ---
-    spawner
-        .spawn(barometer_task(
+    spawner.spawn(
+        barometer_task(
             ms5607_bus1,
             pressure_driver,
             environmental_driver,
             SensorId::BarometerBus1,
-        ))
-        .expect("Error spawning barometer 1 task.");
+        )
+        .expect("Error spawning barometer 1 task."),
+    );
 
-    spawner
-        .spawn(barometer_task(
+    spawner.spawn(
+        barometer_task(
             ms5607_bus2,
             pressure_driver,
             environmental_driver,
             SensorId::BarometerBus2,
-        ))
-        .expect("Error spawning barometer 2 task.");
+        )
+        .expect("Error spawning barometer 2 task."),
+    );
 
     // --- DHT (Environmental) ---
-    spawner
-        .spawn(dht_task(sht_bus1, environmental_driver, SensorId::DhtBus1))
-        .expect("Error spawning DHT 1 task.");
+    spawner.spawn(
+        dht_task(sht_bus1, environmental_driver, SensorId::DhtBus1)
+            .expect("Error spawning DHT 1 task."),
+    );
 
-    spawner
-        .spawn(dht_task(sht_bus2, environmental_driver, SensorId::DhtBus2))
-        .expect("Error spawning DHT 2 task.");
+    spawner.spawn(
+        dht_task(sht_bus2, environmental_driver, SensorId::DhtBus2)
+            .expect("Error spawning DHT 2 task."),
+    );
 
     // --- GPS ---
-    spawner
-        .spawn(gnss_task(gps1_rx, position_driver, SensorId::Gps1))
-        .expect("Error spawning GPS1 task.");
+    spawner.spawn(
+        gnss_task(gps1_rx, position_driver, SensorId::Gps1).expect("Error spawning GPS1 task."),
+    );
 
-    spawner
-        .spawn(gnss_task(gps2_rx, position_driver, SensorId::Gps2))
-        .expect("Error spawning GPS2 task.");
+    spawner.spawn(
+        gnss_task(gps2_rx, position_driver, SensorId::Gps2).expect("Error spawning GPS2 task."),
+    );
 
     // === Other Tasks ===
-    spawner
-        .spawn(blink(led_yellow))
-        .expect("Error spawning blinking task.");
+    spawner.spawn(blink(led_yellow).expect("Error spawning blinking task."));
 
     // setup CAN on FDCAN3 PF6/PF7 and start the loops
     let can = can_impl::setup_can(p.FDCAN3, p.PF6, p.PF7, Irqs); // TX=PF7, RX=PF6
     let (tx, rx, _options) = can.split();
 
-    spawner
-        .spawn(can_impl::can_rx_task(rx))
-        .expect("Failed to spawn CAN RX task.");
+    spawner.spawn(can_impl::can_rx_task(rx).expect("Failed to spawn CAN RX task."));
 
     can_impl::spawn_can_tx_tasks(tx, spawner).await;
 
