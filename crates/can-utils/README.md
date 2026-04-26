@@ -8,7 +8,7 @@ The following will attempt to explain this pattern.
 The idea is that most control and signaling data (thus over CAN to the flight computer),
 is based around `Watch`s, which hold the most recent value.
 This includes inputs and outputs.
-The inner types should be indentical as the type sent over the CAN bus,
+The inner types should be identical to the type sent over the CAN bus,
 which allows a very trivial mapping between values and messages.
 
 Embassy tasks should then read data from these watches and forward it to the `CanTx`.
@@ -18,7 +18,10 @@ For reading and writing, the `rxtx` module provides nice typed abstractions.
 In order to configure hardware receive filters and have less overhead,
 a board specific enum can be defined to contain only a subset of the existing messages.
 
-## Code example
+See also [the wiki on the communication framework](https://wiki.aris-space.ch/en/rocketry/teams/ASTERIA/software/communication-framework)
+for how the message definition fit into the picture.
+
+## Code examples
 
 So the firmware should define a static struct with all relevant input and all relevant output data,
 for example:
@@ -71,7 +74,7 @@ which actually do exactly the given easy mapping between values and messages.
 The needed subset of messages is what `ReceivedMessage` defines, using something like
 
 ```rust
-// This enum encompases all messages that the Recovery board needs to receive.
+// This enum encompasses all messages that the Recovery board needs to receive.
 data_core::can::sparse_decodable_can_message! {
     enum ReceivedMessage {
         ResetAll(dp_system_management::Message::ResetAll),
