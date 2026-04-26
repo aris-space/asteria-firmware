@@ -21,7 +21,7 @@ use crate::watchdog::Watchdog;
 use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector as _;
 use can_utils::rxtx::{TypedCanReceive as _, TypedCanTransmit};
-use can_utils::setup::setup_can;
+use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode;
 use datatypes::status::{ArmingState, StatusCommonMessage};
 use dp_recovery_board::{ActuatorStatus, RecoveryBoardStatus, WatchdogState};
@@ -255,13 +255,7 @@ async fn main(spawner: Spawner) -> ! {
     // CAN.Tx is on PB9
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (can_tx, mut can_rx, _prop) = can.split();
-    let can_tx = Mutex::<ThreadModeRawMutex, _>::new(can_tx);
-    static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
-    CAN_TX
-        .init(can_tx)
-        .ok()
-        .expect("Failed to set CAN TX mutex");
-    let can_tx = CAN_TX.get().await;
+    let can_tx = make_multiplexable(can_tx).await;
 
     /* END CAN BUS */
 
