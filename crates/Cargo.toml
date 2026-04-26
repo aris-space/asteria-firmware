@@ -23,6 +23,7 @@ cortex-m = "0.7.7"
 embassy-stm32 = "*"
 embassy-time = { version = "*", features = ["tick-hz-32_768"] }
 embassy-sync = "*"
+embassy-executor = "*"
 embassy-embedded-hal = "*"
 embedded-hal-async = "1.0.0"
 embedded-hal-bus = "0.3.0"
@@ -32,4 +33,5 @@ defmt = { version = "1.0.1" }
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
 embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }

@@ -4,17 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-embassy-stm32 = "*"
-embassy-sync = "*"
-embassy-executor = "*"
-embassy-time = "*"
+embassy-stm32.workspace = true
+embassy-sync.workspace = true
+embassy-executor.workspace = true
+embassy-time.workspace = true
 embedded-can = "0.4.1"
 embedded-utils = { path = "../embedded-utils" }
 can-hal = { path = "../../data-definitions/can-hal" }
 collector-derive = { path = "./macros/collector" }
 broadcast-derive = { path = "./macros/broadcast" }
 thiserror = { version = "2.0.18", default-features = false }
-defmt = { version = "0.3", optional = true }
+defmt = { workspace = true, optional = true }
 
 [features]
 defmt = [
