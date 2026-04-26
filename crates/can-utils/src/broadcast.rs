@@ -2,7 +2,11 @@ use crate::rxtx::TypedCanTransmit;
 use can_hal::CanEncode;
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::can::CanTx;
-use embassy_sync::blocking_mutex::raw::{RawMutex, ThreadModeRawMutex};
+#[cfg(not(target_os = "none"))] // cheat, since `ThreadModeRawMutex` only exists for cortex-m.
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ThreadModeRawMutex;
+use embassy_sync::blocking_mutex::raw::RawMutex;
+#[cfg(target_os = "none")]
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::Duration;
 use embassy_time::Instant;

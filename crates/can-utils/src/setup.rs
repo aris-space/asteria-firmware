@@ -4,6 +4,9 @@ use embassy_stm32::can::filter::{Action, FilterType, StandardFilter};
 use embassy_stm32::can::{Can, CanConfigurator, CanTx, OperatingMode, RxPin, TxPin};
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::{Peri, can};
+#[cfg(not(target_os = "none"))] // cheat, since `ThreadModeRawMutex` only exists for cortex-m.
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ThreadModeRawMutex;
+#[cfg(target_os = "none")]
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
