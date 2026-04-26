@@ -7,23 +7,25 @@ The following will attempt to explain this pattern.
 
 The idea is that most control and signaling data (thus over CAN to the flight computer),
 is based around `Watch`s, which hold the most recent value.
-This includes inputs and outputs.
+This includes inputs and outputs, thus event messages don't follow this pattern.
 The inner types should be identical to the type sent over the CAN bus,
-which allows a very trivial mapping between values and messages.
+which allows a very simple mapping between values and messages.
 
-Embassy tasks should then read data from these watches and forward it to the `CanTx`.
-Another task reads from `CanRx` and stores into the watches.
+Embassy tasks should then read data from the output watches and forward it to the `CanTx`.
+Another task reads from `CanRx` and stores into the appropriate input watches.
 For reading and writing, the `rxtx` module provides nice typed abstractions.
 
 In order to configure hardware receive filters and have less overhead,
 a board specific enum can be defined to contain only a subset of the existing messages.
+For transmit, the normal messages can be used though.
 
 See also [the wiki on the communication framework](https://wiki.aris-space.ch/en/rocketry/teams/ASTERIA/software/communication-framework)
 for how the message definition fit into the picture.
 
 ## Code examples
 
-So the firmware should define a static struct with all relevant input and all relevant output data,
+To make it more concrete,
+the firmware should define a static struct each with all relevant input and all relevant output data,
 for example:
 
 ```rust
@@ -33,8 +35,8 @@ use can_utils::collector::Collector;
 
 #[derive(Collector)]
 #[collector(
-    message_type = "ReceivedMessage",
-    update_expr = "#field.sender().send(#value);"
+    message_type = "ReceivedMessage", // defined below
+    update_expr = "#field.sender().send(#value);" // common for `Watch`
 )]
 pub struct Inputs {
     /// watch for giving steering target positions to steering_task

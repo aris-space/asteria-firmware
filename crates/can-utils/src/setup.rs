@@ -25,26 +25,25 @@ pub fn setup_can<'a, T: can::Instance>(
     can.set_bitrate(1_000_000);
     can.set_fd_data_bitrate(1_000_000, false);
 
-    const FILTER_COUNT: usize = 28;
+    const FILTER_COUNT: usize = 28; // common on STM32 FDCAN implementations
     let mut filters: [StandardFilter; FILTER_COUNT] = [StandardFilter {
         filter: FilterType::Disabled,
         action: Action::Disable,
     }; FILTER_COUNT];
 
+    // Last filter rejects, rest are not considered
     filters[enabled_ids.len()] = StandardFilter::reject_all();
 
-    // Configure the IDs based on the enabled messages in the `hermes-can` crate.
-    for (filter_idx, id) in enabled_ids.iter().enumerate() {
-        // trace!("Setting up filter for id: {:#X}", id.as_raw());
+    // Configure the IDs based on the enabled messages which are likely from `CanDecode::SUPPORTED_IDS`.
+    for (filter_idx, &id) in enabled_ids.iter().enumerate() {
         filters[filter_idx] = StandardFilter {
-            #[allow(clippy::clone_on_copy)]
-            filter: FilterType::DedicatedSingle(id.clone()),
+            filter: FilterType::DedicatedSingle(id),
             action: Action::StoreInFifo1,
         };
     }
     can.properties().set_standard_filters(&filters);
 
-    /* todo: unsure if this works, did not work in last year's project
+    /* todo: not sure what this would do, was here previously but commented out.
     let mut config = can.config();
     config.global_filter = GlobalFilter::accept_all();
     can.set_config(config);
@@ -54,7 +53,8 @@ pub fn setup_can<'a, T: can::Instance>(
 
 /// Moves the can tx instance behind a singleton mutex.
 ///
-/// Only call this once! And only use this on single-core MCUs.
+/// Only call this once, otherwise it will panic.
+/// And only use this on single-core MCUs due to the `ThreadModeRawMutex`.
 pub async fn make_multiplexable(
     can_tx: CanTx<'static>,
 ) -> &'static Mutex<ThreadModeRawMutex, CanTx<'static>> {
