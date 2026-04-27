@@ -200,7 +200,7 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
                 continue;
             }
             body_stmts.push(quote! {
-                self.#field_name.start_broadcasting(spawner, transmit)?;
+                self.#field_name.start_broadcasting(__spawner, __transmit)?;
             });
             continue;
         }
@@ -297,7 +297,7 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
             __spawner.spawn(#field_name(
                 __transmit,
                 self.#field_name.receiver().ok_or(::embassy_executor::SpawnError::Busy)?,
-            ))?;
+            )?);
         });
     }
 
