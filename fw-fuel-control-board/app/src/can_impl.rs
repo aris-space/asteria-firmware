@@ -133,21 +133,28 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
 #[embassy_executor::task]
 pub async fn can_tx_task() -> ! {
     let start = Instant::now();
-    let mut status_ticker = Ticker::every(Duration::from_millis(1000 / CAN_BOARD_STATUS_FREQ_HZ as u64));
+    let mut status_ticker = Ticker::every(Duration::from_millis(
+        1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,
+    ));
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
     let mut pressure_bus_status = STATE.pressure_bus_status.receiver().unwrap();
 
     loop {
-        let pressure_status = pressure_bus_status.try_changed().unwrap_or(SensorStatus::Online);
-        STATE.board_status.sender().send(dp_fuel_control_board::FuelControlBoardStatus {
-            common: StatusCommonMessage {
-                errors: 0,
-                micros_since_restart: start.elapsed().as_micros(),
-            },
-            thermocouple_status: SensorStatus::Online,
-            pressure_bus: pressure_status,
-        });
+        let pressure_status = pressure_bus_status
+            .try_changed()
+            .unwrap_or(SensorStatus::Online);
+        STATE
+            .board_status
+            .sender()
+            .send(dp_fuel_control_board::FuelControlBoardStatus {
+                common: StatusCommonMessage {
+                    errors: 0,
+                    micros_since_restart: start.elapsed().as_micros(),
+                },
+                thermocouple_status: SensorStatus::Online,
+                pressure_bus: pressure_status,
+            });
 
         status_ticker.next().await;
     }

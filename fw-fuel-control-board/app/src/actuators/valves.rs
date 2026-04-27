@@ -8,7 +8,10 @@ use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Receiver;
 
 #[embassy_executor::task]
-pub(crate) async fn valve_task(pressurization_vent_valve: Output<'static>, fuel_vent_valve: Output<'static>) {
+pub(crate) async fn valve_task(
+    pressurization_vent_valve: Output<'static>,
+    fuel_vent_valve: Output<'static>,
+) {
     let prz_vnt_watcher = STATE.pressurization_vent_control.receiver().unwrap();
     let fue_vnt_watcher = STATE.fuel_vent_control.receiver().unwrap();
     let prz_vnt_task = valve_task_impl(pressurization_vent_valve, prz_vnt_watcher);

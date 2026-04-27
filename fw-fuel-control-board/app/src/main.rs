@@ -109,8 +109,7 @@ async fn main(spawner: Spawner) -> ! {
         .expect("failed to start CAN broadcasting");
 
     spawner.spawn(
-        pid_controller(fuel_dpr_valve)
-            .expect("failed to prepare pid_controller spawn token"),
+        pid_controller(fuel_dpr_valve).expect("failed to prepare pid_controller spawn token"),
     );
 
     spawner.spawn(
@@ -122,14 +121,12 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(can_tx_task().expect("failed to prepare can_tx_task spawn token"));
 
     spawner.spawn(
-        activity_blinky(green, yellow, red)
-            .expect("failed to prepare activity_blinky spawn token"),
+        activity_blinky(green, yellow, red).expect("failed to prepare activity_blinky spawn token"),
     );
 
     spawner.spawn(buzzer_task(buzzer_pwm).expect("failed to prepare buzzer_task spawn token"));
 
-    spawner
-        .spawn(analog_pressure_sensor(adc1, p.PC0).expect("failed to prepare pressure task"));
+    spawner.spawn(analog_pressure_sensor(adc1, p.PC0).expect("failed to prepare pressure task"));
     spawner.spawn(
         fss_tank_pressure_task(adc2, p.PC1, adc3, p.PB13)
             .expect("failed to prepare tank pressure task"),

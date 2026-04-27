@@ -1,5 +1,5 @@
-use embassy_sync::lazy_lock::LazyLock;
 use datatypes::status::BuildInformationCommon;
+use embassy_sync::lazy_lock::LazyLock;
 
 pub mod built {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));

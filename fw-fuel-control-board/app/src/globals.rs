@@ -1,10 +1,10 @@
 use crate::buzzer::BuzzerState;
 use crate::drivers::WATCH;
 use crate::drivers::analog_pressure::FuelTankPressureMeasurement;
+use crate::drivers::solenoid_detection::SolenoidStates;
 use can_utils::broadcast::Broadcast;
 use datatypes::actuator::{DPRValve, NormallyOpenValve};
 use datatypes::status::BuildInformationCommon;
-use crate::drivers::solenoid_detection::SolenoidStates;
 use datatypes::units::BarG;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
