@@ -1,6 +1,6 @@
 [package]
 name = "fw-fuel-control-board"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-space.ch>"]
 
@@ -9,7 +9,7 @@ filters = { path = "../../crates/filters" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 can-utils = { path = "../../crates/can-utils" }
 data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
-dp-recovery-board = { path = "../../data-definitions/datapoints/dp-fuel-control-board", version = "=0.4", features = [
+dp-fuel-control-board = { path = "../../data-definitions/datapoints/dp-fuel-control-board", version = "=0.4", features = [
     "can",
 ] }
 dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [
@@ -49,7 +49,6 @@ defmt = [
     "dep:defmt",
     "dep:defmt-rtt",
     "can-utils/defmt",
-    "data-core/defmt",
     "dp-fuel-control-board/derive_defmt",
     "dp-system-management/derive_defmt",
     "panic-probe/defmt",

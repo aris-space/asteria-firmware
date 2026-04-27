@@ -3,21 +3,17 @@
 use crate::actuators::{CYCLE_TIME_MS, KD, KI, KP, SAFETY_LIMIT_BARG};
 use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
+use datatypes::actuator::DPRValve;
+use datatypes::status::ValveState::{Active, Inactive};
 use embassy_stm32::gpio::Output;
-use embassy_time::{Duration, Ticker, Timer, with_timeout};
+use embassy_time::{Duration, Ticker};
 use embedded_utils::fmt::warn;
 use embedded_utils::trace;
-use hermes_can::messages::board_status::ValveState::{Active, Inactive};
-use hermes_can::messages::event_messages::DprState::{Disabled, Enabled};
-use hermes_can::messages::event_messages::{DprState, FuelPressurization, FuelPressurizationCompleted};
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
     let mut p_watcher = STATE.fuel_tank_pressure.receiver().unwrap();
     let mut dpr_control_loop_receiver = STATE.dpr_control_loop.receiver().unwrap();
-    let mut pressurization_receiver = STATE.dpr_pressurization.receiver().unwrap();
-    let pressurization_info = STATE.pressurization_info.sender();
-    let mut pressurization_abort_receiver = STATE.pressurization_abort.receiver().unwrap();
 
     let dpr_control_loop_sender = STATE.dpr_control_loop.sender();
     let buzzer_error_sender = STATE.buzzer.sender();
@@ -34,77 +30,19 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
     let mut pressure = 0.0;
     let mut ticker = Ticker::every(Duration::from_millis(CYCLE_TIME_MS as u64));
 
-    let pressurization_alpha = 0.1; // 5% tolerance for pressurization
-
     loop {
         // Check for new DPR configuration
         if let Some(cfg) = dpr_control_loop_receiver.try_changed() {
             trace!("Received new DPR config: {:?}", cfg);
             match cfg {
-                Enabled(stp) => {
+                DPRValve::Enabled { setpoint: stp } => {
                     setpoint = stp;
                     loop_state = Active;
                 }
-                Disabled => {
+                DPRValve::Disabled => {
                     loop_state = Inactive;
                 }
             }
-        }
-
-        // Check for pressurization command
-        if let Some(FuelPressurization { target_pressure }) = pressurization_receiver.try_changed()
-        {
-            trace!("[DPR] Starting pressurization to {} barg", target_pressure);
-
-            // Make sure the dpr is closed before starting
-            valve_pin.set_low();
-
-            // Get the current proportional gain
-            let kp = *STATE.pressurization_kp.lock().await;
-
-            let target_margin = (1.0 + pressurization_alpha) * target_pressure;
-
-            // Stepwise increase pressure until target is reached or abort signal is received
-            // Timeout after 15 seconds to cut sequence if target can't be reached
-            let _ = with_timeout(Duration::from_secs(15), async {
-                loop {
-                    // Check for abort signal
-                    if pressurization_abort_receiver.try_get().is_some() {
-                        valve_pin.set_low();
-                        Timer::after_millis(1000).await;
-                        break;
-                    }
-
-                    // Read current pressure
-                    let current_pressure = p_watcher.get().await.dpr_pressure.0;
-
-                    // Exit if target is reached
-                    if current_pressure >= target_pressure {
-                        dpr_control_loop_sender.send(DprState::Enabled(target_pressure));
-                        break;
-                    }
-
-                    // Proportional control for DPR open time
-                    let diff = target_margin - current_pressure;
-                    let open_time = (kp * diff) as u64; // in milliseconds
-
-                    // Activate valve for calculated time
-                    valve_pin.set_high();
-                    Timer::after_millis(open_time).await;
-                    valve_pin.set_low();
-
-                    // Wait a bit before next iteration for pressure to stabilize
-                    Timer::after_millis(500).await;
-                }
-            })
-            .await;
-
-            // Send completion message
-            trace!("[DPR] Pressurization completed to {} barg", target_pressure);
-            pressurization_info.send(FuelPressurizationCompleted);
-
-            let _ = pressurization_receiver.try_get();
-            let _ = pressurization_abort_receiver.try_get();
         }
 
         // Update pressure reading with available data
@@ -114,7 +52,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         if pressure >= SAFETY_LIMIT_BARG {
             warn!("[DPR] Pressure limit exceeded with: {} barg", pressure);
             loop_state = Inactive;
-            dpr_control_loop_sender.send(DprState::Disabled);
+            dpr_control_loop_sender.send(DPRValve::Disabled);
             safety_limit_reached = true;
 
             // Signal error state
@@ -127,7 +65,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
                 safety_limit_reached = false;
                 // Allow reactivation of the control loop
                 loop_state = Active;
-                dpr_control_loop_sender.send(DprState::Enabled(setpoint));
+                dpr_control_loop_sender.send(DPRValve::Enabled { setpoint });
             }
         }
 

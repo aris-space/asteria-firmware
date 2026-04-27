@@ -3,10 +3,10 @@ use crate::drivers::digital_pressure::{
     KellerDriver,
 };
 use crate::sensors::{ACQ_PRESSURE_FREQ_HZ, ENG_CC_P, FUE_INJ_P, OXD_INJ_P};
+use datatypes::status::SensorStatus;
 use embassy_time::{Duration, Ticker, Timer};
 use embedded_utils::fmt::warn;
 use embedded_utils::{error, trace};
-use hermes_can::messages::board_status::SensorStatus;
 use keller_pressure::KellerSensRS485;
 
 #[embassy_executor::task]

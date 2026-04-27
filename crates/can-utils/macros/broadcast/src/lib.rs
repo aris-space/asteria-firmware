@@ -80,7 +80,7 @@
 use darling::{FromDeriveInput, FromField, ast, util::Flag};
 use proc_macro::TokenStream;
 use proc_macro2::Literal;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{GenericArgument, PathArguments, Type, parse_macro_input, spanned::Spanned};
 
 /// Struct-level attributes parsed from `#[broadcast(...)]`.
@@ -279,6 +279,9 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
         let min_lit = Literal::f32_suffixed(min_freq_hz);
         let max_lit = Literal::f32_suffixed(max_freq_hz);
 
+        let receiver_name = format_ident!("__{}_receiver", field_name);
+        let token_name = format_ident!("__{}_token", field_name);
+
         body_stmts.push(quote! {
             #[::embassy_executor::task]
             async fn #field_name(
@@ -294,10 +297,12 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
                 )
                 .await;
             }
-            __spawner.spawn(#field_name(
-                __transmit,
-                self.#field_name.receiver().ok_or(::embassy_executor::SpawnError::Busy)?,
-            ))?;
+            let #receiver_name = self
+                .#field_name
+                .receiver()
+                .ok_or(::embassy_executor::SpawnError::Busy)?;
+            let #token_name = #field_name(__transmit, #receiver_name)?;
+            __spawner.spawn(#token_name);
         });
     }
 

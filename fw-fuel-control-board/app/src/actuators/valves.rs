@@ -1,11 +1,11 @@
 use crate::drivers::WATCH;
 use crate::globals::STATE;
 use core::future::pending;
+use datatypes::actuator::NormallyOpenValve;
 use embassy_futures::join::join;
 use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Receiver;
-use hermes_can::messages::board_status::ValveState;
 
 #[embassy_executor::task]
 pub(crate) async fn valve_task(pressurization_vent_valve: Output<'static>, fuel_vent_valve: Output<'static>) {
@@ -23,15 +23,15 @@ pub(crate) async fn valve_task(pressurization_vent_valve: Output<'static>, fuel_
 
 async fn valve_task_impl(
     mut valve: Output<'static>,
-    mut watch: Receiver<'static, ThreadModeRawMutex, ValveState, WATCH>,
+    mut watch: Receiver<'static, ThreadModeRawMutex, NormallyOpenValve, WATCH>,
 ) {
     loop {
         let state = watch.changed().await;
         match state {
-            ValveState::Active => {
+            NormallyOpenValve::Closed => {
                 valve.set_high();
             }
-            ValveState::Inactive => {
+            NormallyOpenValve::Open => {
                 valve.set_low();
             }
         }

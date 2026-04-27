@@ -39,7 +39,10 @@ use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::can_impl::{can_rx_task, can_tx_task, setup_can};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
+use crate::globals::STATE;
 use crate::sensors::analog_p::{analog_pressure_sensor, fss_tank_pressure_task};
+use can_utils::broadcast::Broadcast as _;
+use can_utils::setup::make_multiplexable;
 
 use crate::buzzer::buzzer_task;
 #[allow(unused_imports)]
@@ -100,31 +103,43 @@ async fn main(spawner: Spawner) -> ! {
     // Can Bus
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs);
     let (tx, rx, _) = can.split();
+    let tx = make_multiplexable(tx).await;
+    STATE
+        .start_broadcasting(spawner, tx)
+        .expect("failed to start CAN broadcasting");
+
+    spawner.spawn(
+        pid_controller(fuel_dpr_valve)
+            .expect("failed to prepare pid_controller spawn token"),
+    );
+
+    spawner.spawn(
+        valve_task(pressurization_vent_valve, fuel_vent_valve)
+            .expect("failed to prepare valve_task spawn token"),
+    );
+
+    spawner.spawn(can_rx_task(rx).expect("failed to prepare can_rx_task spawn token"));
+    spawner.spawn(can_tx_task().expect("failed to prepare can_tx_task spawn token"));
+
+    spawner.spawn(
+        activity_blinky(green, yellow, red)
+            .expect("failed to prepare activity_blinky spawn token"),
+    );
+
+    spawner.spawn(buzzer_task(buzzer_pwm).expect("failed to prepare buzzer_task spawn token"));
 
     spawner
-        .spawn(pid_controller(fuel_dpr_valve))
-        .expect("dpr task failed");
-
-    spawner
-        .spawn(valve_task(pressurization_vent_valve, fuel_vent_valve))
-        .expect("valve task failed");
-
-    spawner.spawn(can_rx_task(rx)).unwrap();
-    spawner.spawn(can_tx_task(tx)).unwrap();
-
-    spawner.spawn(activity_blinky(green, yellow, red)).unwrap();
-
-    spawner.spawn(buzzer_task(buzzer_pwm)).unwrap();
-
-    spawner.spawn(analog_pressure_sensor(adc1, p.PC0)).unwrap();
-    spawner
-        .spawn(fss_tank_pressure_task(adc2, p.PC1, adc3, p.PB13))
-        .unwrap();
+        .spawn(analog_pressure_sensor(adc1, p.PC0).expect("failed to prepare pressure task"));
+    spawner.spawn(
+        fss_tank_pressure_task(adc2, p.PC1, adc3, p.PB13)
+            .expect("failed to prepare tank pressure task"),
+    );
 
     // TODO: Replace PA0/PA1/PA2 with the correct solenoid detection pins
-    spawner
-        .spawn(solenoid_detection_task(p.PA0, p.PA1, p.PA2))
-        .unwrap();
+    spawner.spawn(
+        solenoid_detection_task(p.PA0, p.PA1, p.PA2)
+            .expect("failed to prepare solenoid detection task"),
+    );
 
     #[allow(unreachable_code)]
     loop {
