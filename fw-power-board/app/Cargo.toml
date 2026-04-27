@@ -6,10 +6,7 @@ edition = "2024"
 [dependencies]
 embedded-utils = { path = "../../crates/embedded-utils" }
 ltc2945 = { path = "../../crates/devices/ltc2945" }
-hermes-can = { path = "../../hermes-can", version = "=0.3", features = [
-    "defmt",
-    "message-camera-power-control",
-] }
+hermes-can = { path = "../../hermes-can", version = "=0.3", features = ["defmt"] }
 thiserror = { version = "2.0.11", default-features = false }
 micromath = "2.1.0"
 cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }

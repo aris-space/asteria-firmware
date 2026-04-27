@@ -4,14 +4,9 @@ pub const LTC2945_I2C_ADDR: u8 = 0x67;
 // Bind I2C interrupts
 use embassy_stm32::can;
 use embassy_stm32::dma;
-use embassy_stm32::gpio::Output;
 use embassy_stm32::peripherals::FDCAN1;
 use embassy_stm32::peripherals::{I2C2, I2C3, I2C4};
 use embassy_stm32::{bind_interrupts, i2c, peripherals};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::mutex::Mutex;
-use embassy_sync::once_lock::OnceLock;
-use embassy_sync::signal::Signal;
 
 bind_interrupts!(pub struct Irqs {
     I2C2_EV => i2c::EventInterruptHandler<I2C2>;
@@ -27,7 +22,3 @@ bind_interrupts!(pub struct Irqs {
     DMA2_CHANNEL3 => dma::InterruptHandler<peripherals::DMA2_CH3>;
     DMA2_CHANNEL4 => dma::InterruptHandler<peripherals::DMA2_CH4>;
 });
-
-pub static RECORDING_CAMERA: OnceLock<Mutex<ThreadModeRawMutex, Output>> = OnceLock::new();
-pub static LIVESTREAM_CAMERA: OnceLock<Mutex<ThreadModeRawMutex, Output>> = OnceLock::new();
-pub static CAMERA_SETTINGS_CHANGED: Signal<ThreadModeRawMutex, ()> = Signal::new();

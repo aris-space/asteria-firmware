@@ -10,7 +10,6 @@ mod can_impl;
 mod sensor_readout;
 mod unix_time;
 
-use crate::board::{LIVESTREAM_CAMERA, RECORDING_CAMERA};
 use crate::can::spawn_can_tasks;
 use board::{Irqs, LTC2945_I2C_ADDR};
 use cortex_m::peripheral::SCB;
@@ -21,7 +20,6 @@ use embassy_stm32::i2c::{self, I2c};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embassy_sync::mutex::Mutex;
 use embassy_time::Duration;
 use ltc2945::Ltc2945;
 
@@ -50,18 +48,6 @@ async fn main(spawner: Spawner) -> ! {
     let _led_green = Output::new(p.PB0, Level::Low, Speed::Low);
     let led_yellow = Output::new(p.PB1, Level::Low, Speed::Low);
     let _led_red = Output::new(p.PB2, Level::Low, Speed::Low);
-
-    // Configure camera power-control pins (PA3 = REC, PA4 = LIVE)
-    let rec_pin = Output::new(p.PA3, Level::Low, Speed::Low);
-    RECORDING_CAMERA
-        .init(Mutex::new(rec_pin))
-        .ok()
-        .expect("Failed to set recording camera pin");
-    let live_pin = Output::new(p.PA4, Level::Low, Speed::Low);
-    LIVESTREAM_CAMERA
-        .init(Mutex::new(live_pin))
-        .ok()
-        .expect("Failed to set livestream camera pin");
 
     // Shared I2C configuration: 5 ms timeout, 400 kHz speed
     let mut shared_i2c_config = i2c::Config::default();
