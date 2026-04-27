@@ -39,7 +39,6 @@ use embassy_stm32::usart::Uart;
 use embassy_stm32::{bind_interrupts, can, dma, peripherals, usart};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Duration, Instant};
 use embassy_time::{Timer, with_timeout};
 use embedded_utils::fmt::*;
@@ -280,20 +279,13 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     //indication that async is working correctly, hopefully
-    spawner.spawn(blink(led_yellow)).unwrap();
-    spawner
-        .spawn(steering_task(
-            steering,
-            steer_pwr,
-            steering_detect,
-            steering_watchdog,
-        ))
-        .unwrap();
-    spawner.spawn(separation_task(separation)).unwrap();
-    spawner.spawn(deployment_task(deployment)).unwrap();
-    spawner.spawn(can_tx_task(can_tx)).unwrap();
+    spawner.spawn(blink(led_yellow).unwrap());
+    spawner.spawn(steering_task(steering, steer_pwr, steering_detect, steering_watchdog).unwrap());
+    spawner.spawn(separation_task(separation).unwrap());
+    spawner.spawn(deployment_task(deployment).unwrap());
+    spawner.spawn(can_tx_task(can_tx).unwrap());
     OUTPUTS.start_broadcasting(spawner, can_tx).unwrap();
-    spawner.spawn(arming_detection(arming_detect_pin)).unwrap();
+    spawner.spawn(arming_detection(arming_detect_pin).unwrap());
 
     //now start with CAN tx stuff
     let separation_target_state_tx = SEPARATION_TARGET_STATE.sender();
