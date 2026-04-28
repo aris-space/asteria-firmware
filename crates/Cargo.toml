@@ -15,7 +15,6 @@ members = [
     "devices/keller-pressure",
     "devices/analog-pressure",
     "devices/max31889-thermistor",
-    "devices/ltc2945",
     "devices/dpr",
     "devices/ina232",
 ]
