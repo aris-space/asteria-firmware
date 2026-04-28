@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 embedded-utils = { path = "../../crates/embedded-utils" }
-ltc2945 = { path = "../../crates/devices/ltc2945" }
+ina232 = { path = "../../crates/devices/ina232" }
 hermes-can = { path = "../../hermes-can", version = "=0.3", features = ["defmt"] }
 thiserror = { version = "2.0.11", default-features = false }
 micromath = "2.1.0"

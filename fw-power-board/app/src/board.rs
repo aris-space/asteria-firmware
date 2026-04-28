@@ -1,5 +1,5 @@
-// LTC2945 sensor address (shared on I2C2 and I2C3)
-pub const LTC2945_I2C_ADDR: u8 = 0x67;
+// INA232 sensor address (shared on I2C2 and I2C3)
+pub const INA232_I2C_ADDR: u8 = 0x48;
 
 // Bind I2C interrupts
 use embassy_stm32::can;

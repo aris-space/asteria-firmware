@@ -14,7 +14,7 @@ mod sensor_readout;
 mod unix_time;
 
 use crate::can::spawn_can_tasks;
-use board::{Irqs, LTC2945_I2C_ADDR};
+use board::{INA232_I2C_ADDR, Irqs};
 use cortex_m::peripheral::SCB;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::OutputType;
@@ -24,7 +24,7 @@ use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_time::Duration;
-use ltc2945::Ltc2945;
+use ina232::Ina232;
 
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
@@ -67,7 +67,11 @@ async fn main(spawner: Spawner) -> ! {
         Irqs,
         shared_i2c_config,
     );
-    let ltc_rail_5v = Ltc2945::new_i2c(i2c3, LTC2945_I2C_ADDR);
+    let mut ina_rail_5v = Ina232::new_i2c(i2c3, INA232_I2C_ADDR);
+    ina_rail_5v
+        .init()
+        .await
+        .expect("Failed to init INA232 5V rail");
 
     // Initialize I2C2 (SDA = PA8, SCL = PA9) for the 24V sensor
     let i2c2 = I2c::new(
@@ -79,7 +83,11 @@ async fn main(spawner: Spawner) -> ! {
         Irqs,
         shared_i2c_config,
     );
-    let ltc_rail_24v = Ltc2945::new_i2c(i2c2, LTC2945_I2C_ADDR);
+    let mut ina_rail_24v = Ina232::new_i2c(i2c2, INA232_I2C_ADDR);
+    ina_rail_24v
+        .init()
+        .await
+        .expect("Failed to init INA232 24V rail");
 
     // Initialize PWM (TIM2 CH3 on PB10) for buzzer (~3 kHz, 50% duty)
     let buzzer_pin = PwmPin::new(p.PB10, OutputType::PushPull);
@@ -105,12 +113,12 @@ async fn main(spawner: Spawner) -> ! {
 
     // Spawn the two sensor readout tasks
     spawner.spawn(
-        sensor_readout::sensor_readout_5v_task(ltc_rail_5v)
+        sensor_readout::sensor_readout_5v_task(ina_rail_5v)
             .expect("Failed to spawn 5V sensor task"),
     );
 
     spawner.spawn(
-        sensor_readout::sensor_readout_24v_task(ltc_rail_24v)
+        sensor_readout::sensor_readout_24v_task(ina_rail_24v)
             .expect("Failed to spawn 24V sensor task"),
     );
 

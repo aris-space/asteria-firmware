@@ -837,7 +837,7 @@ dependencies = [
  "embedded-hal-bus",
  "embedded-utils",
  "hermes-can",
- "ltc2945",
+ "ina232",
  "micromath",
  "panic-probe",
  "panic-reset",
@@ -1056,6 +1056,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ina232"
+version = "0.1.0"
+dependencies = [
+ "defmt 1.0.1",
+ "device-driver",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1166,16 +1176,6 @@ dependencies = [
  "scoped-tls",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "ltc2945"
-version = "0.1.0"
-dependencies = [
- "defmt 1.0.1",
- "device-driver",
- "embedded-hal 1.0.0",
- "embedded-hal-async",
 ]
 
 [[package]]
