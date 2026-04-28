@@ -30,9 +30,7 @@ pub async fn buzzer_task(mut pwm: SimplePwm<'static, TIM3>) {
         let state = watcher.get().await;
 
         match state {
-            BuzzerState::Error => {
-                pwm.set_duty(Ch4, on);
-            }
+            BuzzerState::Error => {}
             BuzzerState::Idle => {
                 pwm.set_duty(Ch4, off);
 

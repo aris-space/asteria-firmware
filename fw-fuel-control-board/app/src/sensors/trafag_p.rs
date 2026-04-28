@@ -8,6 +8,7 @@ use embassy_stm32::Peri;
 use embassy_stm32::adc::AdcChannel;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH3, DMA1_CH4, DMA2_CH3, PB13, PC0, PC1};
 use embassy_time::{Duration, Ticker};
+use embedded_utils::info;
 use trafag_pressure::ADCPressure;
 use trafag_pressure::pressures::TrafagPSens;
 
@@ -60,16 +61,15 @@ pub async fn fuel_pressure_acquisition(pressure_handles: FuelPressureHandles) {
         },
     )
     .await;
-
+    info!("Halloooo1");
     pressurization_pressure_handle
         .calibrate(ADC_CALIBRATION_SAMPLES, Irqs)
         .await;
-
+    info!("Halloooo2");
     // Share the calibration values between all pressure sensors because some of the ADC peripherals
     // are not connected to VREFINT and cannot read it out themselves.
     fuel_tank_pressure_1_handle.vref_calib = pressurization_pressure_handle.vref_calib;
     fuel_tank_pressure_2_handle.vref_calib = pressurization_pressure_handle.vref_calib;
-
     let mut ticker = Ticker::every(Duration::from_millis(
         (1000.0 / ACQ_PRESSURE_FREQ_HZ) as u64,
     ));
@@ -81,7 +81,12 @@ pub async fn fuel_pressure_acquisition(pressure_handles: FuelPressureHandles) {
         };
 
         data_publisher.update(measurement);
-
+        info!(
+            "Pressurization pressure: {}",
+            measurement.pressurization_pressure
+        );
+        info!("Fuel tank pressure 1: {}", measurement.fuel_tank_pressure_1);
+        info!("Fuel tank pressure 2: {}", measurement.fuel_tank_pressure_2);
         ticker.next().await;
     }
 }

@@ -12,13 +12,12 @@ pub(crate) async fn valve_task(
     pressurization_vent_valve: Output<'static>,
     fuel_vent_valve: Output<'static>,
 ) {
-    let prz_vnt_watcher = STATE.pressurization_vent_control.receiver().unwrap();
     let fue_vnt_watcher = STATE.fuel_vent_control.receiver().unwrap();
+    let prz_vnt_watcher = STATE.pressurization_vent_control.receiver().unwrap();
     let prz_vnt_task = valve_task_impl(pressurization_vent_valve, prz_vnt_watcher);
     let fue_vnt_task = valve_task_impl(fuel_vent_valve, fue_vnt_watcher);
 
     join(prz_vnt_task, fue_vnt_task).await;
-
     loop {
         pending::<()>().await;
     }

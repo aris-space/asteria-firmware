@@ -39,7 +39,6 @@ use {defmt_rtt as _, panic_probe as _};
 use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::can_impl::{can_rx_task, can_tx_task, setup_can};
-use crate::drivers::ads1015::Ads1015;
 use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
 use crate::sensors::solenoid_current::solenoid_current_task;
@@ -84,6 +83,9 @@ async fn main(spawner: Spawner) -> ! {
     set_adc_configs(&mut config);
     let p = embassy_stm32::init(config);
 
+    //todo() fixn this delay after debuging
+    Timer::after_millis(1000).await;
+
     // LEDs
     let green = Output::new(p.PC15, Level::High, Speed::Low);
     let yellow = Output::new(p.PC14, Level::High, Speed::Low);
@@ -122,13 +124,13 @@ async fn main(spawner: Spawner) -> ! {
     };
 
     let mut i2c_config = i2c::Config::default();
-    i2c_config.timeout = Duration::from_millis(5);
-    i2c_config.frequency = Hertz(400_000);
+    i2c_config.timeout = Duration::from_millis(50);
+    i2c_config.frequency = Hertz(100_000);
 
     // ADS1015 solenoid current monitor on I2C3: SCL = PC8, SDA = PC9.
-    let solenoid_current_adc = Ads1015::new(I2c::new(
+    let solenoid_current_i2c = I2c::new(
         p.I2C3, p.PC8, p.PC9, p.DMA1_CH6, p.DMA1_CH7, Irqs, i2c_config,
-    ));
+    );
 
     // Can Bus
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs);
@@ -162,11 +164,11 @@ async fn main(spawner: Spawner) -> ! {
 
     // TODO: Replace PA0/PA1/PA2 with the correct solenoid detection pins
     spawner.spawn(
-        solenoid_detection_task(p.PB6, p.PC2, p.PC3)
+        solenoid_detection_task(p.PC3, p.PB6, p.PC2)
             .expect("failed to prepare solenoid detection task"),
     );
     spawner.spawn(
-        solenoid_current_task(solenoid_current_adc)
+        solenoid_current_task(solenoid_current_i2c)
             .expect("failed to prepare solenoid current task"),
     );
 

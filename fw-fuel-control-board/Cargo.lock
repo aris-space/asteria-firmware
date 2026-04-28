@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "ads1x1x"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c907ad7732d7d83dafc84f0d9a0909072e86137de28aa97beeb421ef8b648c6"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "nb 1.1.0",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -775,6 +785,7 @@ dependencies = [
 name = "fw-fuel-control-board"
 version = "0.2.0"
 dependencies = [
+ "ads1x1x",
  "built",
  "can-utils",
  "cortex-m",
@@ -795,6 +806,7 @@ dependencies = [
  "embedded-hal-bus",
  "embedded-utils",
  "filters",
+ "nb 1.1.0",
  "panic-probe",
  "panic-reset",
  "thiserror",
