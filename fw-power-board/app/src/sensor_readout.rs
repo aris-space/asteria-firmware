@@ -5,7 +5,7 @@ use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Ticker};
 use embedded_utils::fmt::{error, info};
 use hermes_can::messages::sensor_data::{RailStatus, RailStatus5V, RailStatus24V};
-use ltc2945::I2cInterface;
+use ina232::I2cInterface;
 
 pub static RAIL_5V_LAST: Watch<ThreadModeRawMutex, RailStatus5V, 2> = Watch::new();
 pub static RAIL_24V_LAST: Watch<ThreadModeRawMutex, RailStatus24V, 2> = Watch::new();
@@ -13,7 +13,7 @@ pub static RAIL_24V_LAST: Watch<ThreadModeRawMutex, RailStatus24V, 2> = Watch::n
 /// 5 V rail readout task
 #[embassy_executor::task]
 pub async fn sensor_readout_5v_task(
-    mut rail: ltc2945::Ltc2945<I2cInterface<I2c<'static, Async, i2c::mode::Master>>>,
+    mut rail: ina232::Ina232<I2cInterface<I2c<'static, Async, i2c::mode::Master>>>,
 ) -> ! {
     let sender_5v = RAIL_5V_LAST.sender();
     let mut ticker = Ticker::every(Duration::from_millis(100));
@@ -59,7 +59,7 @@ pub async fn sensor_readout_5v_task(
 /// 24 V rail readout task
 #[embassy_executor::task]
 pub async fn sensor_readout_24v_task(
-    mut rail: ltc2945::Ltc2945<I2cInterface<I2c<'static, Async, i2c::mode::Master>>>,
+    mut rail: ina232::Ina232<I2cInterface<I2c<'static, Async, i2c::mode::Master>>>,
 ) -> ! {
     let sender_24v = RAIL_24V_LAST.sender();
     let mut ticker = Ticker::every(Duration::from_millis(100));
