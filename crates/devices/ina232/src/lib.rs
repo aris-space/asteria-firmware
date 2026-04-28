@@ -73,7 +73,7 @@ where
     /// Async read current in amperes.
     pub async fn read_current(&mut self) -> Result<f32, E> {
         let reg = self.inner.current().read_async().await?;
-        let raw: i16 = reg.current() as i16;
+        let raw: i16 = reg.current();
         Ok((raw as f32) * 0.001) // Current_LSB = 1mA
     }
 
@@ -106,7 +106,7 @@ where
     /// Blocking read current in amperes.
     pub fn blocking_read_current(&mut self) -> Result<f32, E> {
         let reg = self.inner.current().read()?;
-        let raw: i16 = reg.current() as i16;
+        let raw: i16 = reg.current();
         Ok((raw as f32) * 0.001)
     }
 
