@@ -139,11 +139,13 @@ pub async fn can_tx_task() -> ! {
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
     let mut pressure_bus_status = STATE.pressure_bus_status.receiver().unwrap();
+    let mut pressure_status = SensorStatus::Online;
 
     loop {
-        let pressure_status = pressure_bus_status
-            .try_changed()
-            .unwrap_or(SensorStatus::Online);
+        if let Some(status) = pressure_bus_status.try_changed() {
+            pressure_status = status;
+        }
+
         STATE
             .board_status
             .sender()

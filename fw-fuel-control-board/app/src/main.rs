@@ -85,23 +85,23 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
-    let green = Output::new(p.PB0, Level::High, Speed::Low);
-    let yellow = Output::new(p.PB1, Level::High, Speed::Low);
-    let red = Output::new(p.PB2, Level::High, Speed::Low);
+    let green = Output::new(p.PC15, Level::High, Speed::Low);
+    let yellow = Output::new(p.PC14, Level::High, Speed::Low);
+    let red = Output::new(p.PC13, Level::High, Speed::Low);
 
     // Solenoids (TODO: Change to correct pins!!)
-    let pressurization_vent_valve = Output::new(p.PB5, Level::Low, Speed::Medium);
-    let fuel_vent_valve = Output::new(p.PB4, Level::Low, Speed::Medium);
+    let pressurization_vent_valve = Output::new(p.PA10, Level::Low, Speed::Medium);
+    let fuel_vent_valve = Output::new(p.PB11, Level::Low, Speed::Medium);
 
-    let fuel_dpr_valve = Output::new(p.PB6, Level::Low, Speed::VeryHigh);
+    let fuel_dpr_valve = Output::new(p.PB2, Level::Low, Speed::VeryHigh);
 
-    let buzzer_pwm_pin = PwmPin::new(p.PB10, OutputType::PushPull);
+    let buzzer_pwm_pin = PwmPin::new(p.PB7, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
-        p.TIM2,
+        p.TIM3,
+        None,
         None,
         None,
         Some(buzzer_pwm_pin),
-        None,
         Hertz(440),
         Default::default(),
     );
@@ -162,7 +162,7 @@ async fn main(spawner: Spawner) -> ! {
 
     // TODO: Replace PA0/PA1/PA2 with the correct solenoid detection pins
     spawner.spawn(
-        solenoid_detection_task(p.PA0, p.PA1, p.PA2)
+        solenoid_detection_task(p.PB6, p.PC2, p.PC3)
             .expect("failed to prepare solenoid detection task"),
     );
     spawner.spawn(
