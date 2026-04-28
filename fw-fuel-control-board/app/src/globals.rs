@@ -1,7 +1,8 @@
 use crate::buzzer::BuzzerState;
 use crate::drivers::WATCH;
-use crate::drivers::analog_pressure::FuelTankPressureMeasurement;
+use crate::drivers::pressure::FuelTankPressureMeasurement;
 use crate::drivers::solenoid_detection::SolenoidStates;
+use crate::sensors::solenoid_current::SolenoidCurrentMeasurements;
 use can_utils::broadcast::Broadcast;
 use datatypes::actuator::{DPRValve, NormallyOpenValve};
 use datatypes::status::BuildInformationCommon;
@@ -63,6 +64,9 @@ pub struct BoardState {
     pub buzzer: Watch<ThreadModeRawMutex, BuzzerState, WATCH>,
     // Solenoid detection
     pub solenoid_states: Watch<ThreadModeRawMutex, SolenoidStates, WATCH>,
+    // Solenoid currents
+    // TODO: Broadcast this once the corresponding data-definition messages exist.
+    pub solenoid_currents: Watch<ThreadModeRawMutex, SolenoidCurrentMeasurements, WATCH>,
 }
 
 impl BoardState {
@@ -78,6 +82,7 @@ impl BoardState {
             pressure_bus_status: Watch::new(),
             buzzer: Watch::new(),
             solenoid_states: Watch::new(),
+            solenoid_currents: Watch::new(),
         }
     }
 }

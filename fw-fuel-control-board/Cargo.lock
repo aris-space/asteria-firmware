@@ -798,6 +798,7 @@ dependencies = [
  "panic-probe",
  "panic-reset",
  "thiserror",
+ "trafag-pressure",
 ]
 
 [[package]]
@@ -1519,6 +1520,16 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "trafag-pressure"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "defmt 0.3.100",
+ "embassy-stm32",
+ "embedded-utils",
 ]
 
 [[package]]

@@ -11,11 +11,12 @@ mod sensors;
 use core::future::pending;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, OutputType, Speed};
+use embassy_stm32::i2c::I2c;
 use embassy_stm32::peripherals::FDCAN1;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embassy_stm32::{bind_interrupts, can, i2c, peripherals};
-use embassy_time::Timer;
+use embassy_stm32::{bind_interrupts, can, dma, i2c, peripherals};
+use embassy_time::{Duration, Timer};
 use embedded_utils::fmt::*;
 
 mod clocks {
@@ -38,9 +39,11 @@ use {defmt_rtt as _, panic_probe as _};
 use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::can_impl::{can_rx_task, can_tx_task, setup_can};
+use crate::drivers::ads1015::Ads1015;
 use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
-use crate::sensors::analog_p::{analog_pressure_sensor, fss_tank_pressure_task};
+use crate::sensors::solenoid_current::solenoid_current_task;
+use crate::sensors::trafag_p::{FuelPressureHandles, fuel_pressure_acquisition};
 use can_utils::broadcast::Broadcast as _;
 use can_utils::setup::make_multiplexable;
 
@@ -48,6 +51,7 @@ use crate::buzzer::buzzer_task;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
+use trafag_pressure::{config_vref_buf, set_adc_configs};
 
 bind_interrupts!(struct Irqs {
     I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;
@@ -55,6 +59,12 @@ bind_interrupts!(struct Irqs {
 
     FDCAN1_IT0 => can::IT0InterruptHandler<FDCAN1>;
     FDCAN1_IT1 => can::IT1InterruptHandler<FDCAN1>;
+
+    DMA1_CHANNEL3 => dma::InterruptHandler<peripherals::DMA1_CH3>;
+    DMA1_CHANNEL4 => dma::InterruptHandler<peripherals::DMA1_CH4>;
+    DMA1_CHANNEL6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
+    DMA1_CHANNEL7 => dma::InterruptHandler<peripherals::DMA1_CH7>;
+    DMA2_CHANNEL3 => dma::InterruptHandler<peripherals::DMA2_CH3>;
 });
 
 #[embassy_executor::main]
@@ -70,7 +80,8 @@ async fn main(spawner: Spawner) -> ! {
         built_info::TARGET
     );
 
-    let config = clocks_config();
+    let mut config = clocks_config();
+    set_adc_configs(&mut config);
     let p = embassy_stm32::init(config);
 
     // LEDs
@@ -95,10 +106,29 @@ async fn main(spawner: Spawner) -> ! {
         Default::default(),
     );
 
-    // Keller pressure sensors (analog)
-    let adc1 = embassy_stm32::adc::Adc::new(p.ADC1, Default::default());
-    let adc2 = embassy_stm32::adc::Adc::new(p.ADC2, Default::default());
-    let adc3 = embassy_stm32::adc::Adc::new(p.ADC3, Default::default());
+    config_vref_buf();
+
+    // Trafag pressure sensors
+    let pressure_handles = FuelPressureHandles {
+        pressurization_pressure_adc: p.ADC1,
+        pressurization_pressure_dma: p.DMA1_CH4,
+        pressurization_pressure_pin: p.PC0,
+        fuel_tank_pressure_1_adc: p.ADC2,
+        fuel_tank_pressure_1_dma: p.DMA2_CH3,
+        fuel_tank_pressure_1_pin: p.PC1,
+        fuel_tank_pressure_2_adc: p.ADC3,
+        fuel_tank_pressure_2_dma: p.DMA1_CH3,
+        fuel_tank_pressure_2_pin: p.PB13,
+    };
+
+    let mut i2c_config = i2c::Config::default();
+    i2c_config.timeout = Duration::from_millis(5);
+    i2c_config.frequency = Hertz(400_000);
+
+    // ADS1015 solenoid current monitor on I2C3: SCL = PC8, SDA = PC9.
+    let solenoid_current_adc = Ads1015::new(I2c::new(
+        p.I2C3, p.PC8, p.PC9, p.DMA1_CH6, p.DMA1_CH7, Irqs, i2c_config,
+    ));
 
     // Can Bus
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs);
@@ -126,16 +156,18 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(buzzer_task(buzzer_pwm).expect("failed to prepare buzzer_task spawn token"));
 
-    spawner.spawn(analog_pressure_sensor(adc1, p.PC0).expect("failed to prepare pressure task"));
     spawner.spawn(
-        fss_tank_pressure_task(adc2, p.PC1, adc3, p.PB13)
-            .expect("failed to prepare tank pressure task"),
+        fuel_pressure_acquisition(pressure_handles).expect("failed to prepare pressure task"),
     );
 
     // TODO: Replace PA0/PA1/PA2 with the correct solenoid detection pins
     spawner.spawn(
         solenoid_detection_task(p.PA0, p.PA1, p.PA2)
             .expect("failed to prepare solenoid detection task"),
+    );
+    spawner.spawn(
+        solenoid_current_task(solenoid_current_adc)
+            .expect("failed to prepare solenoid current task"),
     );
 
     #[allow(unreachable_code)]
