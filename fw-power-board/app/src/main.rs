@@ -10,6 +10,7 @@ mod build_info;
 mod buzzer;
 mod can;
 mod can_impl;
+mod power_indicators;
 mod sensor_readout;
 mod unix_time;
 
@@ -18,7 +19,7 @@ use board::{INA232_I2C_ADDR, Irqs};
 use cortex_m::peripheral::SCB;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::OutputType;
-use embassy_stm32::gpio::{Level, Output, Speed};
+use embassy_stm32::gpio::{Input, Level, Output, Speed};
 use embassy_stm32::i2c::{self, I2c};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::low_level::CountingMode;
@@ -47,10 +48,16 @@ async fn main(spawner: Spawner) -> ! {
     let config = clocks::clocks_config();
     let p = embassy_stm32::init(config);
 
-    // Configure LEDs (PB0, PB1, PB2) as outputs (low = off)
-    let _led_green = Output::new(p.PB0, Level::Low, Speed::Low);
-    let led_yellow = Output::new(p.PB1, Level::Low, Speed::Low);
-    let _led_red = Output::new(p.PB2, Level::Low, Speed::Low);
+    // Configure active power-rail detection (pull down is external)
+    let bat_p = Input::new(p.PA0, embassy_stm32::gpio::Pull::None);
+    let ext_p = Input::new(p.PA1, embassy_stm32::gpio::Pull::None);
+
+    // Configure LEDs as outputs (low = off)
+    let _led_green = Output::new(p.PA3, Level::Low, Speed::Low);
+    let led_yellow = Output::new(p.PA4, Level::Low, Speed::Low);
+    let _led_red = Output::new(p.PA5, Level::Low, Speed::Low);
+    let led_bat_p = Output::new(p.PA6, Level::Low, Speed::Low);
+    let led_ext_p = Output::new(p.PA7, Level::Low, Speed::Low);
 
     // Shared I2C configuration: 5 ms timeout, 400 kHz speed
     let mut shared_i2c_config = i2c::Config::default();
@@ -107,6 +114,12 @@ async fn main(spawner: Spawner) -> ! {
 
     // Spawn activity LED
     spawner.spawn(blink::blink(led_yellow).expect("Failed to spawn blink task"));
+
+    // Spawn power rail indicator LED task
+    spawner.spawn(
+        power_indicators::power_indicators(bat_p, ext_p, led_bat_p, led_ext_p)
+            .expect("Failed to spawn power rail indicator task"),
+    );
 
     // Spawn the buzzer alert task
     spawner.spawn(buzzer::buzzer_task(pwm).expect("Failed to spawn buzzer task"));
