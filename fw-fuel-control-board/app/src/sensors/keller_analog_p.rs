@@ -1,5 +1,5 @@
 use crate::Irqs;
-use crate::drivers::pressure::{FuelPressureDriver, FuelPressureMeasurementRaw};
+use crate::drivers::analog_pressure::{FuelPressureDriver, FuelPressureMeasurementRaw};
 use crate::sensors::{
     ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES, FUEL_TANK_PRESSURE_1_RANGE,
     FUEL_TANK_PRESSURE_2_RANGE, PRESSURIZATION_PRESSURE_RANGE,

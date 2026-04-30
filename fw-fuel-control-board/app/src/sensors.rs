@@ -1,5 +1,5 @@
+pub mod keller_analog_p;
 pub mod solenoid_current;
-pub mod trafag_p;
 
 pub(crate) const ACQ_PRESSURE_FREQ_HZ: f32 = 60.0; // max stable possible ~ 60 Hz
 pub(crate) const ADC_CALIBRATION_SAMPLES: u64 = 50;

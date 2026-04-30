@@ -1,6 +1,6 @@
 use crate::buzzer::BuzzerState;
 use crate::drivers::WATCH;
-use crate::drivers::pressure::FuelTankPressureMeasurement;
+use crate::drivers::analog_pressure::FuelTankPressureMeasurement;
 use crate::drivers::solenoid_detection::SolenoidStates;
 use crate::sensors::solenoid_current::SolenoidCurrentMeasurements;
 use can_utils::broadcast::Broadcast;

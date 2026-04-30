@@ -41,8 +41,8 @@ use crate::actuators::valves::valve_task;
 use crate::can_impl::{can_rx_task, can_tx_task, setup_can};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
+use crate::sensors::keller_analog_p::{FuelPressureHandles, fuel_pressure_acquisition};
 use crate::sensors::solenoid_current::solenoid_current_task;
-use crate::sensors::trafag_p::{FuelPressureHandles, fuel_pressure_acquisition};
 use can_utils::broadcast::Broadcast as _;
 use can_utils::setup::make_multiplexable;
 
@@ -110,7 +110,7 @@ async fn main(spawner: Spawner) -> ! {
 
     config_vref_buf();
 
-    // Trafag pressure sensors
+    // Keller analog pressure sensors
     let pressure_handles = FuelPressureHandles {
         pressurization_pressure_adc: p.ADC1,
         pressurization_pressure_dma: p.DMA1_CH4,
