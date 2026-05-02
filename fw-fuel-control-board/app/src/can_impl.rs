@@ -2,13 +2,10 @@ use crate::globals::STATE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
-use can_utils::setup::setup_can as setup_can_with_filters;
 use data_core::can::hal::CanDecode as _;
 use datatypes::status::{BoardId, SensorStatus, StatusCommonMessage};
 use embassy_futures::yield_now;
-use embassy_stm32::can::{Can, CanRx, RxPin, TxPin};
-use embassy_stm32::interrupt::typelevel::Binding;
-use embassy_stm32::{Peri, can};
+use embassy_stm32::can::CanRx;
 use embassy_time::{Duration, Instant, Ticker};
 use embedded_utils::fmt::*;
 
@@ -33,17 +30,6 @@ const __ASSERT_LEN_OK: () = {
         core::panic!("Too many receiving can ids");
     }
 };
-
-pub fn setup_can<'a, T: can::Instance>(
-    peri: Peri<'a, T>,
-    rx: Peri<'a, impl RxPin<T>>,
-    tx: Peri<'a, impl TxPin<T>>,
-    irqs: impl Binding<T::IT0Interrupt, can::IT0InterruptHandler<T>>
-    + Binding<T::IT1Interrupt, can::IT1InterruptHandler<T>>
-    + 'a,
-) -> Can<'a> {
-    setup_can_with_filters(peri, rx, tx, irqs, ReceivedMessage::SUPPORTED_IDS)
-}
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {

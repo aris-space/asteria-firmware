@@ -38,13 +38,14 @@ use {defmt_rtt as _, panic_probe as _};
 
 use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
-use crate::can_impl::{can_rx_task, can_tx_task, setup_can};
+use crate::can_impl::{ReceivedMessage, can_rx_task, can_tx_task};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
 use crate::sensors::keller_analog_p::{FuelPressureHandles, fuel_pressure_acquisition};
 use crate::sensors::solenoid_current::solenoid_current_task;
 use can_utils::broadcast::Broadcast as _;
-use can_utils::setup::make_multiplexable;
+use can_utils::setup::{make_multiplexable, setup_can};
+use data_core::can::hal::CanDecode as _;
 
 use crate::buzzer::buzzer_task;
 #[allow(unused_imports)]
@@ -133,7 +134,7 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // Can Bus
-    let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs);
+    let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (tx, rx, _) = can.split();
     let tx = make_multiplexable(tx).await;
     STATE
