@@ -34,7 +34,7 @@ const __ASSERT_LEN_OK: () = {
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
     loop {
-        match recv_message(&mut can_rx).await {
+        match can_rx.recv().await {
             Ok(ReceivedMessage::ResetAll(_)) => {
                 warn!("[CAN Task] Received ResetAll message, resetting FuelControlBoard");
                 reset_now();
@@ -90,8 +90,4 @@ pub async fn board_status_update_task() -> ! {
 
 fn reset_now() {
     cortex_m::peripheral::SCB::sys_reset();
-}
-
-async fn recv_message(can_rx: &mut CanRx<'_>) -> Result<ReceivedMessage, ()> {
-    can_rx.recv().await.map_err(|_| ())
 }
