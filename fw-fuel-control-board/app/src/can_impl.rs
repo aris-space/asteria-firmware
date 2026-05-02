@@ -57,7 +57,7 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn can_tx_task() -> ! {
+pub async fn board_status_update_task() -> ! {
     let start = Instant::now();
     let mut status_ticker = Ticker::every(Duration::from_millis(
         1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,

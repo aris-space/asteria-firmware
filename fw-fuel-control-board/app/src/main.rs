@@ -38,7 +38,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
-use crate::can_impl::{ReceivedMessage, can_rx_task, can_tx_task};
+use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
 use crate::sensors::keller_analog_p::{FuelPressureHandles, fuel_pressure_acquisition};
@@ -151,7 +151,9 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     spawner.spawn(can_rx_task(rx).expect("failed to prepare can_rx_task spawn token"));
-    spawner.spawn(can_tx_task().expect("failed to prepare can_tx_task spawn token"));
+    spawner.spawn(
+        board_status_update_task().expect("failed to prepare board_status_update_task spawn token"),
+    );
 
     spawner.spawn(
         activity_blinky(green, yellow, red).expect("failed to prepare activity_blinky spawn token"),
