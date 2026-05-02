@@ -88,8 +88,8 @@ async fn main(spawner: Spawner) -> ! {
     Timer::after_millis(1000).await;
 
     // LEDs
-    let green = Output::new(p.PC15, Level::High, Speed::Low);
-    let yellow = Output::new(p.PC14, Level::High, Speed::Low);
+    let _green = Output::new(p.PC15, Level::High, Speed::Low);
+    let _yellow = Output::new(p.PC14, Level::High, Speed::Low);
     let red = Output::new(p.PC13, Level::High, Speed::Low);
 
     // Solenoids (TODO: Change to correct pins!!)
@@ -156,7 +156,7 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     spawner.spawn(
-        activity_blinky(green, yellow, red).expect("failed to prepare activity_blinky spawn token"),
+        build_status_blinky(red).expect("failed to prepare build_status_blinky spawn token"),
     );
 
     spawner.spawn(buzzer_task(buzzer_pwm).expect("failed to prepare buzzer_task spawn token"));
@@ -182,21 +182,19 @@ async fn main(spawner: Spawner) -> ! {
 }
 
 #[embassy_executor::task]
-async fn activity_blinky(
-    mut led1: Output<'static>,
-    mut led2: Output<'static>,
-    mut led3: Output<'static>,
-) {
+async fn build_status_blinky(mut red: Output<'static>) {
+    let build_info = crate::build_info::BUILD_INFO.get();
+    let warning_build = build_info.is_git_dirty || !build_info.is_release;
+    let (on_ms, off_ms) = if warning_build {
+        (125, 125)
+    } else {
+        (900, 100)
+    };
+
     loop {
-        led1.set_high();
-        Timer::after_millis(100).await;
-        led1.set_low();
-        led2.set_high();
-        Timer::after_millis(100).await;
-        led2.set_low();
-        led3.set_high();
-        Timer::after_millis(100).await;
-        led3.set_low();
-        Timer::after_millis(700).await;
+        red.set_low();
+        Timer::after_millis(on_ms).await;
+        red.set_high();
+        Timer::after_millis(off_ms).await;
     }
 }
