@@ -15,14 +15,6 @@ pub struct FuelPressureMeasurementRaw {
     pub fuel_tank_pressure_2: f32,
 }
 
-#[derive(Clone, Copy)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct FuelTankPressureMeasurement {
-    pub fuel_tank_pressure_1: BarG,
-    pub fuel_tank_pressure_2: BarG,
-    pub dpr_pressure: BarG,
-}
-
 pub struct FuelPressureDriver {
     pressurization_pressure_avg: GaussianMovingAverage<FILTER_WINDOW>,
     fuel_tank_pressure_1_avg: GaussianMovingAverage<FILTER_WINDOW>,
@@ -63,10 +55,10 @@ impl FuelPressureDriver {
         STATE
             .fuel_tank_pressure
             .sender()
-            .send(FuelTankPressureMeasurement {
-                fuel_tank_pressure_1: BarG(value.fuel_tank_pressure_1),
-                fuel_tank_pressure_2: BarG(value.fuel_tank_pressure_2),
-                dpr_pressure: BarG(get_filtered_tank_p(
+            .send(dp_fuel_control_board::FuelTankPressure {
+                fuel_tank_pressure_sensor_1: BarG(value.fuel_tank_pressure_1),
+                fuel_tank_pressure_sensor_2: BarG(value.fuel_tank_pressure_2),
+                fuel_tank_pressure_filtered: BarG(get_filtered_tank_p(
                     value.fuel_tank_pressure_1,
                     value.fuel_tank_pressure_2,
                 )),

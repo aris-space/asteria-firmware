@@ -46,7 +46,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         }
 
         // Update pressure reading with available data
-        pressure = p_watcher.get().await.dpr_pressure.0;
+        pressure = p_watcher.get().await.fuel_tank_pressure_filtered.0;
 
         // Safety check
         if pressure >= SAFETY_LIMIT_BARG {

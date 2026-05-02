@@ -1,6 +1,5 @@
 use crate::buzzer::BuzzerState;
 use crate::drivers::WATCH;
-use crate::drivers::analog_pressure::FuelTankPressureMeasurement;
 use crate::drivers::solenoid_detection::SolenoidStates;
 use crate::sensors::solenoid_current::SolenoidCurrentMeasurements;
 use can_utils::broadcast::Broadcast;
@@ -26,11 +25,11 @@ pub struct BoardState {
     )]
     pub pressurization_pressure: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
-        map = "dp_fuel_control_board::Message::FuelTankPressure(dp_fuel_control_board::FuelTankPressure { fuel_tank_pressure_sensor_1: #value.fuel_tank_pressure_1, fuel_tank_pressure_sensor_2: #value.fuel_tank_pressure_2, fuel_tank_pressure_filtered: #value.dpr_pressure })",
+        map = "dp_fuel_control_board::Message::FuelTankPressure(#value)",
         min_freq_hz = 20.0,
         max_freq_hz = 20.0
     )]
-    pub fuel_tank_pressure: Watch<ThreadModeRawMutex, FuelTankPressureMeasurement, 5>,
+    pub fuel_tank_pressure: Watch<ThreadModeRawMutex, dp_fuel_control_board::FuelTankPressure, 5>,
     // DPR
     #[broadcast(
         map = "dp_fuel_control_board::Message::FuelDprValveState(#value)",
