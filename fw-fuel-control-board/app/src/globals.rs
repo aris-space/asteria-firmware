@@ -4,14 +4,19 @@ use crate::drivers::analog_pressure::FuelTankPressureMeasurement;
 use crate::drivers::solenoid_detection::SolenoidStates;
 use crate::sensors::solenoid_current::SolenoidCurrentMeasurements;
 use can_utils::broadcast::Broadcast;
+use can_utils::collector::Collector;
 use datatypes::actuator::{DPRValve, NormallyOpenValve};
 use datatypes::status::BuildInformationCommon;
 use datatypes::units::BarG;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 
-#[derive(Broadcast)]
+#[derive(Broadcast, Collector)]
 #[broadcast(loop_type = "can_utils::broadcast::ResponsiveLoop")]
+#[collector(
+    message_type = "crate::can_impl::ReceivedMessage",
+    update_expr = "#field.sender().send(#value);"
+)]
 pub struct BoardState {
     // Pressure sensors
     #[broadcast(
@@ -32,6 +37,9 @@ pub struct BoardState {
         min_freq_hz = 5.0,
         max_freq_hz = 5.0
     )]
+    #[collector(
+        pattern = "crate::can_impl::ReceivedMessage::FuelDprValveControlFC(#value) | crate::can_impl::ReceivedMessage::FuelDprValveControlRFS(#value)"
+    )]
     pub dpr_control_loop: Watch<ThreadModeRawMutex, DPRValve, 5>,
     // Valves
     #[broadcast(
@@ -39,11 +47,17 @@ pub struct BoardState {
         min_freq_hz = 5.0,
         max_freq_hz = 5.0
     )]
+    #[collector(
+        pattern = "crate::can_impl::ReceivedMessage::PressurizationVentValveControlFC(#value) | crate::can_impl::ReceivedMessage::PressurizationVentValveControlRFS(#value)"
+    )]
     pub pressurization_vent_control: Watch<ThreadModeRawMutex, NormallyOpenValve, 5>,
     #[broadcast(
         map = "dp_fuel_control_board::Message::FuelVentValveState(#value)",
         min_freq_hz = 5.0,
         max_freq_hz = 5.0
+    )]
+    #[collector(
+        pattern = "crate::can_impl::ReceivedMessage::FuelVentValveControlFC(#value) | crate::can_impl::ReceivedMessage::FuelVentValveControlRFS(#value)"
     )]
     pub fuel_vent_control: Watch<ThreadModeRawMutex, NormallyOpenValve, 5>,
     #[broadcast(

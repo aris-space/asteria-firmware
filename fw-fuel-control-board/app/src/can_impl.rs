@@ -4,7 +4,6 @@ use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use can_utils::setup::setup_can as setup_can_with_filters;
 use data_core::can::hal::CanDecode as _;
-use datatypes::actuator::{DPRValve, NormallyOpenValve};
 use datatypes::status::{BoardId, SensorStatus, StatusCommonMessage};
 use embassy_futures::yield_now;
 use embassy_stm32::can::{Can, CanRx, RxPin, TxPin};
@@ -35,65 +34,6 @@ const __ASSERT_LEN_OK: () = {
     }
 };
 
-struct DprSender;
-impl DprSender {
-    fn sender(&self) -> &Self {
-        self
-    }
-    fn send(&self, value: DPRValve) {
-        STATE.dpr_control_loop.sender().send(value);
-    }
-}
-
-struct PrzVentSender;
-impl PrzVentSender {
-    fn sender(&self) -> &Self {
-        self
-    }
-    fn send(&self, value: NormallyOpenValve) {
-        STATE.pressurization_vent_control.sender().send(value);
-    }
-}
-
-struct FuelVentSender;
-impl FuelVentSender {
-    fn sender(&self) -> &Self {
-        self
-    }
-    fn send(&self, value: NormallyOpenValve) {
-        STATE.fuel_vent_control.sender().send(value);
-    }
-}
-
-#[derive(Collector)]
-#[collector(
-    message_type = "ReceivedMessage",
-    update_expr = "#field.sender().send(#value);"
-)]
-struct FuelCanInputs {
-    #[collector(pattern = "ReceivedMessage::FuelDprValveControlFC(#value)")]
-    fuel_dpr_fc: DprSender,
-    #[collector(pattern = "ReceivedMessage::FuelDprValveControlRFS(#value)")]
-    fuel_dpr_rfs: DprSender,
-    #[collector(pattern = "ReceivedMessage::PressurizationVentValveControlFC(#value)")]
-    prz_vent_fc: PrzVentSender,
-    #[collector(pattern = "ReceivedMessage::PressurizationVentValveControlRFS(#value)")]
-    prz_vent_rfs: PrzVentSender,
-    #[collector(pattern = "ReceivedMessage::FuelVentValveControlFC(#value)")]
-    fuel_vent_fc: FuelVentSender,
-    #[collector(pattern = "ReceivedMessage::FuelVentValveControlRFS(#value)")]
-    fuel_vent_rfs: FuelVentSender,
-}
-
-static INPUTS: FuelCanInputs = FuelCanInputs {
-    fuel_dpr_fc: DprSender,
-    fuel_dpr_rfs: DprSender,
-    prz_vent_fc: PrzVentSender,
-    prz_vent_rfs: PrzVentSender,
-    fuel_vent_fc: FuelVentSender,
-    fuel_vent_rfs: FuelVentSender,
-};
-
 pub fn setup_can<'a, T: can::Instance>(
     peri: Peri<'a, T>,
     rx: Peri<'a, impl RxPin<T>>,
@@ -120,7 +60,7 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
                 }
             }
             Ok(msg) => {
-                let _ = INPUTS.update_from(msg);
+                let _ = STATE.update_from(msg);
             }
             Err(err) => {
                 error!("CAN RX error: {:?}", err);
