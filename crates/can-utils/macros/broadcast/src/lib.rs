@@ -282,7 +282,10 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
         body_stmts.push(quote! {
             #[::embassy_executor::task]
             async fn #field_name(
-                transmit: &'static ::embassy_sync::mutex::Mutex<#mtx, ::embassy_stm32::can::CanTx<'static>>,
+                transmit: &'static ::embassy_sync::mutex::Mutex<
+                    ::embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+                    ::embassy_stm32::can::CanTx<'static>,
+                >,
                 field: ::embassy_sync::watch::Receiver<'static, #mtx, #t_ty, #n_val>,
             ) {
                 #loop_type::broadcast_loop(
