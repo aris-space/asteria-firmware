@@ -37,7 +37,7 @@ use embassy_stm32::timer::Channel::{Ch1, Ch2};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::Uart;
 use embassy_stm32::{bind_interrupts, can, dma, peripherals, usart};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant};
 use embassy_time::{Timer, with_timeout};
@@ -254,7 +254,7 @@ async fn main(spawner: Spawner) -> ! {
     // CAN.Tx is on PB9
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (can_tx, mut can_rx, _prop) = can.split();
-    let can_tx = make_multiplexable(can_tx).await;
+    let can_tx = make_multiplexable(can_tx);
 
     /* END CAN BUS */
 
@@ -371,7 +371,7 @@ async fn blink(mut led: Output<'static>) {
 }
 
 #[embassy_executor::task]
-async fn can_tx_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
     let status_creation_task = async {
         let mut last = Instant::now();
         let mut steering_status_rx = STEERING_STATUS.receiver().unwrap();

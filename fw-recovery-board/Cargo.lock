@@ -139,7 +139,7 @@ dependencies = [
  "broadcast-derive",
  "can-hal",
  "collector-derive",
- "defmt 0.3.100",
+ "defmt 1.0.1",
  "embassy-executor",
  "embassy-stm32",
  "embassy-sync",
@@ -710,7 +710,7 @@ dependencies = [
 name = "embedded-utils"
 version = "0.1.0"
 dependencies = [
- "defmt 0.3.100",
+ "defmt 1.0.1",
  "embassy-time",
 ]
 
