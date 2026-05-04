@@ -51,8 +51,7 @@ pub fn setup_can<'a, T: can::Instance>(
 /// Moves the can tx instance behind a singleton mutex.
 ///
 /// Only call this once, otherwise it will panic.
-/// And only use this on single-core MCUs due to the `ThreadModeRawMutex`.
-pub async fn make_multiplexable(
+pub fn make_multiplexable(
     can_tx: CanTx<'static>,
 ) -> &'static Mutex<CriticalSectionRawMutex, CanTx<'static>> {
     let can_tx = Mutex::<CriticalSectionRawMutex, _>::new(can_tx);
@@ -61,5 +60,5 @@ pub async fn make_multiplexable(
         .init(can_tx)
         .ok()
         .expect("Failed to set CAN TX mutex");
-    CAN_TX.get().await
+    CAN_TX.try_get().expect("set just above")
 }
