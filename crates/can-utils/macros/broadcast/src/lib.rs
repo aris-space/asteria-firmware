@@ -11,7 +11,7 @@
 //! #[broadcast(loop_type = "MyLoop")]
 //! struct Outputs {
 //!     #[broadcast(filter_map = "#value.map(Msg::Positions)", min_freq_hz = 1., max_freq_hz = 10.)]
-//!     positions: Watch<ThreadModeRawMutex, Option<Positions>, 2>,
+//!     positions: Watch<CriticalSectionRawMutex, Option<Positions>, 2>,
 //!
 //!     // Fields without #[broadcast] are ignored.
 //!     other: u32,
@@ -28,12 +28,12 @@
 //!     fn start_broadcasting(
 //!         &'static self,
 //!         spawner: Spawner,
-//!         transmit: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
+//!         transmit: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>,
 //!     ) -> Result<(), SpawnError> {
 //!         #[embassy_executor::task]
 //!         async fn positions(
-//!             transmit: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
-//!             field: Receiver<'static, ThreadModeRawMutex, Option<Positions>, 2>,
+//!             transmit: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>,
+//!             field: Receiver<'static, CriticalSectionRawMutex, Option<Positions>, 2>,
 //!         ) {
 //!             MyLoop::broadcast_loop(
 //!                 field,
@@ -318,7 +318,7 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
                 &'static self,
                 __spawner: ::embassy_executor::Spawner,
                 __transmit: &'static ::embassy_sync::mutex::Mutex<
-                    ::embassy_sync::blocking_mutex::raw::ThreadModeRawMutex,
+                    ::embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
                     ::embassy_stm32::can::CanTx<'static>,
                 >,
             ) -> ::core::result::Result<(), ::embassy_executor::SpawnError> {
@@ -384,7 +384,7 @@ mod tests {
             #[broadcast(loop_type = "MyLoop")]
             struct Data {
                 #[broadcast(map = "Msg::A(#value)", min_freq_hz = 1.)]
-                a: Watch<ThreadModeRawMutex, i32, 1>,
+                a: Watch<CriticalSectionRawMutex, i32, 1>,
             }
         };
 
@@ -404,7 +404,7 @@ mod tests {
             #[broadcast(loop_type = "MyLoop")]
             struct Data {
                 #[broadcast(min_freq_hz = 1., max_freq_hz = 1.)]
-                a: Watch<ThreadModeRawMutex, i32, 1>,
+                a: Watch<CriticalSectionRawMutex, i32, 1>,
             }
         };
 
@@ -424,7 +424,7 @@ mod tests {
             #[broadcast(loop_type = "MyLoop")]
             struct Data {
                 #[broadcast(map = "Msg::A(#value)", filter_map = "#value.map(Msg::A)", min_freq_hz = 1., max_freq_hz = 1.)]
-                a: Watch<ThreadModeRawMutex, i32, 1>,
+                a: Watch<CriticalSectionRawMutex, i32, 1>,
             }
         };
 

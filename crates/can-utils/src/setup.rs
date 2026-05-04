@@ -4,10 +4,7 @@ use embassy_stm32::can::filter::{Action, FilterType, StandardFilter};
 use embassy_stm32::can::{Can, CanConfigurator, CanTx, OperatingMode, RxPin, TxPin};
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::{Peri, can};
-#[cfg(not(target_os = "none"))] // cheat, since `ThreadModeRawMutex` only exists for cortex-m.
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ThreadModeRawMutex;
-#[cfg(target_os = "none")]
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 
@@ -57,9 +54,9 @@ pub fn setup_can<'a, T: can::Instance>(
 /// And only use this on single-core MCUs due to the `ThreadModeRawMutex`.
 pub async fn make_multiplexable(
     can_tx: CanTx<'static>,
-) -> &'static Mutex<ThreadModeRawMutex, CanTx<'static>> {
-    let can_tx = Mutex::<ThreadModeRawMutex, _>::new(can_tx);
-    static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
+) -> &'static Mutex<CriticalSectionRawMutex, CanTx<'static>> {
+    let can_tx = Mutex::<CriticalSectionRawMutex, _>::new(can_tx);
+    static CAN_TX: OnceLock<Mutex<CriticalSectionRawMutex, CanTx<'static>>> = OnceLock::new();
     CAN_TX
         .init(can_tx)
         .ok()
