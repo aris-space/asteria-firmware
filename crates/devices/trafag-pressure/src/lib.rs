@@ -152,7 +152,7 @@ pub fn config_vref_buf() {
     let csr = VREFBUF.csr();
 
     csr.modify(|csr| {
-        csr.set_vrs(Vrs::VREF0);
+        csr.set_vrs(Vrs::VREF2);
 
         csr.set_envr(true);
         csr.set_hiz(Hiz::CONNECTED);
