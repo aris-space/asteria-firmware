@@ -1,7 +1,9 @@
 use crate::drivers::WATCH;
+use crate::globals::STATE;
+use datatypes::status::SensorStatus;
+use datatypes::units::Celsius;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::{Sender, Watch};
-use hermes_can::messages::board_status::SensorStatus;
 
 pub static THERMOCOUPLE_WATCH: Watch<ThreadModeRawMutex, ThermoMeasurementRaw, WATCH> =
     Watch::new();
@@ -29,5 +31,12 @@ impl<'a> TCDriver<'a> {
     pub fn update(&mut self, value: ThermoMeasurementRaw) {
         // Send the value to the watch channel
         self.watch_handle.send(value);
+        STATE
+            .engine_bay_temperature
+            .sender()
+            .send(dp_engine_control_board::EngineBayTemperature {
+                eng_inj_t: Celsius(value.oss_rnl_t),
+                oss_tnk_t: Celsius(value.oss_tnk_t),
+            });
     }
 }

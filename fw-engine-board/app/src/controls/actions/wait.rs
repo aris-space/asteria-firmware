@@ -3,18 +3,12 @@ use crate::drivers::WATCH;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Receiver;
 use embassy_time::{Duration, Instant, Timer};
-use hermes_can::messages::event_messages::FiringAbortInitiation;
 
 const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub async fn wait_with_abort<'a>(
     duration: &Duration,
-    abort_initiation_receiver: &mut Receiver<
-        'a,
-        CriticalSectionRawMutex,
-        FiringAbortInitiation,
-        WATCH,
-    >,
+    abort_initiation_receiver: &mut Receiver<'a, CriticalSectionRawMutex, (), WATCH>,
 ) -> ActionCompleteness {
     let start = Instant::now();
     loop {

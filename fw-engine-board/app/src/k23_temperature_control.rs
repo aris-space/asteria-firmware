@@ -1,4 +1,4 @@
-use crate::drivers::digital_pressure::DIGITAL_TEMPERATURE_WATCH;
+use crate::globals::STATE;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_stm32::gpio::Output;
 use embassy_time::Timer;
@@ -11,7 +11,7 @@ pub(crate) static HEATING_CONTROL_ACTIVE: AtomicBool = AtomicBool::new(true);
 
 #[embassy_executor::task]
 pub async fn k23_temperature_control(mut pin: Output<'static>) {
-    let mut temperature_watcher = DIGITAL_TEMPERATURE_WATCH.receiver().unwrap();
+    let mut temperature_watcher = STATE.engine_bay_temperature.receiver().unwrap();
 
     loop {
         if !HEATING_CONTROL_ACTIVE.load(Ordering::Relaxed) {
@@ -22,15 +22,11 @@ pub async fn k23_temperature_control(mut pin: Output<'static>) {
 
         let temp = temperature_watcher.get().await;
 
-        if (temp.eng_cc_t < LOWER_TEMP_THRESHOLD)
-            | (temp.fue_inj_t < LOWER_TEMP_THRESHOLD)
-            | (temp.oxd_inj_t < LOWER_TEMP_THRESHOLD)
-        {
+        if (temp.eng_inj_t.0 < LOWER_TEMP_THRESHOLD) | (temp.oss_tnk_t.0 < LOWER_TEMP_THRESHOLD) {
             pin.set_high();
             info!("Heater turned ON");
-        } else if (temp.eng_cc_t > UPPER_TEMP_THRESHOLD)
-            | (temp.fue_inj_t > UPPER_TEMP_THRESHOLD)
-            | (temp.oxd_inj_t > UPPER_TEMP_THRESHOLD)
+        } else if (temp.eng_inj_t.0 > UPPER_TEMP_THRESHOLD)
+            | (temp.oss_tnk_t.0 > UPPER_TEMP_THRESHOLD)
         {
             pin.set_low();
             info!("Heater turned OFF");

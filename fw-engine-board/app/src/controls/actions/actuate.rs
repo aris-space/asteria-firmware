@@ -1,19 +1,14 @@
-use crate::valves::{EXTERNAL_VALVE_CONTROL, FSS_MAIN_CONTROL, OSS_MAIN_CONTROL};
-use crate::valves::{ExternalValve, OnboardValve};
-use embassy_sync::pubsub::PubSubBehavior;
+use crate::globals::STATE;
+use crate::valves::OnboardValve;
 
 pub async fn actuate_onboard_valve(valve: OnboardValve) {
     match valve {
         // Onboard valves
         OnboardValve::FuelMain(state) => {
-            FSS_MAIN_CONTROL.sender().send(state);
+            STATE.fuel_main_control.sender().send(state);
         }
         OnboardValve::OxidizerMain(state) => {
-            OSS_MAIN_CONTROL.sender().send(state);
+            STATE.oxidizer_main_control.sender().send(state);
         }
     }
-}
-
-pub async fn actuate_external_valve(valve: ExternalValve) {
-    EXTERNAL_VALVE_CONTROL.publish_immediate(valve);
 }

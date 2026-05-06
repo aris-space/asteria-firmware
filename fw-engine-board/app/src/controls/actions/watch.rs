@@ -1,12 +1,11 @@
 use crate::controls::actions::Watcher;
 use crate::controls::actions::detect::SENSOR_TIMEOUT;
 use crate::controls::runner::ABORT_INITIATION;
-use crate::drivers::{ENGINE_P_WATCH, IGNITER_P_WATCH};
+use crate::drivers::ENGINE_P_WATCH;
 use crate::sensors::Sensor;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Timer, with_timeout};
-use hermes_can::messages::event_messages::FiringAbortInitiation;
 
 #[derive(Clone, PartialEq)]
 pub enum WatchState {
@@ -42,7 +41,6 @@ pub async fn watch_task_runner() {
             // These unwraps are safe because the total amount of receiver is smaller than the CAP
             let (mut sensor_receiver, threshold) = match watcher.sensor {
                 Sensor::EngineP(threshold) => (ENGINE_P_WATCH.receiver().unwrap(), threshold),
-                Sensor::IgniterP(threshold) => (IGNITER_P_WATCH.receiver().unwrap(), threshold),
             };
 
             // Try receiving a sensor update with a timeout
@@ -54,13 +52,13 @@ pub async fn watch_task_runner() {
                     || (!watcher.increasing && (value <= threshold))
                 {
                     // Trigger abort if threshold is crossed
-                    abort_initiator.send(FiringAbortInitiation);
+                    abort_initiator.send(());
                     // Switch to Ignore state after abort
                     watch_state = WatchState::Ignore;
                 }
             } else {
                 // If a timeout occurs, trigger abort
-                abort_initiator.send(FiringAbortInitiation);
+                abort_initiator.send(());
 
                 // Switch to Ignore state after abort
                 watch_state = WatchState::Ignore;

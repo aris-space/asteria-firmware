@@ -1,8 +1,9 @@
 use crate::controls::abort_sequence::ABORT_SEQUENCE;
 use crate::controls::actions::Actions;
-use crate::controls::actions::actuate::{actuate_external_valve, actuate_onboard_valve};
+use crate::controls::actions::actuate::actuate_onboard_valve;
 use crate::controls::actions::wait::wait_no_abort;
 use crate::controls::runner::{ABORT_INITIATION, FIRING_INFO, FiringInfo};
+use crate::globals::STATE;
 use embassy_time::{Duration, Timer};
 use embedded_utils::fmt::warn;
 use embedded_utils::info;
@@ -19,6 +20,7 @@ pub async fn abort_task_runner() {
         if abort_initiation_receiver.try_changed().is_some() {
             warn!("[ABORT] INITIATED");
             firing_info_sender.publish_immediate(FiringInfo::FiringAborted);
+            STATE.firing_aborted.sender().send(true);
 
             for action in &ABORT_SEQUENCE {
                 info!("[ABORT] Executing action: {:?}", action);
@@ -28,9 +30,6 @@ pub async fn abort_task_runner() {
                     }
                     Actions::ActuateOnboard(valve) => {
                         actuate_onboard_valve(*valve).await;
-                    }
-                    Actions::ActuateExternal(valve) => {
-                        actuate_external_valve(*valve).await;
                     }
                     _ => {
                         // Rest of the actions not needed in abort sequence

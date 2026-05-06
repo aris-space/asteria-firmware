@@ -2,12 +2,11 @@
 
 pub mod actuate;
 pub mod detect;
-pub mod follow_thrust_curve;
 pub mod wait;
 pub mod watch;
 
 use crate::sensors::Sensor;
-use crate::valves::{ExternalValve, OnboardValve};
+use crate::valves::OnboardValve;
 use embassy_time::Duration;
 
 #[derive(PartialEq)]
@@ -19,12 +18,10 @@ pub enum ActionCompleteness {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Actions {
     Wait(Duration),
-    ActuateExternal(ExternalValve),
     ActuateOnboard(OnboardValve),
     Detect(Detection),
     Watch(Watcher),
     Ignore(Sensor),
-    FollowThrustCurve,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

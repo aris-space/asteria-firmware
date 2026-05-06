@@ -7,16 +7,13 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 use embedded_utils::info;
-use hermes_can::messages::event_messages::{FiringAbortInitiation, FiringInitiation};
 
 mod abort;
 mod firing;
 
 // Channels to initiate a firing or abort
-pub static FIRING_INITIATION: Watch<CriticalSectionRawMutex, FiringInitiation, WATCH> =
-    Watch::new();
-pub static ABORT_INITIATION: Watch<CriticalSectionRawMutex, FiringAbortInitiation, WATCH> =
-    Watch::new();
+pub static FIRING_INITIATION: Watch<CriticalSectionRawMutex, (), WATCH> = Watch::new();
+pub static ABORT_INITIATION: Watch<CriticalSectionRawMutex, (), WATCH> = Watch::new();
 // Channels to notify firing or abort completion
 pub static FIRING_INFO: PubSubChannel<CriticalSectionRawMutex, FiringInfo, CAP, SUB, PUB> =
     PubSubChannel::new();
@@ -25,7 +22,6 @@ pub static FIRING_INFO: PubSubChannel<CriticalSectionRawMutex, FiringInfo, CAP, 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum FiringInfo {
     FiringInitiated,
-    IgnitionDetected,
     CombustionDetected,
     FiringCompleted,
     FiringAborted,

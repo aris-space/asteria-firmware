@@ -1,14 +1,10 @@
-use crate::drivers::WATCH;
+use crate::globals::STATE;
 use cortex_m::prelude::_embedded_hal_Pwm;
 use embassy_stm32::peripherals::TIM2;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel::Ch3;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Timer};
-
-pub static BUZZER_WATCH: Watch<ThreadModeRawMutex, BuzzerState, WATCH> = Watch::new();
 
 const STATUS_BEEP_INTERVAL: Duration = Duration::from_secs(10);
 const ARMING_BEEP_INTERVAL: Duration = Duration::from_secs(5);
@@ -20,7 +16,7 @@ pub enum BuzzerState {
 }
 #[embassy_executor::task]
 pub async fn buzzer_task(mut pwm: SimplePwm<'static, TIM2>) {
-    let mut watcher = BUZZER_WATCH.receiver().unwrap();
+    let mut watcher = STATE.buzzer.receiver().unwrap();
 
     pwm.enable(Ch3);
     let on = (pwm.get_max_duty() as f32 * 0.95) as u32;

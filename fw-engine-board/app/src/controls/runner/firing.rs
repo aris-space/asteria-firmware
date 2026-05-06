@@ -1,13 +1,13 @@
 #![allow(unused_assignments)]
 
-use crate::controls::actions::actuate::{actuate_external_valve, actuate_onboard_valve};
+use crate::controls::actions::actuate::actuate_onboard_valve;
 use crate::controls::actions::detect::detect_with_abort;
-use crate::controls::actions::follow_thrust_curve::follow_thrust_curve;
 use crate::controls::actions::wait::wait_with_abort;
 use crate::controls::actions::watch::{WATCH_STATE, WatchState};
 use crate::controls::actions::{ActionCompleteness, Actions};
 use crate::controls::firing_sequence::FIRING_SEQUENCE;
 use crate::controls::runner::{ABORT_INITIATION, FIRING_INFO, FIRING_INITIATION, FiringInfo};
+use crate::globals::STATE;
 use crate::sensors::Sensor;
 use embassy_time::{Duration, Timer};
 use embedded_utils::{fmt::warn, info};
@@ -31,6 +31,7 @@ pub async fn firing_task_runner() {
             info!("[FIRING] STARTED");
 
             firing_info_sender.publish_immediate(FiringInfo::FiringInitiated);
+            STATE.firing_initiated.sender().send(true);
 
             // Execute the firing sequence
             for action in &FIRING_SEQUENCE {
@@ -54,9 +55,6 @@ pub async fn firing_task_runner() {
                     Actions::ActuateOnboard(valve) => {
                         actuate_onboard_valve(*valve).await;
                     }
-                    Actions::ActuateExternal(valve) => {
-                        actuate_external_valve(*valve).await;
-                    }
                     Actions::Detect(detection) => {
                         // Perform detection with abort capability
                         let action_completeness = detect_with_abort(
@@ -75,9 +73,7 @@ pub async fn firing_task_runner() {
                             Sensor::EngineP(_) => {
                                 firing_info_sender
                                     .publish_immediate(FiringInfo::CombustionDetected);
-                            }
-                            Sensor::IgniterP(_) => {
-                                firing_info_sender.publish_immediate(FiringInfo::IgnitionDetected);
+                                STATE.combustion_detected.sender().send(true);
                             }
                         }
                     }
@@ -89,15 +85,6 @@ pub async fn firing_task_runner() {
                         // Set the watch state to ignore sensor monitoring
                         watch_state_sender.send(WatchState::Ignore);
                     }
-                    Actions::FollowThrustCurve => {
-                        // Follow the thrust curve with abort capability
-                        let action_completeness =
-                            follow_thrust_curve(&mut abort_initiation_receiver).await;
-                        // If the thrust curve following was aborted or failed, exit the firing sequence by setting state to Idle
-                        if action_completeness == ActionCompleteness::Failed {
-                            break;
-                        }
-                    }
                 };
             }
             // Reset the watch state to ignore after firing sequence completion
@@ -106,6 +93,7 @@ pub async fn firing_task_runner() {
             info!("[FIRING] COMPLETED");
 
             firing_info_sender.publish_immediate(FiringInfo::FiringCompleted);
+            STATE.firing_completed.sender().send(true);
 
             // Wait for a short duration to allow any late firing initiation signals to be ignored
             Timer::after(FIRING_REQUEST_INTERVAL).await;
