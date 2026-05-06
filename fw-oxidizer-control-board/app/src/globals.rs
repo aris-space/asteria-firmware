@@ -7,6 +7,8 @@ use datatypes::status::BuildInformationCommon;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 
+use crate::sensors::solenoid_current::SolenoidCurrentMeasurements;
+
 #[derive(Broadcast, Collector)]
 #[broadcast(loop_type = "can_utils::broadcast::ResponsiveLoop")]
 #[collector(
@@ -57,9 +59,11 @@ pub struct BoardState {
     pub build_info: Watch<ThreadModeRawMutex, BuildInformationCommon, 5>,
     // Board state
     pub pressure_bus_status: Watch<ThreadModeRawMutex, datatypes::status::SensorStatus, WATCH>,
-    pub thermocouple_status: Watch<ThreadModeRawMutex, datatypes::status::SensorStatus, WATCH>,
     // Buzzer
     pub buzzer: Watch<ThreadModeRawMutex, BuzzerState, WATCH>,
+    // Solenoid currents
+    // TODO: Broadcast this once the corresponding data-definition messages exist.
+    pub solenoid_currents: Watch<ThreadModeRawMutex, SolenoidCurrentMeasurements, WATCH>,
 }
 
 impl BoardState {
@@ -71,8 +75,8 @@ impl BoardState {
             board_status: Watch::new(),
             build_info: Watch::new(),
             pressure_bus_status: Watch::new(),
-            thermocouple_status: Watch::new(),
             buzzer: Watch::new(),
+            solenoid_currents: Watch::new(),
         }
     }
 }

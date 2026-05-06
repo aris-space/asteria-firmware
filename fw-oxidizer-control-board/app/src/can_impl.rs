@@ -65,16 +65,11 @@ pub async fn board_status_update_task() -> ! {
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
     let mut pressure_bus_status = STATE.pressure_bus_status.receiver().unwrap();
-    let mut thermocouple_status_watch = STATE.thermocouple_status.receiver().unwrap();
     let mut pressure_status = SensorStatus::Online;
-    let mut thermocouple_status = SensorStatus::Online;
 
     loop {
         if let Some(status) = pressure_bus_status.try_changed() {
             pressure_status = status;
-        }
-        if let Some(status) = thermocouple_status_watch.try_changed() {
-            thermocouple_status = status;
         }
 
         STATE
@@ -85,7 +80,7 @@ pub async fn board_status_update_task() -> ! {
                     errors: 0,
                     micros_since_restart: start.elapsed().as_micros(),
                 },
-                thermocouple_status,
+                thermocouple_status: SensorStatus::Online,
                 pressure_bus: pressure_status,
             });
 

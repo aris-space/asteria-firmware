@@ -3,14 +3,13 @@
 version = 4
 
 [[package]]
-name = "ads1120-thermocouples"
-version = "0.1.0"
+name = "ads1x1x"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c907ad7732d7d83dafc84f0d9a0909072e86137de28aa97beeb421ef8b648c6"
 dependencies = [
- "defmt 0.3.100",
- "embassy-stm32",
- "embassy-time",
- "embedded-utils",
- "micromath",
+ "embedded-hal 1.0.0",
+ "nb 1.1.0",
 ]
 
 [[package]]
@@ -786,7 +785,7 @@ dependencies = [
 name = "fw-oxidizer-control-board"
 version = "0.1.0"
 dependencies = [
- "ads1120-thermocouples",
+ "ads1x1x",
  "built",
  "can-utils",
  "cortex-m",
@@ -806,7 +805,7 @@ dependencies = [
  "embedded-hal-bus",
  "embedded-utils",
  "filters",
- "max31889-thermistor",
+ "nb 1.1.0",
  "panic-probe",
  "panic-reset",
  "trafag-pressure",
@@ -1082,24 +1081,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "max31889-thermistor"
-version = "0.1.0"
-dependencies = [
- "defmt 0.3.100",
- "embassy-stm32",
- "embassy-time",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
-
-[[package]]
-name = "micromath"
-version = "2.1.0"
-source = "git+https://github.com/tarcieri/micromath?rev=7139d27#7139d270fa77aa5c66468cf9f154ed8ee1a207b4"
 
 [[package]]
 name = "nb"
