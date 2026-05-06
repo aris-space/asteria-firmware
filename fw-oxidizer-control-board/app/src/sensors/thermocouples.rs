@@ -1,8 +1,8 @@
+use datatypes::status::SensorStatus;
 use embassy_time::{Duration, Ticker};
-use hermes_can::messages::board_status::SensorStatus;
 use max31889_thermistor::MAX31889;
 
-use crate::drivers::temperature::{TCDriver, THERMOCOUPLE_ERROR_WATCH, ThermoMeasurementRaw};
+use crate::globals::STATE;
 use crate::sensors::ACQ_THERMOCOUPLE_FREQ_HZ;
 use ads1120_thermocouples::ADSThermocouples;
 use ads1120_thermocouples::thermocouple_conversions::{ThermocoupleConversion, ThermocoupleType};
@@ -15,8 +15,7 @@ pub async fn thermocouple_task(
     tc_primary: &'static ThermocoupleType,
     _tc_secondary: &'static ThermocoupleType,
 ) {
-    let mut driver = TCDriver::new();
-    let status_sender = THERMOCOUPLE_ERROR_WATCH.sender();
+    let status_sender = STATE.thermocouple_status.sender();
     let mut error_count = 0;
 
     let mut ticker = Ticker::every(Duration::from_millis(
@@ -40,11 +39,7 @@ pub async fn thermocouple_task(
         let tc_primary_temp =
             tc_primary.voltage_to_temperature(tc_primary_voltage, cold_junction_primary_v);
 
-        let measurement = ThermoMeasurementRaw {
-            fss_tnk_t: tc_primary_temp,
-        };
-
-        driver.update(measurement);
+        let _oss_tnk_t = tc_primary_temp;
 
         if error_count > 0 {
             error!("[TC] Thermocouple errors detected: {}", error_count);
