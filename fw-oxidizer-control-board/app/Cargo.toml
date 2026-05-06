@@ -1,8 +1,8 @@
 [package]
 name = "fw-oxidizer-control-board"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-authors = ["Domenic Nebiker <dnebiker@aris-space.ch>"]
+authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-space.ch>"]
 
 [dependencies]
 filters = { path = "../../crates/filters" }

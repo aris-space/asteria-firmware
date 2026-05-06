@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "fw-oxidizer-control-board"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ads1x1x",
  "built",
