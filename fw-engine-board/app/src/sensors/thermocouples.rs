@@ -54,7 +54,7 @@ pub async fn thermocouple_task(
             tc_secondary.voltage_to_temperature(tc_secondary_voltage, cold_junction_secondary_v);
 
         let measurement = ThermoMeasurementRaw {
-            oss_rnl_t: tc_primary_temp,
+            fss_inj_t: tc_primary_temp,
             oss_tnk_t: tc_secondary_temp,
         };
 

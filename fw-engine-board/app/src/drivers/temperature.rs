@@ -13,7 +13,7 @@ pub static THERMOCOUPLE_ERROR_WATCH: Watch<ThreadModeRawMutex, SensorStatus, WAT
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ThermoMeasurementRaw {
-    pub oss_rnl_t: f32,
+    pub fss_inj_t: f32,
     pub oss_tnk_t: f32,
 }
 
@@ -35,7 +35,7 @@ impl<'a> TCDriver<'a> {
             .engine_bay_temperature
             .sender()
             .send(dp_engine_control_board::EngineBayTemperature {
-                eng_inj_t: Celsius(value.oss_rnl_t),
+                eng_inj_t: Celsius(value.fss_inj_t),
                 oss_tnk_t: Celsius(value.oss_tnk_t),
             });
     }
