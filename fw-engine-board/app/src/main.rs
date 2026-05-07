@@ -175,9 +175,9 @@ async fn main(spawner: Spawner) -> ! {
     let oss_ml_vlv = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
     let fss_ml_vlv = Output::new(p.PA10, Level::Low, Speed::VeryHigh);
 
-    let heating_pad_switching = Output::new(p.PB6, Level::Low, Speed::Medium);
+    let heating_pad_switching = Output::new(p.PB2, Level::Low, Speed::Medium);
 
-    let main_arming_pin = Input::new(p.PA0, Pull::Down);
+    let main_arming_pin = Input::new(p.PC12, Pull::Down);
 
     let buzzer_pwm_pin = PwmPin::new(p.PB7, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(

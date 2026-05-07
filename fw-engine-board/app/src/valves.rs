@@ -50,11 +50,11 @@ pub async fn check_main_arming(pin: Input<'static>) {
     let arming_state_sender = STATE.arming_state.sender();
     loop {
         match pin.get_level() {
-            Level::Low => {
+            Level::High => {
                 arming_state_sender.send(ArmingState::Safe);
                 buzzer_armed_sender.send(BuzzerState::Idle);
             }
-            Level::High => {
+            Level::Low => {
                 arming_state_sender.send(ArmingState::Armed);
                 buzzer_armed_sender.send(BuzzerState::Armed);
             }
