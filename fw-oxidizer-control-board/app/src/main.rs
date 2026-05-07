@@ -40,6 +40,7 @@ use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::buzzer::buzzer_task;
 use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
+use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
 use crate::sensors::keller_analog_p::{OxidizerPressureHandles, oxidizer_pressure_acquisition};
 use crate::sensors::solenoid_current::solenoid_current_task;
@@ -84,19 +85,19 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
-    let red = Output::new(p.PB2, Level::High, Speed::Low);
+    let red = Output::new(p.PC13, Level::High, Speed::Low);
 
     // Solenoids
-    let oxidizer_vent_valve = Output::new(p.PB5, Level::Low, Speed::Medium);
-    let oxidizer_dpr_valve = Output::new(p.PB6, Level::Low, Speed::VeryHigh);
+    let oxidizer_vent_valve = Output::new(p.PA10, Level::Low, Speed::Medium);
+    let oxidizer_dpr_valve = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
 
-    let buzzer_pwm_pin = PwmPin::new(p.PB10, OutputType::PushPull);
+    let buzzer_pwm_pin = PwmPin::new(p.PB7, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
-        p.TIM2,
+        p.TIM3,
+        None,
         None,
         None,
         Some(buzzer_pwm_pin),
-        None,
         Hertz(440),
         Default::default(),
     );
@@ -145,6 +146,10 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(build_status_blinky(red).expect("build status blinky task failed"));
 
     spawner.spawn(buzzer_task(buzzer_pwm).unwrap());
+
+    spawner.spawn(
+        solenoid_detection_task(p.PC2, p.PB6).expect("failed to prepare solenoid detection task"),
+    );
 
     spawner.spawn(
         solenoid_current_task(solenoid_current_i2c)
