@@ -2,6 +2,7 @@ use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 
 pub(crate) mod pressure;
+pub mod solenoid_detection;
 pub(crate) mod temperature;
 
 pub const CAP: usize = 10;

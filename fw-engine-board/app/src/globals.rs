@@ -1,5 +1,6 @@
 use crate::buzzer::BuzzerState;
 use crate::drivers::WATCH;
+use crate::drivers::solenoid_detection::SolenoidStates;
 use crate::sensors::solenoid_current::SolenoidCurrentMeasurements;
 use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
@@ -98,6 +99,7 @@ pub struct BoardState {
     pub arming_state: Watch<ThreadModeRawMutex, ArmingState, WATCH>,
     pub buzzer: Watch<ThreadModeRawMutex, BuzzerState, WATCH>,
     pub engine_chamber_pressure: Watch<ThreadModeRawMutex, f32, WATCH>,
+    pub solenoid_states: Watch<ThreadModeRawMutex, SolenoidStates, WATCH>,
     // TODO: Broadcast this once the corresponding data-definition messages exist.
     pub solenoid_currents: Watch<ThreadModeRawMutex, SolenoidCurrentMeasurements, WATCH>,
 }
@@ -120,6 +122,7 @@ impl BoardState {
             arming_state: Watch::new(),
             buzzer: Watch::new(),
             engine_chamber_pressure: Watch::new(),
+            solenoid_states: Watch::new(),
             solenoid_currents: Watch::new(),
         }
     }
