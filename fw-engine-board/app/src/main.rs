@@ -111,12 +111,12 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
-    let _green = Output::new(p.PB0, Level::High, Speed::Low);
-    let _yellow = Output::new(p.PB1, Level::High, Speed::Low);
-    let red = Output::new(p.PB2, Level::High, Speed::Low);
+    let _green = Output::new(p.PC15, Level::High, Speed::Low);
+    let red = Output::new(p.PC13, Level::High, Speed::Low);
 
+    //Used the yellow LED as critical error indicator
     CRICITAL_ERROR_INDICATOR
-        .init(Mutex::new(Output::new(p.PC13, Level::Low, Speed::Low)))
+        .init(Mutex::new(Output::new(p.PC14, Level::Low, Speed::Low)))
         .ok()
         .unwrap();
 
@@ -172,20 +172,20 @@ async fn main(spawner: Spawner) -> ! {
         Default::default(),
     );
 
-    let oss_mnl_vlv = Output::new(p.PB4, Level::Low, Speed::VeryHigh);
-    let fss_mnl_vlv = Output::new(p.PB5, Level::Low, Speed::VeryHigh);
+    let oss_ml_vlv = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
+    let fss_ml_vlv = Output::new(p.PA10, Level::Low, Speed::VeryHigh);
 
     let heating_pad_switching = Output::new(p.PB6, Level::Low, Speed::Medium);
 
     let main_arming_pin = Input::new(p.PA0, Pull::Down);
 
-    let buzzer_pwm_pin = PwmPin::new(p.PB10, OutputType::PushPull);
+    let buzzer_pwm_pin = PwmPin::new(p.PB7, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
-        p.TIM2,
+        p.TIM3,
+        None,
         None,
         None,
         Some(buzzer_pwm_pin),
-        None,
         Hertz(440),
         Default::default(),
     );
@@ -204,7 +204,7 @@ async fn main(spawner: Spawner) -> ! {
         thermocouple_task(tc, max, &OXD_RNL_T, &OXD_TNK_T).expect("Thermocouple Task failed"),
     );
 
-    spawner.spawn(valve_task(oss_mnl_vlv, fss_mnl_vlv).expect("Valve Task failed"));
+    spawner.spawn(valve_task(oss_ml_vlv, fss_ml_vlv).expect("Valve Task failed"));
 
     spawner.spawn(check_main_arming(main_arming_pin).expect("Check main arming Task failed"));
 
