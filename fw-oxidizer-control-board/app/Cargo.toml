@@ -10,6 +10,8 @@ embedded-utils = { path = "../../crates/embedded-utils" }
 trafag-pressure = { path = "../../crates/devices/trafag-pressure" }
 can-utils = { path = "../../crates/can-utils" }
 data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
+
+# ToDo: remove rev and put version again
 dp-oxidizer-control-board = { path = "../../data-definitions/datapoints/dp-oxidizer-control-board", version = "=0.4", features = [
     "can",
 ] }
