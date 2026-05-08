@@ -41,6 +41,7 @@ panic-probe = { version = "1.0.0", optional = true }
 panic-reset = "0.1.1"
 ads1x1x = "0.3.0"
 nb = "1.1.0"
+log = "0.4.29"
 
 [build-dependencies]
 built = { version = "0.7.7", features = ["git2"] }

@@ -806,6 +806,7 @@ dependencies = [
  "embedded-hal-bus",
  "embedded-utils",
  "filters",
+ "log",
  "nb 1.1.0",
  "panic-probe",
  "panic-reset",

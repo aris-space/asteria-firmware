@@ -1,14 +1,16 @@
 #![allow(unused_assignments)]
 
+use defmt::println;
 use crate::actuators::{CYCLE_TIME_MS, KD, KI, KP, SAFETY_LIMIT_BARG};
 use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
 use datatypes::actuator::DPRValve;
 use datatypes::status::ValveState::{Active, Inactive};
 use embassy_stm32::gpio::Output;
+use embassy_stm32::usb::In;
 use embassy_time::{Duration, Ticker};
 use embedded_utils::fmt::warn;
-use embedded_utils::trace;
+use embedded_utils::{error, info, trace};
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
@@ -33,7 +35,6 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
     loop {
         // Check for new DPR configuration
         if let Some(cfg) = dpr_control_loop_receiver.try_changed() {
-            trace!("Received new DPR config: {:?}", cfg);
             match cfg {
                 DPRValve::Enabled { setpoint: stp } => {
                     setpoint = stp;
@@ -46,27 +47,23 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         }
 
         // Update pressure reading with available data
-        pressure = p_watcher.get().await.fuel_tank_pressure_filtered.0;
+        let new_pressure = p_watcher.get().await.fuel_tank_pressure_filtered.0;
+        if new_pressure != f32::INFINITY {
+            pressure = new_pressure
+        }
 
         // Safety check
+
         if pressure >= SAFETY_LIMIT_BARG {
-            warn!("[DPR] Pressure limit exceeded with: {} barg", pressure);
+            error!("[DPR] Pressure limit exceeded with: {} barg", pressure);
             loop_state = Inactive;
-            dpr_control_loop_sender.send(DPRValve::Disabled);
             safety_limit_reached = true;
+            dpr_control_loop_sender.send(DPRValve::Disabled);
 
             // Signal error state
             buzzer_error_sender.send(BuzzerState::Error);
         } else {
             buzzer_error_sender.send(BuzzerState::Idle);
-
-            if safety_limit_reached {
-                // Reset the flag only when pressure is back to safe levels
-                safety_limit_reached = false;
-                // Allow reactivation of the control loop
-                loop_state = Active;
-                dpr_control_loop_sender.send(DPRValve::Enabled { setpoint });
-            }
         }
 
         // PID Control
