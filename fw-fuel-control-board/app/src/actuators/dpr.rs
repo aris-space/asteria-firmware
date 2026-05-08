@@ -53,7 +53,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         }
 
         // Safety check
-
+        // ToDo: implement correctly ask lennard he will yap about it
         if pressure >= SAFETY_LIMIT_BARG {
             error!("[DPR] Pressure limit exceeded with: {} barg", pressure);
             loop_state = Inactive;
