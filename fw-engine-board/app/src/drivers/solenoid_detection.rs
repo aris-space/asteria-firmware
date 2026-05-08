@@ -2,7 +2,7 @@
 use crate::globals::STATE;
 use embassy_stm32::Peri;
 use embassy_stm32::gpio::{Input, Pull};
-use embassy_stm32::peripherals::{PA1, PC2, PC3};
+use embassy_stm32::peripherals::{PA1, PB6, PC2, PC3};
 use embassy_time::{Duration, Ticker};
 use embedded_utils::info;
 
@@ -16,8 +16,8 @@ pub struct SolenoidStates {
 
 #[embassy_executor::task]
 pub async fn solenoid_detection_task(
-    fuel_main_detect: Peri<'static, PC2>,
-    oxidizer_main_detect: Peri<'static, PC3>,
+    fuel_main_detect: Peri<'static, PB6>,
+    oxidizer_main_detect: Peri<'static, PC2>,
     heating_pad_detect: Peri<'static, PA1>,
 ) -> ! {
     let fuel_main_pin = Input::new(fuel_main_detect, Pull::Down);

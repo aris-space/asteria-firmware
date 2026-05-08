@@ -4,7 +4,6 @@
 mod build_info;
 mod buzzer;
 mod can_impl;
-mod controls;
 mod drivers;
 mod globals;
 pub(crate) mod k23_temperature_control;
@@ -37,7 +36,6 @@ use {defmt_rtt as _, panic_probe as _};
 
 use crate::buzzer::buzzer_task;
 use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
-use crate::controls::runner::initiate_runner_tasks;
 use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
 use crate::k23_temperature_control::k23_temperature_control;
@@ -213,10 +211,6 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(build_status_blinky(red).expect("blinky executor"));
 
-    initiate_runner_tasks(spawner)
-        .await
-        .expect("InitiateRunnerTasks failed");
-
     spawner.spawn(
         k23_temperature_control(heating_pad_switching).expect("K23 temperature control failed"),
     );
@@ -224,7 +218,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(buzzer_task(buzzer_pwm).unwrap());
     // TODO: Replace PC2/PC3/PA1 with the correct solenoid detection pins.
     spawner.spawn(
-        solenoid_detection_task(p.PC2, p.PC3, p.PA1)
+        solenoid_detection_task(p.PB6, p.PC2, p.PA1)
             .expect("failed to prepare solenoid detection task"),
     );
     spawner.spawn(solenoid_current_task(solenoid_current_i2c).unwrap());

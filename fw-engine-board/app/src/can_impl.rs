@@ -1,4 +1,3 @@
-use crate::controls::runner::{ABORT_INITIATION, FIRING_INITIATION};
 use crate::globals::STATE;
 use crate::k23_temperature_control::HEATING_CONTROL_ACTIVE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
@@ -18,8 +17,6 @@ data_core::can::sparse_decodable_can_message! {
     enum ReceivedMessage {
         ResetAll(dp_system_management::Message::ResetAll),
         ResetSpecific(dp_system_management::Message::ResetSpecific),
-        FiringAbortInitiation(dp_engine_control_board::Message::FiringAbortInitiation),
-        FiringInitiation(dp_engine_control_board::Message::FiringInitiation),
         FuelMainValveControlFC(dp_engine_control_board::Message::FuelMainValveControlFC),
         FuelMainValveControlRFS(dp_engine_control_board::Message::FuelMainValveControlRFS),
         OxidizerMainValveControlFC(dp_engine_control_board::Message::OxidizerMainValveControlFC),
@@ -36,8 +33,6 @@ const __ASSERT_LEN_OK: () = {
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
-    let firing_initiation_sender = FIRING_INITIATION.sender();
-    let abort_initiation_sender = ABORT_INITIATION.sender();
 
     loop {
         match can_rx.recv().await {
@@ -52,15 +47,6 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
                     );
                     reset_now();
                 }
-            }
-            Ok(ReceivedMessage::FiringInitiation(_)) => {
-                trace!("[CAN Task] Received FiringInitiation message");
-                firing_initiation_sender.send(());
-                HEATING_CONTROL_ACTIVE.store(false, Ordering::Relaxed);
-            }
-            Ok(ReceivedMessage::FiringAbortInitiation(_)) => {
-                trace!("[CAN Task] Received FiringAbortInitiation message");
-                abort_initiation_sender.send(());
             }
             Ok(msg) => {
                 let _ = STATE.update_from(msg);
@@ -94,7 +80,7 @@ pub async fn board_status_update_task() -> ! {
             armed = state;
         }
 
-        STATE
+        let _ = STATE
             .board_status
             .sender()
             .send(dp_engine_control_board::EngineControlBoardStatus {
@@ -104,8 +90,8 @@ pub async fn board_status_update_task() -> ! {
                 },
                 thermocouple_status,
                 armed,
-            });
 
+            });
         status_ticker.next().await;
     }
 }

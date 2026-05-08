@@ -63,37 +63,6 @@ pub struct BoardState {
         max_freq_hz = 0.2
     )]
     pub build_info: Watch<ThreadModeRawMutex, BuildInformationCommon, 5>,
-    // Events
-    #[broadcast(
-        map = "dp_engine_control_board::Message::FiringAborted",
-        min_freq_hz = 0.0,
-        max_freq_hz = 10.0
-    )]
-    pub firing_aborted: Watch<ThreadModeRawMutex, bool, 5>,
-    #[broadcast(
-        map = "dp_engine_control_board::Message::FiringCompleted",
-        min_freq_hz = 0.0,
-        max_freq_hz = 10.0
-    )]
-    pub firing_completed: Watch<ThreadModeRawMutex, bool, 5>,
-    #[broadcast(
-        map = "dp_engine_control_board::Message::FiringInitiated",
-        min_freq_hz = 0.0,
-        max_freq_hz = 10.0
-    )]
-    pub firing_initiated: Watch<ThreadModeRawMutex, bool, 5>,
-    #[broadcast(
-        map = "dp_engine_control_board::Message::IgnitionDetected",
-        min_freq_hz = 0.0,
-        max_freq_hz = 10.0
-    )]
-    pub ignition_detected: Watch<ThreadModeRawMutex, bool, 5>,
-    #[broadcast(
-        map = "dp_engine_control_board::Message::CombustionDetected",
-        min_freq_hz = 0.0,
-        max_freq_hz = 10.0
-    )]
-    pub combustion_detected: Watch<ThreadModeRawMutex, bool, 5>,
     // Board-local state
     pub thermocouple_status: Watch<ThreadModeRawMutex, SensorStatus, WATCH>,
     pub arming_state: Watch<ThreadModeRawMutex, ArmingState, WATCH>,
@@ -113,11 +82,6 @@ impl BoardState {
             oxidizer_main_control: Watch::new(),
             board_status: Watch::new(),
             build_info: Watch::new(),
-            firing_aborted: Watch::new(),
-            firing_completed: Watch::new(),
-            firing_initiated: Watch::new(),
-            ignition_detected: Watch::new(),
-            combustion_detected: Watch::new(),
             thermocouple_status: Watch::new(),
             arming_state: Watch::new(),
             buzzer: Watch::new(),
