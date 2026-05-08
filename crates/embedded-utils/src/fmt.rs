@@ -255,6 +255,16 @@ impl defmt::Format for Bytes<'_> {
     }
 }
 
+#[cfg(feature = "defmt")]
+pub trait Format: defmt::Format {}
+#[cfg(feature = "defmt")]
+impl<T: defmt::Format> Format for T {}
+
+#[cfg(not(feature = "defmt"))]
+pub trait Format {}
+#[cfg(not(feature = "defmt"))]
+impl<T> Format for T {}
+
 pub use _warn as warn;
 pub use assert;
 pub use assert_eq;

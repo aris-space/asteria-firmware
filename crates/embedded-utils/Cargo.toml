@@ -6,7 +6,7 @@ authors = ["Louis Schell <louis.schell1@gmx.de>"]
 
 [dependencies]
 embassy-time = { workspace = true, features = ["tick-hz-32_768"] }
-defmt = { version = "0.3.10", optional = true }
+defmt = { workspace = true, optional = true }
 
 [features]
 defmt = ["dep:defmt"]
