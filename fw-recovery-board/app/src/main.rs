@@ -265,6 +265,10 @@ async fn main(spawner: Spawner) -> ! {
     /* END LEDS */
 
     debug!("build info: {:?}", build_info::BUILD_INFO.get());
+    OUTPUTS
+        .build_info
+        .sender()
+        .send(crate::build_info::BUILD_INFO.get().clone());
 
     //indication that async is working correctly, hopefully
     spawner.spawn(build_status_blinky(led_red).unwrap());

@@ -4,7 +4,7 @@ use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
-use datatypes::status::ArmingState;
+use datatypes::status::{ArmingState, BuildInformationCommon};
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Level, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
@@ -75,10 +75,17 @@ pub struct Outputs {
         max_freq_hz = 15.
     )]
     pub steering_actual_positions: Watch<ThreadModeRawMutex, Option<SteeringPositions>, 2>,
+    #[broadcast(
+        map = "dp_recovery_board::Message::BuildInfo(#value)",
+        min_freq_hz = 0.2,
+        max_freq_hz = 0.2
+    )]
+    pub build_info: Watch<ThreadModeRawMutex, BuildInformationCommon, 1>,
 }
 
 pub static OUTPUTS: Outputs = Outputs {
     steering_actual_positions: Watch::new(),
+    build_info: Watch::new(),
 };
 
 /// status that of the motors
