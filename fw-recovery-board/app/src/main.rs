@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod build_info;
 mod can_io;
 mod recovery_actuator_control;
 mod rsbl_servo;
@@ -75,10 +76,6 @@ const STATUS_CREATION_INTERVAL: Duration = Duration::from_millis(1000);
 
 const THIS_BOARD_ID: datatypes::status::BoardId = datatypes::status::BoardId::RecoveryBoard;
 /* END CONSTANTS */
-
-mod built_info {
-    include!(concat!(env!("OUT_DIR"), "/built.rs"));
-}
 
 #[allow(unused_imports)]
 #[cfg(feature = "defmt")]
@@ -263,23 +260,14 @@ async fn main(spawner: Spawner) -> ! {
     // LED2 is on PB1, is yellow
     // LED3 is on PB2, is red
     let _led_green = Output::new(p.PB0, Level::Low, Speed::Low);
-    let led_yellow = Output::new(p.PB1, Level::Low, Speed::Low);
-    let mut led_red = Output::new(p.PB2, Level::Low, Speed::Low);
+    let mut led_yellow = Output::new(p.PB1, Level::Low, Speed::Low);
+    let led_red = Output::new(p.PB2, Level::Low, Speed::Low);
     /* END LEDS */
 
-    debug!(
-        "pkg_name: {}, git_commit_hash_short: {}, git_dirty: {}, profile: {}, features: {}, rustc: {}, target: {}",
-        built_info::PKG_NAME,
-        built_info::GIT_COMMIT_HASH_SHORT,
-        built_info::GIT_DIRTY,
-        built_info::PROFILE,
-        built_info::FEATURES,
-        built_info::RUSTC,
-        built_info::TARGET
-    );
+    debug!("build info: {:?}", build_info::BUILD_INFO.get());
 
     //indication that async is working correctly, hopefully
-    spawner.spawn(blink(led_yellow).unwrap());
+    spawner.spawn(build_status_blinky(led_red).unwrap());
     spawner.spawn(steering_task(steering, steer_pwr, steering_detect, steering_watchdog).unwrap());
     spawner.spawn(separation_task(separation).unwrap());
     spawner.spawn(deployment_task(deployment).unwrap());
@@ -294,7 +282,7 @@ async fn main(spawner: Spawner) -> ! {
     loop {
         match can_rx.recv().await {
             Ok(msg) => {
-                led_red.set_low();
+                led_yellow.set_low();
                 //handle received messages. They are already filtered
                 match msg {
                     ReceivedMessage::ResetAll(_) => {
@@ -353,7 +341,7 @@ async fn main(spawner: Spawner) -> ! {
             Err(e) => {
                 error!("HELP! THERE IS A CAN ERROR!!!! {}", e);
                 error!("AAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHHHHHH");
-                led_red.set_high();
+                led_yellow.set_high();
                 Timer::after_millis(10).await;
             }
         }
@@ -361,12 +349,21 @@ async fn main(spawner: Spawner) -> ! {
 }
 
 #[embassy_executor::task]
-async fn blink(mut led: Output<'static>) {
+async fn build_status_blinky(mut led: Output<'static>) {
+    let build_info = crate::build_info::BUILD_INFO.get();
+    let warning_build =
+        build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
+    let (on_ms, off_ms) = if warning_build {
+        (125, 125)
+    } else {
+        (900, 100)
+    };
+
     loop {
-        led.set_high();
-        Timer::after_millis(100).await;
         led.set_low();
-        Timer::after_millis(900).await;
+        Timer::after_millis(on_ms).await;
+        led.set_high();
+        Timer::after_millis(off_ms).await;
     }
 }
 
