@@ -92,12 +92,18 @@ run *args:
 
     if [[ "{{use_probe_rs}}" == "true" ]]; then
         probe-rs run --chip {{chip}} \
+            --no-catch-hardfault \
+            --no-catch-reset \
+            --chip-erase \
             --log-format '{t} {L:severity} {s}' "$elf"
         wait_for_upload
     else
         arm-none-eabi-objcopy -O binary "$elf" "${elf}.bin"
         STM32_Programmer_CLI -c port=SWD -d "${elf}.bin" 0x08000000 -rst
-        probe-rs attach --chip {{chip}} "$elf"
+        probe-rs attach --chip {{chip}} \
+            --no-catch-hardfault \
+            --no-catch-reset \
+            "$elf"
         # Mirror probe-rs behavior: defer upload wait until the interactive phase ends.
         wait_for_upload
     fi
@@ -139,7 +145,7 @@ flash *args:
     ) >"$upload_log" 2>&1 &
     upload_pid="$!"
 
-    probe-rs download --chip {{chip}} "$elf"
+    probe-rs download --chip {{chip}} --chip-erase "$elf"
 
     if wait "$upload_pid"; then
       cat "$upload_log"
@@ -161,7 +167,10 @@ attach:
     echo "using profile: $chosen_dir"
     echo "attached with: $elf"
 
-    exec probe-rs attach --chip {{chip}} "$elf"
+    exec probe-rs attach --chip {{chip}} \
+        --no-catch-hardfault \
+        --no-catch-reset \
+        "$elf"
 
 # Replay flash logs then attach live via probe-rs.
 replay-attach:
@@ -210,7 +219,10 @@ replay-attach:
     echo ""
     echo "--- live (probe-rs attach) ---"
     echo ""
-    exec probe-rs attach --chip {{chip}} --no-catch-reset "$elf"
+    exec probe-rs attach --chip {{chip}} \
+        --no-catch-hardfault \
+        --no-catch-reset \
+        "$elf"
 
 # Run checks that will be used in CI
 ci-checks:
