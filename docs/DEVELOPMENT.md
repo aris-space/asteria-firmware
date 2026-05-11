@@ -15,9 +15,6 @@ just attach         # re-attach RTT output without reflashing
 
 To build for a critical test or launch, use `just build --release --no-default-features`.
 
-**WARNING**: For some, currently unknown, reason, pressing the hardware reset after flashing will not work, and prevent the MCU from starting.
-Thus power cycle once after flashing.
-
 At the repo root, `just build` compiles all workspaces, `just fmt` formats everything, and `just ci-checks` / `just clippy` / `just test` run lints and host-side tests.
 
 ## Device communication and logs
