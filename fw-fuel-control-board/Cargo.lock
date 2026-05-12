@@ -429,6 +429,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dpr"
+version = "0.1.0"
+dependencies = [
+ "datatypes",
+ "embassy-executor",
+ "embassy-stm32",
+ "embassy-sync",
+ "embassy-time",
+]
+
+[[package]]
 name = "embassy-embedded-hal"
 version = "0.6.0"
 source = "git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd#cf6a6cd33bc21907212384d9fe5f017ecf2e006c"
@@ -796,6 +807,7 @@ dependencies = [
  "defmt-rtt",
  "dp-fuel-control-board",
  "dp-system-management",
+ "dpr",
  "embassy-executor",
  "embassy-futures",
  "embassy-stm32",
