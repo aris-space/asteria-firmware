@@ -12,13 +12,15 @@ pub struct PIDError {
 }
 
 pub struct PID {
-    gain: PIDGain,
     error: PIDError,
-    setpoint: f32,
+    pub gain: PIDGain,
+    pub setpoint: f32,
+    pub min_ms: f32,
+    pub max_ms: f32,
 }
 
 impl PID {
-    pub fn new(gain: PIDGain) -> PID {
+    pub fn new(gain: PIDGain, min_ms: f32, max_ms: f32) -> PID {
         let error = PIDError {
             p: 0.0,
             i: 0.0,
@@ -32,18 +34,23 @@ impl PID {
             gain,
             error,
             setpoint,
+            min_ms,
+            max_ms,
         }
     }
 
     pub fn update(&mut self, pressure: f32, elapsed_time_s: f32) -> f32 {
         self.error.p = self.setpoint - pressure;
+
+        if self.error.p < 0.0 {
+            return f32::NAN;
+        }
+
         self.error.i += self.error.p * elapsed_time_s;
         self.error.d = (self.error.p - self.error.prev_p) / elapsed_time_s;
         self.error.prev_p = self.error.p;
 
-        return self.gain.p * self.error.p
-            + self.gain.i * self.error.i
-            + self.gain.d * self.error.d;
+        self.gain.p * self.error.p + self.gain.i * self.error.i + self.gain.d * self.error.d
     }
 
     pub fn reset(&mut self) {

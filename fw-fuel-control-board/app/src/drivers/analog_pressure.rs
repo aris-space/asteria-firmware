@@ -1,6 +1,7 @@
 use crate::globals::STATE;
 use datatypes::status::SensorStatus;
 use datatypes::units::BarG;
+use embassy_sync::watch::Watch;
 use filters::GaussianMovingAverage;
 
 const FILTER_WINDOW: usize = 10;

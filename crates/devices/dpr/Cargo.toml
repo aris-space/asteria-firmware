@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-datatypes = { path = "../../../data-definitions/datatypes", version = "0.1.0" }
+datatypes = { path = "../../../data-definitions/datatypes"}
 
 embassy-executor.workspace = true
 embassy-stm32.workspace = true

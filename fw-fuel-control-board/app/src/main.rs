@@ -15,7 +15,7 @@ use embassy_stm32::i2c::I2c;
 use embassy_stm32::peripherals::FDCAN1;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embass_interrupts, can, dma, i2c, peripherals};
+use embassy_stm32::{bind_interrupts, can, dma, i2c, peripherals};
 use embassy_time::{Duration, Timer};
 use embedded_utils::fmt::*;
 
@@ -144,10 +144,12 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(
         dpr::pid_controller(
             fuel_dpr_valve,
-        STATE.dpr_control_loop.receiver().unwrap(),
-        STATE.fuel_tank_pressure.receiver().unwrap(),
-        todo!(),
-        todo!()).expect("failed to prepare pid_controller spawn token"),
+            STATE.dpr_control_loop.receiver().unwrap(),
+            STATE.dpr_pressure.receiver().unwrap(),
+            STATE.dpr_gain.receiver().unwrap(),
+            STATE.dpr_info.sender(),
+        )
+        .expect("failed to prepare pid_controller spawn token"),
     );
 
     spawner.spawn(

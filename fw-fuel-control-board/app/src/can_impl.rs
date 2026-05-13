@@ -3,9 +3,12 @@ use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
-use datatypes::status::{BoardId, SensorStatus, StatusCommonMessage};
+use datatypes::actuator::DPRValve;
+use datatypes::status::{BoardId, DprGainInfo, DprLoopInfo, SensorStatus, StatusCommonMessage};
 use embassy_futures::yield_now;
 use embassy_stm32::can::CanRx;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker};
 use embedded_utils::fmt::*;
 
@@ -21,6 +24,11 @@ data_core::can::sparse_decodable_can_message! {
         PressurizationVentValveControlRFS(dp_fuel_control_board::Message::PressurizationVentValveControlRFS),
         FuelVentValveControlFC(dp_fuel_control_board::Message::FuelVentValveControlFC),
         FuelVentValveControlRFS(dp_fuel_control_board::Message::FuelVentValveControlRFS),
+        FuelDprGainP(dp_fuel_control_board::Message::FuelDprGainP),
+        FuelDprGainI(dp_fuel_control_board::Message::FuelDprGainI),
+        FuelDprGainD(dp_fuel_control_board::Message::FuelDprGainD),
+        FuelDprMinOpeningTime(dp_fuel_control_board::Message::FuelDprMinOpeningTime),
+        FuelDprMaxOpeningTime(dp_fuel_control_board::Message::FuelDprMaxOpeningTime),
     }
 }
 
@@ -33,6 +41,17 @@ const __ASSERT_LEN_OK: () = {
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
+    let mut dpr_gain_sender = STATE.dpr_gain.sender();
+
+    use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
+    let mut dpr_gain = DprGainInfo {
+        p: GAINS.p,
+        i: GAINS.i,
+        d: GAINS.d,
+        min_ms: MIN_TIME_MS,
+        max_ms: MAX_TIME_MS,
+    };
+
     loop {
         match can_rx.recv().await {
             Ok(ReceivedMessage::ResetAll(_)) => {
@@ -45,9 +64,31 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
                     reset_now();
                 }
             }
-            Ok(msg) => {
-                let _ = STATE.update_from(msg);
-            }
+            Ok(msg) => match msg {
+                ReceivedMessage::FuelDprGainP(p) => {
+                    dpr_gain.p = p;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::FuelDprGainI(i) => {
+                    dpr_gain.i = i;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::FuelDprGainD(d) => {
+                    dpr_gain.d = d;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::FuelDprMinOpeningTime(min_ms) => {
+                    dpr_gain.min_ms = min_ms;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::FuelDprMaxOpeningTime(max_ms) => {
+                    dpr_gain.max_ms = max_ms;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                _ => {
+                    let _ = STATE.update_from(msg);
+                }
+            },
             Err(err) => {
                 error!("CAN RX error: {:?}", err);
             }
@@ -62,6 +103,12 @@ pub async fn board_status_update_task() -> ! {
     let mut status_ticker = Ticker::every(Duration::from_millis(
         1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,
     ));
+    let mut dpr_info_receiver = STATE.dpr_info.receiver().unwrap();
+    let mut dpr_status = DprLoopInfo::default();
+
+    let mut dpr_gain_receiver = STATE.dpr_gain.receiver().unwrap();
+    let mut dpr_gain = DprGainInfo::default();
+
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
     let mut pressure_bus_status = STATE.pressure_bus_status.receiver().unwrap();
@@ -71,8 +118,14 @@ pub async fn board_status_update_task() -> ! {
         if let Some(status) = pressure_bus_status.try_changed() {
             pressure_status = status;
         }
+        if let Some(status) = dpr_info_receiver.try_changed() {
+            dpr_status = status;
+        }
+        if let Some(gain) = dpr_gain_receiver.try_changed() {
+            dpr_gain = gain;
+        }
 
-        STATE
+        let _ = STATE
             .board_status
             .sender()
             .send(dp_fuel_control_board::FuelControlBoardStatus {
@@ -82,6 +135,8 @@ pub async fn board_status_update_task() -> ! {
                 },
                 thermocouple_status: SensorStatus::Online,
                 pressure_bus: pressure_status,
+                dpr_loop_info: dpr_status,
+                dpr_gain_info: dpr_gain,
             });
 
         status_ticker.next().await;
