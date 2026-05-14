@@ -61,11 +61,11 @@ pub async fn fuel_pressure_acquisition(pressure_handles: FuelPressureHandles) {
         },
     )
     .await;
-    
+
     pressurization_pressure_handle
         .calibrate(ADC_CALIBRATION_SAMPLES, Irqs)
         .await;
-    
+
     // Share the calibration values between all pressure sensors because some of the ADC peripherals
     // are not connected to VREFINT and cannot read it out themselves.
     fuel_tank_pressure_1_handle.vref_calib = pressurization_pressure_handle.vref_calib;

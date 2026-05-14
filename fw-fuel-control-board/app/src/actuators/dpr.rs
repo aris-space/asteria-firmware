@@ -14,7 +14,7 @@ use embedded_utils::{error, info, trace};
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
-    let mut p_watcher = STATE.fuel_tank_pressure.receiver().unwrap();
+    let mut p_watcher = STATE.fuel_tank_pressure_filtered.receiver().unwrap();
     let mut dpr_control_loop_receiver = STATE.dpr_control_loop.receiver().unwrap();
 
     let dpr_control_loop_sender = STATE.dpr_control_loop.sender();
@@ -47,7 +47,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         }
 
         // Update pressure reading with available data
-        let new_pressure = p_watcher.get().await.fuel_tank_pressure_filtered.0;
+        let new_pressure = p_watcher.get().await.0;
         if new_pressure != f32::INFINITY {
             pressure = new_pressure
         }

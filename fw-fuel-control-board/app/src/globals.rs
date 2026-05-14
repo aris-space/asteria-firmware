@@ -25,11 +25,23 @@ pub struct BoardState {
     )]
     pub pressurization_pressure: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
-        map = "dp_fuel_control_board::Message::FuelTankPressure(#value)",
+        map = "dp_fuel_control_board::Message::FuelTankPressureSensor1(#value)",
         min_freq_hz = 20.0,
         max_freq_hz = 20.0
     )]
-    pub fuel_tank_pressure: Watch<ThreadModeRawMutex, dp_fuel_control_board::FuelTankPressure, 5>,
+    pub fuel_tank_pressure_sensor_1: Watch<ThreadModeRawMutex, BarG, 5>,
+    #[broadcast(
+        map = "dp_fuel_control_board::Message::FuelTankPressureSensor2(#value)",
+        min_freq_hz = 20.0,
+        max_freq_hz = 20.0
+    )]
+    pub fuel_tank_pressure_sensor_2: Watch<ThreadModeRawMutex, BarG, 5>,
+    #[broadcast(
+        map = "dp_fuel_control_board::Message::FuelTankPressureFiltered(#value)",
+        min_freq_hz = 20.0,
+        max_freq_hz = 20.0
+    )]
+    pub fuel_tank_pressure_filtered: Watch<ThreadModeRawMutex, BarG, 5>,
     // DPR
     #[broadcast(
         map = "dp_fuel_control_board::Message::FuelDprValveState(#value)",
@@ -86,7 +98,9 @@ impl BoardState {
     const fn new() -> Self {
         Self {
             pressurization_pressure: Watch::new(),
-            fuel_tank_pressure: Watch::new(),
+            fuel_tank_pressure_sensor_1: Watch::new(),
+            fuel_tank_pressure_sensor_2: Watch::new(),
+            fuel_tank_pressure_filtered: Watch::new(),
             dpr_control_loop: Watch::new(),
             pressurization_vent_control: Watch::new(),
             fuel_vent_control: Watch::new(),
