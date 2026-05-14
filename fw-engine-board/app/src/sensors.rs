@@ -7,7 +7,7 @@ pub(crate) mod trafag_p;
 
 pub const CAN_BOARD_STATUS_FREQ_HZ: f32 = 1.0;
 pub(crate) const ACQ_THERMOCOUPLE_FREQ_HZ: f32 = 10.0;
-pub(crate) const ACQ_PRESSURE_FREQ_HZ: f32 = 50.0;
+pub(crate) const ACQ_PRESSURE_FREQ_HZ: f32 = 500.0;
 pub(crate) const ADC_CALIBRATION_SAMPLES: u64 = 50;
 
 pub(crate) static OXD_TNK_T: ThermocoupleType = ThermocoupleType::K;

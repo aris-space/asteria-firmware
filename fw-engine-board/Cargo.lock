@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "dp-engine-control-board"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bincode",
  "data-core",

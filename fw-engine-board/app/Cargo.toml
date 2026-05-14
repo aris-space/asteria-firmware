@@ -12,7 +12,7 @@ filters = { path = "../../crates/filters" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 can-utils = { path = "../../crates/can-utils" }
 data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
-dp-engine-control-board = { path = "../../data-definitions/datapoints/dp-engine-control-board", version = "=0.4", features = [
+dp-engine-control-board = { path = "../../data-definitions/datapoints/dp-engine-control-board", version = "=0.5", features = [
     "can",
 ] }
 dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [
