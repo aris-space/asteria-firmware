@@ -5,11 +5,12 @@
 pub mod pressures;
 use crate::pressures::{OVERFLOW_THRESHOLD_V, TrafagPSens, UNDERFLOW_THRESHOLD_V, VOLTAGE_RANGE};
 use embassy_stm32::adc::{
-    Adc, AdcChannel, AdcConfig, AnyAdcChannel, Instance, RxDma, SampleTime, SpecialConverter,
-    Temperature, VrefInt,
+    Adc, AdcChannel, AdcConfig, AnyAdcChannel, Instance, Presc, RxDma, SampleTime,
+    SpecialConverter, Temperature, VrefInt,
 };
 use embassy_stm32::dma;
 use embassy_stm32::interrupt::typelevel::Binding;
+use embassy_stm32::pac;
 use embassy_stm32::pac::vrefbuf::vals::{Hiz, Vrs};
 use embassy_stm32::rcc::{Sysclk, mux};
 use embassy_stm32::{Config, Peri};
@@ -174,5 +175,4 @@ pub fn config_vref_buf() {
 pub fn set_adc_configs(config: &mut Config) {
     config.rcc.mux.adc12sel = mux::Adcsel::SYS;
     config.rcc.mux.adc345sel = mux::Adcsel::SYS;
-    config.rcc.sys = Sysclk::HSE;
 }

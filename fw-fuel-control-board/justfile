@@ -1,5 +1,31 @@
 chip    := "STM32G473RCTx"
 bin     := "fw-fuel-control-board"
-use_probe_rs := "false"
+use_probe_rs := "true"
 
 import '../just/firmware.just'
+
+# Attach to the running firmware and record pressurization pressure to a CSV for 5 minutes.
+record-pressure:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    elf="$(find "target/thumbv7em-none-eabihf" -type f -name "{{bin}}" -print0 | xargs -0 ls -t 2>/dev/null | head -n1 || true)"
+    [[ -n "$elf" ]] || { echo "No built {{bin}} found under target/thumbv7em-none-eabihf." >&2; exit 1; }
+
+    out="pressure_$(date +%Y%m%d_%H%M%S).csv"
+    echo "timestamp_s,pressure_bar" > "$out"
+    echo "Recording pressurization pressure to $out for 5 minutes (Ctrl+C to stop early)..."
+
+    timeout 300 probe-rs attach --chip {{chip}} \
+        --no-catch-hardfault \
+        --no-catch-reset \
+        "$elf" \
+    | grep --line-buffered "Pressurization pressure:" \
+    | awk 'BEGIN { OFS="," } {
+        ts = $1
+        for (i = 1; i <= NF; i++) {
+            if ($i == "pressure:") { print ts, $(i+1); fflush(); break }
+        }
+    }' >> "$out" || true
+
+    echo "Done. Saved $(( $(wc -l < "$out") - 1 )) samples to $out"

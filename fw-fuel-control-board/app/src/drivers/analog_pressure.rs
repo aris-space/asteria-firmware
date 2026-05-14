@@ -30,7 +30,7 @@ impl FuelPressureDriver {
         }
     }
 
-    pub fn update(&mut self, mut value: FuelPressureMeasurementRaw) {
+    pub fn update(&mut self, mut value: FuelPressureMeasurementRaw) -> FuelPressureMeasurementRaw {
         let has_error = !value.pressurization_pressure.is_finite()
             || !value.fuel_tank_pressure_1.is_finite()
             || !value.fuel_tank_pressure_2.is_finite();
@@ -73,6 +73,8 @@ impl FuelPressureDriver {
         } else {
             SensorStatus::Online
         });
+
+        value
     }
 }
 
