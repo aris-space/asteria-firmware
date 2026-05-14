@@ -51,15 +51,18 @@ impl OxidizerPressureDriver {
             value.oxidizer_tank_differential_pressure,
         );
 
-        STATE.oxidizer_tank_pressure.sender().send(
-            dp_oxidizer_control_board::OxidizerTankPressure {
-                oxidizer_tank_pressure_sensor_1: BarG(value.oxidizer_tank_pressure_1),
-                oxidizer_tank_pressure_sensor_2: BarG(value.oxidizer_tank_pressure_2),
-                oxidizer_tank_differential_pressure: BarG(
-                    value.oxidizer_tank_differential_pressure,
-                ),
-            },
-        );
+        STATE
+            .oxidizer_tank_pressure_sensor_1
+            .sender()
+            .send(BarG(value.oxidizer_tank_pressure_1));
+        STATE
+            .oxidizer_tank_pressure_sensor_2
+            .sender()
+            .send(BarG(value.oxidizer_tank_pressure_2));
+        STATE
+            .oxidizer_tank_differential_pressure
+            .sender()
+            .send(BarG(value.oxidizer_tank_differential_pressure));
 
         STATE.pressure_bus_status.sender().send(if has_error {
             SensorStatus::Offline

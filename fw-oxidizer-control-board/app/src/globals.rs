@@ -5,6 +5,7 @@ use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
 use datatypes::actuator::{DPRValve, NormallyClosedValve};
 use datatypes::status::BuildInformationCommon;
+use datatypes::units::BarG;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 
@@ -19,12 +20,23 @@ use crate::sensors::solenoid_current::SolenoidCurrentMeasurements;
 pub struct BoardState {
     // Pressure sensors
     #[broadcast(
-        map = "dp_oxidizer_control_board::Message::OxidizerTankPressure(#value)",
+        map = "dp_oxidizer_control_board::Message::OxidizerTankPressureSensor1(#value)",
         min_freq_hz = 20.0,
         max_freq_hz = 20.0
     )]
-    pub oxidizer_tank_pressure:
-        Watch<ThreadModeRawMutex, dp_oxidizer_control_board::OxidizerTankPressure, 5>,
+    pub oxidizer_tank_pressure_sensor_1: Watch<ThreadModeRawMutex, BarG, 5>,
+    #[broadcast(
+        map = "dp_oxidizer_control_board::Message::OxidizerTankPressureSensor2(#value)",
+        min_freq_hz = 20.0,
+        max_freq_hz = 20.0
+    )]
+    pub oxidizer_tank_pressure_sensor_2: Watch<ThreadModeRawMutex, BarG, 5>,
+    #[broadcast(
+        map = "dp_oxidizer_control_board::Message::OxidizerTankDifferentialPressure(#value)",
+        min_freq_hz = 20.0,
+        max_freq_hz = 20.0
+    )]
+    pub oxidizer_tank_differential_pressure: Watch<ThreadModeRawMutex, BarG, 5>,
     // DPR
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::OxidizerDprValveState(#value)",
@@ -72,7 +84,9 @@ pub struct BoardState {
 impl BoardState {
     const fn new() -> Self {
         Self {
-            oxidizer_tank_pressure: Watch::new(),
+            oxidizer_tank_pressure_sensor_1: Watch::new(),
+            oxidizer_tank_pressure_sensor_2: Watch::new(),
+            oxidizer_tank_differential_pressure: Watch::new(),
             dpr_control_loop: Watch::new(),
             oxidizer_vent_control: Watch::new(),
             board_status: Watch::new(),

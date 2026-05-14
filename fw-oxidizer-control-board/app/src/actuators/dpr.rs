@@ -14,7 +14,8 @@ use embedded_utils::{error, info, trace};
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
-    let mut p_watcher = STATE.oxidizer_tank_pressure.receiver().unwrap();
+    let mut p1_watcher = STATE.oxidizer_tank_pressure_sensor_1.receiver().unwrap();
+    let mut p2_watcher = STATE.oxidizer_tank_pressure_sensor_2.receiver().unwrap();
     let mut dpr_control_loop_receiver = STATE.dpr_control_loop.receiver().unwrap();
 
     let dpr_control_loop_sender = STATE.dpr_control_loop.sender();
@@ -46,11 +47,10 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
             }
         }
 
-        // Update pressure reading with available data
-        let new_pressure = get_control_pressure(p_watcher.get().await);
-        if new_pressure != f32::INFINITY {
-            pressure = new_pressure
-        }
+        // Update pressure reading with available tank pressure data.
+        let p1 = p1_watcher.get().await;
+        let p2 = p2_watcher.get().await;
+        pressure = get_control_pressure(p1, p2);
 
         // Safety check
         // ToDo: implement correctly ask lennard he will yap about it
@@ -91,9 +91,9 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
     }
 }
 
-fn get_control_pressure(pressure: dp_oxidizer_control_board::OxidizerTankPressure) -> f32 {
-    let p1 = pressure.oxidizer_tank_pressure_sensor_1.0;
-    let p2 = pressure.oxidizer_tank_pressure_sensor_2.0;
+fn get_control_pressure(p1: datatypes::units::BarG, p2: datatypes::units::BarG) -> f32 {
+    let p1 = p1.0;
+    let p2 = p2.0;
 
     if p1.is_finite() && p2.is_finite() {
         f32::max(p1, p2)
