@@ -33,7 +33,6 @@ const __ASSERT_LEN_OK: () = {
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
-
     loop {
         match can_rx.recv().await {
             Ok(ReceivedMessage::ResetAll(_)) => {
@@ -80,18 +79,18 @@ pub async fn board_status_update_task() -> ! {
             armed = state;
         }
 
-        let _ = STATE
-            .board_status
-            .sender()
-            .send(dp_engine_control_board::EngineControlBoardStatus {
-                common: StatusCommonMessage {
-                    errors: 0,
-                    micros_since_restart: start.elapsed().as_micros(),
-                },
-                thermocouple_status,
-                armed,
-
-            });
+        let _ =
+            STATE
+                .board_status
+                .sender()
+                .send(dp_engine_control_board::EngineControlBoardStatus {
+                    common: StatusCommonMessage {
+                        errors: 0,
+                        micros_since_restart: start.elapsed().as_micros(),
+                    },
+                    thermocouple_status,
+                    armed,
+                });
         status_ticker.next().await;
     }
 }

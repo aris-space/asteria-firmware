@@ -6,6 +6,7 @@ use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
 use datatypes::actuator::NormallyClosedValve;
 use datatypes::status::{ArmingState, BuildInformationCommon, SensorStatus};
+use datatypes::units::{BarG, Celsius};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 
@@ -18,18 +19,35 @@ use embassy_sync::watch::Watch;
 pub struct BoardState {
     // Sensors
     #[broadcast(
-        map = "dp_engine_control_board::Message::EnginePressure(#value)",
+        map = "dp_engine_control_board::Message::ChamberPressure(#value)",
         min_freq_hz = 20.0,
         max_freq_hz = 20.0
     )]
-    pub engine_pressure: Watch<ThreadModeRawMutex, dp_engine_control_board::EnginePressure, 5>,
+    pub eng_cc_p: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
-        map = "dp_engine_control_board::Message::EngineBayTemperature(#value)",
+        map = "dp_engine_control_board::Message::InjectorFuelPressure(#value)",
+        min_freq_hz = 20.0,
+        max_freq_hz = 20.0
+    )]
+    pub fss_inj_p: Watch<ThreadModeRawMutex, BarG, 5>,
+    #[broadcast(
+        map = "dp_engine_control_board::Message::InjectorOxidizerPressure(#value)",
+        min_freq_hz = 20.0,
+        max_freq_hz = 20.0
+    )]
+    pub oss_inj_p: Watch<ThreadModeRawMutex, BarG, 5>,
+    #[broadcast(
+        map = "dp_engine_control_board::Message::InjectorFuelTemperature(#value)",
         min_freq_hz = 10.0,
         max_freq_hz = 10.0
     )]
-    pub engine_bay_temperature:
-        Watch<ThreadModeRawMutex, dp_engine_control_board::EngineBayTemperature, 5>,
+    pub fss_inj_t: Watch<ThreadModeRawMutex, Celsius, 5>,
+    #[broadcast(
+        map = "dp_engine_control_board::Message::OxidizerTankTemperature(#value)",
+        min_freq_hz = 10.0,
+        max_freq_hz = 10.0
+    )]
+    pub oss_tnk_t: Watch<ThreadModeRawMutex, Celsius, 5>,
     // Valves
     #[broadcast(
         map = "dp_engine_control_board::Message::FuelMainValveState(#value)",
@@ -76,8 +94,11 @@ pub struct BoardState {
 impl BoardState {
     const fn new() -> Self {
         Self {
-            engine_pressure: Watch::new(),
-            engine_bay_temperature: Watch::new(),
+            eng_cc_p: Watch::new(),
+            fss_inj_p: Watch::new(),
+            oss_inj_p: Watch::new(),
+            fss_inj_t: Watch::new(),
+            oss_tnk_t: Watch::new(),
             fuel_main_control: Watch::new(),
             oxidizer_main_control: Watch::new(),
             board_status: Watch::new(),

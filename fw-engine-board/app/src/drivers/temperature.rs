@@ -31,12 +31,7 @@ impl<'a> TCDriver<'a> {
     pub fn update(&mut self, value: ThermoMeasurementRaw) {
         // Send the value to the watch channel
         self.watch_handle.send(value);
-        STATE
-            .engine_bay_temperature
-            .sender()
-            .send(dp_engine_control_board::EngineBayTemperature {
-                eng_inj_t: Celsius(value.fss_inj_t),
-                oss_tnk_t: Celsius(value.oss_tnk_t),
-            });
+        STATE.fss_inj_t.sender().send(Celsius(value.fss_inj_t));
+        STATE.oss_tnk_t.sender().send(Celsius(value.oss_tnk_t));
     }
 }

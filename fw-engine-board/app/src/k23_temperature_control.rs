@@ -11,7 +11,8 @@ pub(crate) static HEATING_CONTROL_ACTIVE: AtomicBool = AtomicBool::new(true);
 
 #[embassy_executor::task]
 pub async fn k23_temperature_control(mut pin: Output<'static>) {
-    let mut temperature_watcher = STATE.engine_bay_temperature.receiver().unwrap();
+    let mut fss_inj_t_watcher = STATE.fss_inj_t.receiver().unwrap();
+    let mut oss_tnk_t_watcher = STATE.oss_tnk_t.receiver().unwrap();
 
     loop {
         if !HEATING_CONTROL_ACTIVE.load(Ordering::Relaxed) {
@@ -20,14 +21,13 @@ pub async fn k23_temperature_control(mut pin: Output<'static>) {
             continue;
         }
 
-        let temp = temperature_watcher.get().await;
+        let fss_inj_t = fss_inj_t_watcher.get().await;
+        let oss_tnk_t = oss_tnk_t_watcher.get().await;
 
-        if (temp.eng_inj_t.0 < LOWER_TEMP_THRESHOLD) | (temp.oss_tnk_t.0 < LOWER_TEMP_THRESHOLD) {
+        if (fss_inj_t.0 < LOWER_TEMP_THRESHOLD) | (oss_tnk_t.0 < LOWER_TEMP_THRESHOLD) {
             pin.set_high();
             info!("Heater turned ON");
-        } else if (temp.eng_inj_t.0 > UPPER_TEMP_THRESHOLD)
-            | (temp.oss_tnk_t.0 > UPPER_TEMP_THRESHOLD)
-        {
+        } else if (fss_inj_t.0 > UPPER_TEMP_THRESHOLD) | (oss_tnk_t.0 > UPPER_TEMP_THRESHOLD) {
             pin.set_low();
             info!("Heater turned OFF");
         }

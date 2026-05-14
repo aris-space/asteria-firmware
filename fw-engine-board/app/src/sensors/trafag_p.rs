@@ -7,6 +7,7 @@ use embassy_stm32::Peri;
 use embassy_stm32::adc::AdcChannel;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH4, DMA2_CH2, DMA2_CH3, PB13, PC0, PC1};
 use embassy_time::{Duration, Ticker};
+use embedded_utils::info;
 use trafag_pressure::ADCPressure;
 use trafag_pressure::pressures::TrafagPSens;
 
@@ -79,7 +80,10 @@ pub async fn engine_pressure_acquisition(pressure_handles: EnginePressureHandles
             fss_inj_p: eng_inj_p_handle.read_pressure(Irqs).await,
         };
 
-        data_publisher.update(measurement);
+        let filtered = data_publisher.update(measurement);
+        info!("Engine CC pressure: {}", filtered.eng_cc_p);
+        info!("FSS injector pressure: {}", filtered.fss_inj_p);
+        info!("OSS injector pressure: {}", filtered.oss_inj_p);
 
         // Wait for the next tick
         ticker.next().await;

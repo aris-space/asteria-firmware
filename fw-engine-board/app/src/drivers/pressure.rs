@@ -30,23 +30,23 @@ impl AnalogPressureDriver {
         }
     }
 
-    pub fn update(&mut self, mut value: AnalogPressureMeasurementRaw) {
+    pub fn update(
+        &mut self,
+        mut value: AnalogPressureMeasurementRaw,
+    ) -> AnalogPressureMeasurementRaw {
         // Apply filtering to the raw sensor data
         value.eng_cc_p = self.eng_cc_p_avg.update(value.eng_cc_p);
         value.oss_inj_p = self.oss_inj_p_avg.update(value.oss_inj_p);
         value.fss_inj_p = self.fss_inj_p_avg.update(value.fss_inj_p);
 
-        STATE
-            .engine_pressure
-            .sender()
-            .send(dp_engine_control_board::EnginePressure {
-                eng_cc_p: BarG(value.eng_cc_p),
-                eng_inj_p: BarG(value.fss_inj_p),
-                oss_inj_p: BarG(value.oss_inj_p),
-            });
+        STATE.eng_cc_p.sender().send(BarG(value.eng_cc_p));
+        STATE.fss_inj_p.sender().send(BarG(value.fss_inj_p));
+        STATE.oss_inj_p.sender().send(BarG(value.oss_inj_p));
 
         // Update the engine chamber pressure watch
         ENGINE_P_WATCH.sender().send(value.eng_cc_p);
         STATE.engine_chamber_pressure.sender().send(value.eng_cc_p);
+
+        value
     }
 }
