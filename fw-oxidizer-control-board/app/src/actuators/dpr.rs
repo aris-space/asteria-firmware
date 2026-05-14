@@ -1,13 +1,12 @@
 #![allow(unused_assignments)]
 
-use defmt::println;
 use crate::actuators::{CYCLE_TIME_MS, KD, KI, KP, SAFETY_LIMIT_BARG};
 use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
 use datatypes::actuator::DPRValve;
 use datatypes::status::ValveState::{Active, Inactive};
+use defmt::println;
 use embassy_stm32::gpio::Output;
-use embassy_stm32::usb::In;
 use embassy_time::{Duration, Ticker};
 use embedded_utils::fmt::warn;
 use embedded_utils::{error, info, trace};
@@ -50,7 +49,10 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         // Update pressure reading with available tank pressure data.
         let p1 = p1_watcher.get().await;
         let p2 = p2_watcher.get().await;
-        pressure = get_control_pressure(p1, p2);
+        let new_pressure = get_control_pressure(p1, p2);
+        if new_pressure != f32::INFINITY {
+            pressure = new_pressure
+        }
 
         // Safety check
         // ToDo: implement correctly ask lennard he will yap about it
