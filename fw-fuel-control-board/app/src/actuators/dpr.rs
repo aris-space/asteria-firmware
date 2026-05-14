@@ -1,11 +1,11 @@
 #![allow(unused_assignments)]
 
-use defmt::println;
 use crate::actuators::{CYCLE_TIME_MS, KD, KI, KP, SAFETY_LIMIT_BARG};
 use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
 use datatypes::actuator::DPRValve;
 use datatypes::status::ValveState::{Active, Inactive};
+use defmt::println;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::usb::In;
 use embassy_time::{Duration, Ticker};
