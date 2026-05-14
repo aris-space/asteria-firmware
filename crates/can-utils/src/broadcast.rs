@@ -103,7 +103,7 @@ where
             };
 
             let now = Instant::now();
-            if now - last_sent >= throttle_period {
+            if now.checked_duration_since(last_sent).unwrap_or_default() >= throttle_period {
                 let mut tx = transmit.lock().await;
                 embedded_utils::trace!("Sending data: {:?}", msg);
                 match embassy_time::with_timeout(TX_TIMEOUT, tx.transmit(msg)).await {

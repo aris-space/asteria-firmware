@@ -1,26 +1,29 @@
 #![allow(clippy::single_match)]
 #![allow(clippy::collapsible_else_if)]
+use can_utils::broadcast::Broadcast;
+use can_utils::collector::Collector;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
+use datatypes::status::{ArmingState, BuildInformationCommon};
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Level, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant};
 use embassy_time::{Timer, with_timeout};
 use embedded_utils::fmt::*;
 // this is maybe not nice, think about using another enum?
+use crate::can_io::ReceivedMessage;
 use crate::recovery_actuator_control::SteeringStatus::{Connected, NotConnected, Responsive};
-use crate::rsbl_servo::{LEFT, RIGHT, RsblData};
+use crate::rsbl_servo::{LEFT, RIGHT};
 use crate::servo::RecoveryActuator;
 use crate::{
     DEPLOYMENT_INITIAL_ANGLE, DEPLOYMENT_SERVO_ANGLE, SAFETY_SPIRAL_POS_LEFT,
     SAFETY_SPIRAL_POS_RIGHT, SEPARATION_INITIAL_ANGLE, SEPARATION_SERVO_ANGLE, rsbl_servo,
     watchdog,
 };
-use hermes_can::messages::board_status::{ActuatorStatus, ArmingState, WatchdogState};
+use dp_recovery_board::{ActuatorStatus, SteeringPositions, WatchdogState};
 
 #[allow(unused_imports)]
 #[cfg(feature = "defmt")]
@@ -39,19 +42,53 @@ pub enum SteeringStatus {
     /// This state is only possible before power is on
     Connected,
 
-    /// in this array is saved the Motor data from the REC board. In data0 is the array containing the left data,
-    /// while in data1 is the array containing the right data. The data is wrapped in an option to indicate if
-    /// any data could be read or not
-    Responsive([Option<RsblData>; 2]),
+    /// Indicates if data from the motors could be read or not for [left, right].
+    Responsive([bool; 2]),
 }
-/// watch for giving steering target positions to steering_task
-pub static STEERING_TARGET_POSITIONS: Channel<CriticalSectionRawMutex, [i32; 2], 3> =
-    Channel::new();
 
-/// watch for setting steering power
-pub static STEERING_POWER: Watch<CriticalSectionRawMutex, bool, 1> = Watch::new();
+#[derive(Collector)]
+#[collector(
+    message_type = "ReceivedMessage",
+    update_expr = "#field.sender().send(#value);"
+)]
+pub struct Inputs {
+    /// watch for giving steering target positions to steering_task
+    #[collector(pattern = "ReceivedMessage::SteeringTargetPositions(#value)")]
+    pub steering_target_positions: Watch<CriticalSectionRawMutex, SteeringPositions, 3>,
 
-/// status that also includes the data read from the motors
+    /// watch for setting steering power
+    pub steering_power: Watch<CriticalSectionRawMutex, bool, 1>,
+}
+
+pub static INPUTS: Inputs = Inputs {
+    steering_target_positions: Watch::new(),
+    steering_power: Watch::new(),
+};
+
+#[derive(Broadcast)]
+#[broadcast(loop_type = "can_utils::broadcast::ResponsiveLoop")]
+pub struct Outputs {
+    /// Position data read from the motors
+    #[broadcast(
+        filter_map = "#value.map(dp_recovery_board::Message::SteeringActualPositions)",
+        min_freq_hz = 0.1,
+        max_freq_hz = 15.
+    )]
+    pub steering_actual_positions: Watch<ThreadModeRawMutex, Option<SteeringPositions>, 2>,
+    #[broadcast(
+        map = "dp_recovery_board::Message::BuildInfo(#value)",
+        min_freq_hz = 0.2,
+        max_freq_hz = 0.2
+    )]
+    pub build_info: Watch<ThreadModeRawMutex, BuildInformationCommon, 1>,
+}
+
+pub static OUTPUTS: Outputs = Outputs {
+    steering_actual_positions: Watch::new(),
+    build_info: Watch::new(),
+};
+
+/// status that of the motors
 pub static STEERING_STATUS: Watch<CriticalSectionRawMutex, SteeringStatus, 2> = Watch::new();
 
 /// indicator for power for steering (setting target positions etc. just won't do anything if this is not true)
@@ -68,9 +105,10 @@ pub async fn steering_task(
     steering_actuator_detect: Input<'static>,
     mut watchdog: watchdog::Watchdog,
 ) {
-    let motor_targets_rx = STEERING_TARGET_POSITIONS.receiver();
-    let mut motor_power = STEERING_POWER.receiver().unwrap();
+    let mut motor_targets_rx = INPUTS.steering_target_positions.receiver().unwrap();
+    let mut motor_power = INPUTS.steering_power.receiver().unwrap();
     let steering_status = STEERING_STATUS.sender();
+    let steering_positions = OUTPUTS.steering_actual_positions.sender();
     let watchdog_state_tx = WATCHDOG_STATE.sender();
 
     let power_task = async {
@@ -114,8 +152,8 @@ pub async fn steering_task(
                 // check that the watchdog is still active
                 if watchdog.check() {
                     // check if new values are available
-                    match motor_targets_rx.try_receive() {
-                        Ok(target_positions) => {
+                    match motor_targets_rx.try_changed() {
+                        Some(target_positions) => {
                             //on first value reception, activate watchdog
                             if !watchdog_active {
                                 watchdog.start();
@@ -124,9 +162,12 @@ pub async fn steering_task(
                             }
                             // pet the watchdog
                             watchdog.update();
-                            // set target positions to steering
+                            // set target positions to steering (flip as motors are counting revolutions the other way around)
                             match steering
-                                .steer_parachutes(target_positions[0], target_positions[1])
+                                .steer_parachutes(
+                                    -target_positions.left_pos,
+                                    -target_positions.right_pos,
+                                )
                                 .await
                             {
                                 Ok(()) => {}
@@ -135,7 +176,7 @@ pub async fn steering_task(
                                 }
                             }
                         }
-                        Err(_) => {}
+                        None => {}
                     }
                 } else {
                     if !safety_spiral_active {
@@ -156,13 +197,16 @@ pub async fn steering_task(
                     }
                 }
 
-                let mut angles = [None, None];
+                let mut positions = SteeringPositions::default();
+                let mut connectedness = [false; 2];
                 // read out position data for both servos roughly every 100 ms
                 if Instant::now() - last >= Duration::from_millis(100) {
                     last = Instant::now();
                     match steering.read_steering_data(LEFT).await {
                         Ok(left_val) => {
-                            angles[0] = left_val;
+                            // SteeringPositions is flipped from what the driver outputs.
+                            positions.left_pos = -left_val.map(|d| d.angle).unwrap_or_default();
+                            connectedness[0] = left_val.is_some();
                         }
                         Err(e) => {
                             error!("Error in reading left steering data: {:?}", e)
@@ -170,13 +214,20 @@ pub async fn steering_task(
                     }
                     match steering.read_steering_data(RIGHT).await {
                         Ok(right_val) => {
-                            angles[1] = right_val;
+                            // SteeringPositions is flipped from what the driver outputs.
+                            positions.right_pos = -right_val.map(|d| d.angle).unwrap_or_default();
+                            connectedness[1] = right_val.is_some();
                         }
                         Err(e) => {
                             error!("Error in reading right steering data: {:?}", e)
                         }
                     }
-                    steering_status.send(Responsive(angles));
+                    steering_positions.send(if connectedness[0] && connectedness[1] {
+                        Some(positions)
+                    } else {
+                        None
+                    });
+                    steering_status.send(Responsive(connectedness));
                 }
             } else {
                 // deactivate steering, make sure to wait a bit...

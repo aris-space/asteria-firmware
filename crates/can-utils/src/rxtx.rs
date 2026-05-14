@@ -71,8 +71,8 @@ impl<'a> TypedCanTransmit for CanTx<'a> {
         M::Error: Format,
     {
         let mut buf = [0u8; 64];
-        let (id, len) = msg.encode_into(&mut buf).map_err(|e| {
-            warn!("cannot encode: {}", e);
+        let (id, len) = msg.encode_into(&mut buf).map_err(|_e| {
+            // warn!("cannot encode: {}", e); // FIXME: e is not defmt::Format
             TxError::Encode
         })?;
 
@@ -108,8 +108,8 @@ impl<'a> TypedCanReceive for CanRx<'a> {
             }
         };
 
-        let msg = M::from_parts(*id, frame.data()).map_err(|e| {
-            warn!("cannot decode: {}", e);
+        let msg = M::from_parts(*id, frame.data()).map_err(|_e| {
+            // warn!("cannot decode: {}", e); // FIXME: e is not defmt::Format
             RxError::Decode
         })?;
         Ok(msg)

@@ -27,6 +27,10 @@ pub fn setup_can<'a, T: can::Instance>(
         filter: FilterType::Disabled,
         action: Action::Disable,
     }; FILTER_COUNT];
+    assert!(
+        enabled_ids.len() < FILTER_COUNT,
+        "too many enabled messages"
+    );
 
     // Last filter rejects, rest are not considered
     filters[enabled_ids.len()] = StandardFilter::reject_all();
