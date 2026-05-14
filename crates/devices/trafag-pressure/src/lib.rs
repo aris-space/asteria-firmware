@@ -174,5 +174,4 @@ pub fn config_vref_buf() {
 pub fn set_adc_configs(config: &mut Config) {
     config.rcc.mux.adc12sel = mux::Adcsel::SYS;
     config.rcc.mux.adc345sel = mux::Adcsel::SYS;
-    config.rcc.sys = Sysclk::HSE;
 }

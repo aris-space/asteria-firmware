@@ -5,11 +5,9 @@ use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
 use datatypes::actuator::DPRValve;
 use datatypes::status::ValveState::{Active, Inactive};
-use defmt::println;
 use embassy_stm32::gpio::Output;
 use embassy_time::{Duration, Ticker};
-use embedded_utils::fmt::warn;
-use embedded_utils::{error, info, trace};
+use embedded_utils::error;
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {

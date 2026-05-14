@@ -33,7 +33,10 @@ impl OxidizerPressureDriver {
         }
     }
 
-    pub fn update(&mut self, mut value: OxidizerPressureMeasurementRaw) {
+    pub fn update(
+        &mut self,
+        mut value: OxidizerPressureMeasurementRaw,
+    ) -> OxidizerPressureMeasurementRaw {
         let has_error = !value.oxidizer_tank_pressure_1.is_finite()
             || !value.oxidizer_tank_pressure_2.is_finite()
             || !value.oxidizer_tank_differential_pressure.is_finite();
@@ -69,6 +72,8 @@ impl OxidizerPressureDriver {
         } else {
             SensorStatus::Online
         });
+
+        value
     }
 }
 
