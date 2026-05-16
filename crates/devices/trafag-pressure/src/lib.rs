@@ -138,7 +138,7 @@ where
         adc.read(
             dma,
             irq,
-            [(pin, SampleTime::CYCLES247_5)].into_iter(),
+            [(pin, SampleTime::CYCLES640_5)].into_iter(),
             &mut read_buf,
         )
         .await;
