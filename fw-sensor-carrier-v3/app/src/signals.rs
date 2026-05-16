@@ -2,11 +2,16 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 
-use crate::measurements::{GnssSample, ImuSample, MagSample, PressureSample};
+use crate::measurements::{GnssSample, ImuSample, MagSample, PressureSample, StateEstimate};
 use crate::sensors::{
     BAROMETER_COUNT, BarometerId, GNSS_COUNT, GnssId, IMU_COUNT, ImuId, MAGNETOMETER_COUNT,
     MagnetometerId,
 };
+
+/// Latest state estimate from the EKF. Single global watch (lossy / latest-only).
+/// TODO: revisit if a downstream consumer needs the full history rather than
+/// the latest snapshot — switch to a PubSubChannel then.
+pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 4> = Watch::new();
 
 macro_rules! define_signal {
     (

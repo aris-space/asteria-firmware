@@ -7,6 +7,9 @@ authors = ["Louis Schell <louis.schell1@gmx.de>"]
 [features]
 default = ["storage"]
 storage = ["dep:w25q256jv", "dep:littlefs2", "dep:generic-array"]
+# Enables the on-device profiling helpers (DWT cycle timing of EKF predict,
+# MSP stack high-water tracking). See app/src/profiling.rs.
+profiling = []
 
 [dependencies]
 # cortex-m setup
@@ -35,6 +38,9 @@ embassy-embedded-hal = "*"
 
 assign-resources = "0.5.0"
 static_cell = "2.1.1"
+
+# State estimation
+ekf = { path = "../../ba-implementation/ekf", default-features = false, features = ["no_std"] }
 
 # Sensor Drivers
 ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }

@@ -84,6 +84,7 @@ pub fn spawn_tasks(
     board: PreparedBoard,
     thread_spawner: Spawner,
     level_0_spawner: SendSpawner,
+    level_1_spawner: SendSpawner,
     defmt_consumer: DefmtConsumer,
 ) {
     level_0_spawner.spawn(
@@ -128,6 +129,10 @@ pub fn spawn_tasks(
 
     level_0_spawner.spawn(
         tasks::processing::inertial::task().expect("Failed to spawn inertial processing task"),
+    );
+
+    level_1_spawner.spawn(
+        tasks::processing::state_estimation::task().expect("Failed to spawn state estimation task"),
     );
 
     // Storage/config init runs on thread-mode so blocking flash I/O never starves readouts.

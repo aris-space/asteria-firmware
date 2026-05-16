@@ -169,6 +169,13 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             }
 
             let num_pairs = fifo_entries / 2;
+            // TODO: replace this interpolated timestamping with the
+            // LSM6DSO32's TIMESTAMPED_FIFO mode (TIMESTAMP/DEC_TS tags). The
+            // current scheme assigns each sample a timestamp linearly
+            // interpolated between the FIFO drain edges, which carries the
+            // host-side IRQ jitter into per-sample dt. The hardware can tag
+            // each sample with its own ~µs timestamp — using it would give
+            // the EKF a much cleaner dt series.
             let avg_dt_us =
                 this_data_end.duration_since(this_data_start).as_micros() / num_pairs as u64;
 

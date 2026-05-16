@@ -4,3 +4,6 @@
 [submodule "data-definitions"]
 	path = data-definitions
 	url = ../asteria-data-definitions
+[submodule "ba-implementation"]
+	path = ba-implementation
+	url = ssh://git@gitlab.ost.ch:45022/ba-embedded/ba-implementation.git

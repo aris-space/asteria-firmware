@@ -68,11 +68,34 @@ pub struct MagData {
     pub z: i16,
 }
 
+/// Snapshot of the EKF after an IMU prediction step.
+///
+/// Numeric fields are kept as plain `f64` arrays so this type does not depend
+/// on which `nalgebra` version any particular consumer is built against (the
+/// firmware uses 0.33, the `ekf` crate uses 0.34).
+#[derive(Clone, Copy, Debug)]
+pub struct StateEstimate {
+    pub ts: Instant,
+    /// NED position [N, E, D] in meters.
+    pub pos_ned_m: [f64; 3],
+    /// NED velocity [VN, VE, VD] in m/s.
+    pub vel_ned_mps: [f64; 3],
+    /// Body-to-NED attitude quaternion [w, x, y, z].
+    pub attitude_quat_wxyz: [f64; 4],
+    /// Diagonal of the 9x9 covariance (variance of each state).
+    pub cov_diag: [f64; 9],
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct PvtData {
     pub lon_deg: f64,
     pub lat_deg: f64,
     pub fix_type: ublox::GpsFix,
+    /// Height above WGS84 ellipsoid, in metres. Required by the EKF's
+    /// `Gnss::from_geodetic` (`map_3d::geodetic2ned` expects ellipsoidal alt).
+    pub height_ellipsoid_m: f32,
+    /// Height above mean sea level, in metres. Kept for human-facing telemetry;
+    /// not used by the EKF.
     pub height_msl: f32,
     pub num_satellites: u8,
     pub heading_deg: f32,

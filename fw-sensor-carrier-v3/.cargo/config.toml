@@ -16,4 +16,4 @@ rustflags = [
 target = "thumbv7em-none-eabihf" # Cortex-M7F (with single and double-precision FPU)
 
 [env]
-DEFMT_LOG = "trace"
+DEFMT_LOG = "debug"

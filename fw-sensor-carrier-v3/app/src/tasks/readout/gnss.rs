@@ -111,6 +111,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                             lon_deg: pvt.lon_degrees(),
                                             lat_deg: pvt.lat_degrees(),
                                             fix_type: pvt.fix_type(),
+                                            height_ellipsoid_m: pvt.height_meters() as f32,
                                             height_msl: pvt.height_msl() as f32,
                                             num_satellites: pvt.num_satellites(),
                                             heading_deg: pvt.heading_degrees() as f32,
