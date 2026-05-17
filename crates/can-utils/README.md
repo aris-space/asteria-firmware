@@ -62,7 +62,7 @@ pub struct Outputs {
         min_freq_hz = 0.1,
         max_freq_hz = 15.
     )]
-    pub steering_actual_positions: Watch<ThreadModeRawMutex, Option<SteeringPositions>, 2>,
+    pub steering_actual_positions: Watch<CriticalSectionRawMutex, Option<SteeringPositions>, 2>,
 }
 
 pub static OUTPUTS: Outputs = Outputs {

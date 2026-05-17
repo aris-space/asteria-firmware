@@ -2,11 +2,8 @@ use crate::rxtx::TypedCanTransmit;
 use can_hal::CanEncode;
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::can::CanTx;
-#[cfg(not(target_os = "none"))] // cheat, since `ThreadModeRawMutex` only exists for cortex-m.
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ThreadModeRawMutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::raw::RawMutex;
-#[cfg(target_os = "none")]
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::Duration;
 use embassy_time::Instant;
@@ -40,7 +37,7 @@ pub trait Broadcast {
     fn start_broadcasting(
         &'static self,
         spawner: Spawner,
-        transmit: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
+        transmit: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>,
     ) -> Result<(), SpawnError>;
 }
 
@@ -56,7 +53,7 @@ pub trait BroadcastLoop<M>: 'static {
     fn broadcast_loop<T: Send + Sync + 'static + Clone, MTX: RawMutex + Sync, const N: usize>(
         field: embassy_sync::watch::Receiver<'static, MTX, T, N>,
         map: impl FnMut(T) -> Option<M> + Send + 'static,
-        transmit: &'static Mutex<MTX, impl TypedCanTransmit + Send>,
+        transmit: &'static Mutex<CriticalSectionRawMutex, impl TypedCanTransmit + Send>,
         min_freq_hz: f32,
         max_freq_hz: f32,
     ) -> impl core::future::Future<Output = NeverReturns> + Send;
@@ -85,7 +82,7 @@ where
     >(
         mut watch: embassy_sync::watch::Receiver<'static, MTX, T, N>,
         mut filter_map: impl FnMut(T) -> Option<M> + Send + 'static,
-        transmit: &'static Mutex<MTX, impl TypedCanTransmit>,
+        transmit: &'static Mutex<CriticalSectionRawMutex, impl TypedCanTransmit>,
         min_freq_hz: f32,
         max_freq_hz: f32,
     ) -> NeverReturns {
