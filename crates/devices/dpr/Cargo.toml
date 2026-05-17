@@ -1,0 +1,12 @@
+[package]
+name = "dpr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+datatypes = { path = "../../../data-definitions/datatypes" }
+
+embassy-executor.workspace = true
+embassy-stm32.workspace = true
+embassy-time.workspace = true
+embassy-sync.workspace = true

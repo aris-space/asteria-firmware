@@ -136,13 +136,20 @@ async fn main(spawner: Spawner) -> ! {
     // Can Bus
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (tx, rx, _) = can.split();
-    let tx = make_multiplexable(tx).await;
+    let tx = make_multiplexable(tx);
     STATE
         .start_broadcasting(spawner, tx)
         .expect("failed to start CAN broadcasting");
 
     spawner.spawn(
-        pid_controller(fuel_dpr_valve).expect("failed to prepare pid_controller spawn token"),
+        dpr::pid_controller(
+            fuel_dpr_valve,
+            STATE.dpr_control_loop.receiver().unwrap(),
+            STATE.dpr_pressure.receiver().unwrap(),
+            STATE.dpr_gain.receiver().unwrap(),
+            STATE.dpr_info.sender(),
+        )
+        .expect("failed to prepare pid_controller spawn token"),
     );
 
     spawner.spawn(

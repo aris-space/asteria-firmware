@@ -5,6 +5,7 @@ use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
 use datatypes::actuator::DPRValve;
 use datatypes::status::ValveState::{Active, Inactive};
+use defmt::println;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::usb::In;
 use embassy_time::{Duration, Ticker};

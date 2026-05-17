@@ -5,12 +5,13 @@ edition = "2024"
 authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-space.ch>"]
 
 [dependencies]
+dpr = { path = "../../crates/devices/dpr" }
 filters = { path = "../../crates/filters" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 trafag-pressure = { path = "../../crates/devices/trafag-pressure" }
 can-utils = { path = "../../crates/can-utils" }
 data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
-dp-fuel-control-board = { path = "../../data-definitions/datapoints/dp-fuel-control-board", version = "=0.5", features = [
+dp-fuel-control-board = { path = "../../data-definitions/datapoints/dp-fuel-control-board", features = [
     "can",
 ] }
 dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [

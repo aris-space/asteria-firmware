@@ -11,7 +11,7 @@
 //! #[broadcast(loop_type = "MyLoop")]
 //! struct Outputs {
 //!     #[broadcast(filter_map = "#value.map(Msg::Positions)", min_freq_hz = 1., max_freq_hz = 10.)]
-//!     positions: Watch<ThreadModeRawMutex, Option<Positions>, 2>,
+//!     positions: Watch<CriticalSectionRawMutex, Option<Positions>, 2>,
 //!
 //!     // Fields without #[broadcast] are ignored.
 //!     other: u32,
@@ -28,12 +28,12 @@
 //!     fn start_broadcasting(
 //!         &'static self,
 //!         spawner: Spawner,
-//!         transmit: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
+//!         transmit: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>,
 //!     ) -> Result<(), SpawnError> {
 //!         #[embassy_executor::task]
 //!         async fn positions(
-//!             transmit: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
-//!             field: Receiver<'static, ThreadModeRawMutex, Option<Positions>, 2>,
+//!             transmit: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>,
+//!             field: Receiver<'static, CriticalSectionRawMutex, Option<Positions>, 2>,
 //!         ) {
 //!             MyLoop::broadcast_loop(
 //!                 field,
@@ -80,7 +80,7 @@
 use darling::{FromDeriveInput, FromField, ast, util::Flag};
 use proc_macro::TokenStream;
 use proc_macro2::Literal;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::{GenericArgument, PathArguments, Type, parse_macro_input, spanned::Spanned};
 
 /// Struct-level attributes parsed from `#[broadcast(...)]`.
@@ -200,7 +200,7 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
                 continue;
             }
             body_stmts.push(quote! {
-                self.#field_name.start_broadcasting(spawner, transmit)?;
+                self.#field_name.start_broadcasting(__spawner, __transmit)?;
             });
             continue;
         }
@@ -279,13 +279,13 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
         let min_lit = Literal::f32_suffixed(min_freq_hz);
         let max_lit = Literal::f32_suffixed(max_freq_hz);
 
-        let receiver_name = format_ident!("__{}_receiver", field_name);
-        let token_name = format_ident!("__{}_token", field_name);
-
         body_stmts.push(quote! {
             #[::embassy_executor::task]
             async fn #field_name(
-                transmit: &'static ::embassy_sync::mutex::Mutex<#mtx, ::embassy_stm32::can::CanTx<'static>>,
+                transmit: &'static ::embassy_sync::mutex::Mutex<
+                    ::embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+                    ::embassy_stm32::can::CanTx<'static>,
+                >,
                 field: ::embassy_sync::watch::Receiver<'static, #mtx, #t_ty, #n_val>,
             ) {
                 #loop_type::broadcast_loop(
@@ -297,12 +297,10 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
                 )
                 .await;
             }
-            let #receiver_name = self
-                .#field_name
-                .receiver()
-                .ok_or(::embassy_executor::SpawnError::Busy)?;
-            let #token_name = #field_name(__transmit, #receiver_name)?;
-            __spawner.spawn(#token_name);
+            __spawner.spawn(#field_name(
+                __transmit,
+                self.#field_name.receiver().ok_or(::embassy_executor::SpawnError::Busy)?,
+            )?);
         });
     }
 
@@ -323,7 +321,7 @@ fn derive_broadcast_impl(raw_input: &syn::DeriveInput) -> proc_macro2::TokenStre
                 &'static self,
                 __spawner: ::embassy_executor::Spawner,
                 __transmit: &'static ::embassy_sync::mutex::Mutex<
-                    ::embassy_sync::blocking_mutex::raw::ThreadModeRawMutex,
+                    ::embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
                     ::embassy_stm32::can::CanTx<'static>,
                 >,
             ) -> ::core::result::Result<(), ::embassy_executor::SpawnError> {
@@ -389,7 +387,7 @@ mod tests {
             #[broadcast(loop_type = "MyLoop")]
             struct Data {
                 #[broadcast(map = "Msg::A(#value)", min_freq_hz = 1.)]
-                a: Watch<ThreadModeRawMutex, i32, 1>,
+                a: Watch<CriticalSectionRawMutex, i32, 1>,
             }
         };
 
@@ -409,7 +407,7 @@ mod tests {
             #[broadcast(loop_type = "MyLoop")]
             struct Data {
                 #[broadcast(min_freq_hz = 1., max_freq_hz = 1.)]
-                a: Watch<ThreadModeRawMutex, i32, 1>,
+                a: Watch<CriticalSectionRawMutex, i32, 1>,
             }
         };
 
@@ -429,7 +427,7 @@ mod tests {
             #[broadcast(loop_type = "MyLoop")]
             struct Data {
                 #[broadcast(map = "Msg::A(#value)", filter_map = "#value.map(Msg::A)", min_freq_hz = 1., max_freq_hz = 1.)]
-                a: Watch<ThreadModeRawMutex, i32, 1>,
+                a: Watch<CriticalSectionRawMutex, i32, 1>,
             }
         };
 

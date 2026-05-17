@@ -20,7 +20,7 @@ defmt = { workspace = true, optional = true }
 defmt = [
     "dep:defmt",
     "embassy-stm32/defmt",
+    "can-hal/defmt",
     "embedded-utils/defmt",
     "embassy-time/defmt",
-    "can-hal/defmt",
 ]

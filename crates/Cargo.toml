@@ -16,6 +16,7 @@ members = [
     "devices/trafag-pressure",
     "devices/max31889-thermistor",
     "devices/ltc2945",
+    "devices/dpr",
 ]
 
 [workspace.dependencies]

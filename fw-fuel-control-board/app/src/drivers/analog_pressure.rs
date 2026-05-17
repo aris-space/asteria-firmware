@@ -81,6 +81,7 @@ impl FuelPressureDriver {
             .fuel_tank_pressure_filtered
             .sender()
             .send(BarG(fuel_tank_pressure_pid));
+        STATE.dpr_pressure.sender().send(fuel_tank_pressure_pid);
 
         STATE.pressure_bus_status.sender().send(if has_error {
             SensorStatus::Offline
