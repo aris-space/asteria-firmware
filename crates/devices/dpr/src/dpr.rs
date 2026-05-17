@@ -65,7 +65,6 @@ impl<'a> DPR<'a> {
             match cfg {
                 DPRValve::Enabled { setpoint: stp } => {
                     self.enable(stp);
-                    // ToDo: Is it correct to reset the pid errors here always
                     self.reset();
                 }
                 DPRValve::Disabled => {
@@ -90,7 +89,7 @@ impl<'a> DPR<'a> {
 
     pub fn update_pressure(&mut self) {
         if let Some(p) = self.pressure_receiver.try_changed() {
-            // ToDo: proper handling
+            // ToDo: proper handling maybe put in pressure driver
             if p.is_finite() {
                 self.pressure = p;
             }
@@ -102,11 +101,13 @@ impl<'a> DPR<'a> {
             ActiveNominal => {
                 if self.pressure > SAFETY_LIMIT_BARG {
                     self.loop_state = ActiveOverPressure;
+                    self.status_sender.send(self.loop_state);
                 }
             }
             ActiveOverPressure => {
                 if self.pressure < SAFETY_LIMIT_BARG {
-                    self.loop_state = ActiveOverPressure;
+                    self.loop_state = ActiveNominal;
+                    self.status_sender.send(self.loop_state);
                 }
             }
             Passive => {}
@@ -119,14 +120,8 @@ impl<'a> DPR<'a> {
                 let elapsed_ms = self.last_time.elapsed().as_millis() as f32;
                 let opening_time = self.pid.update(self.pressure, elapsed_ms);
 
-                let opening_time_clamped = if opening_time.is_nan() {
-                    0.0
-                } else {
-                    opening_time.clamp(self.pid.min_ms, self.pid.max_ms)
-                };
-
                 self.last_time = Instant::now();
-                self.actuate_valve(opening_time_clamped).await;
+                self.actuate_valve(opening_time).await;
             }
             _ => {
                 self.valve_pin.set_low();
@@ -135,9 +130,9 @@ impl<'a> DPR<'a> {
         }
     }
 
-    pub async fn actuate_valve(&mut self, time_ms: f32) {
+    pub async fn actuate_valve(&mut self, time_ms: u64) {
         self.valve_pin.set_high();
-        self.mindful_await(time_ms as u64).await;
+        self.mindful_await(time_ms).await;
         self.valve_pin.set_low();
     }
 

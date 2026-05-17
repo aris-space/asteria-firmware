@@ -39,18 +39,22 @@ impl PID {
         }
     }
 
-    pub fn update(&mut self, pressure: f32, elapsed_time_s: f32) -> f32 {
+    pub fn update(&mut self, pressure: f32, elapsed_time_s: f32) -> u64 {
         self.error.p = self.setpoint - pressure;
 
+        // If pressure is bigger than setpoint, don't open at all
         if self.error.p < 0.0 {
-            return f32::NAN;
+            return 0
         }
 
         self.error.i += self.error.p * elapsed_time_s;
         self.error.d = (self.error.p - self.error.prev_p) / elapsed_time_s;
         self.error.prev_p = self.error.p;
 
-        self.gain.p * self.error.p + self.gain.i * self.error.i + self.gain.d * self.error.d
+        (self.gain.p * self.error.p
+            + self.gain.i * self.error.i
+            + self.gain.d * self.error.d
+        ).clamp(self.min_ms, self.max_ms) as u64
     }
 
     pub fn reset(&mut self) {

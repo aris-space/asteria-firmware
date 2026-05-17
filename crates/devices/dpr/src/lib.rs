@@ -38,7 +38,6 @@ pub async fn pid_controller(
 
         // Check for overpressure
         dpr.handle_overpressure();
-        // ToDo: implement state update send (maybe)
 
         // Compute controller output and actuate valve
         dpr.step().await;

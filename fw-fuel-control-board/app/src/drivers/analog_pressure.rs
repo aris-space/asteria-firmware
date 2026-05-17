@@ -48,6 +48,8 @@ impl FuelPressureDriver {
             &mut self.fuel_tank_pressure_2_avg,
             value.fuel_tank_pressure_2,
         );
+        
+        let filtered = get_filtered_tank_p(value.fuel_tank_pressure_1, value.fuel_tank_pressure_2);
 
         STATE
             .pressurization_pressure
@@ -59,11 +61,13 @@ impl FuelPressureDriver {
             .send(dp_fuel_control_board::FuelTankPressure {
                 fuel_tank_pressure_sensor_1: BarG(value.fuel_tank_pressure_1),
                 fuel_tank_pressure_sensor_2: BarG(value.fuel_tank_pressure_2),
-                fuel_tank_pressure_filtered: BarG(get_filtered_tank_p(
-                    value.fuel_tank_pressure_1,
-                    value.fuel_tank_pressure_2,
-                )),
+                fuel_tank_pressure_filtered: BarG(filtered
+                ),
             });
+        
+        STATE.dpr_pressure.sender().send(
+            filtered
+        );
 
         STATE.pressure_bus_status.sender().send(if has_error {
             SensorStatus::Offline
