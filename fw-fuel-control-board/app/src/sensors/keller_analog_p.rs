@@ -8,7 +8,6 @@ use embassy_stm32::Peri;
 use embassy_stm32::adc::AdcChannel;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH3, DMA1_CH4, DMA2_CH3, PB13, PC0, PC1};
 use embassy_time::{Duration, Ticker};
-use embedded_utils::info;
 use trafag_pressure::ADCPressure;
 use trafag_pressure::pressures::TrafagPSens;
 
@@ -80,13 +79,7 @@ pub async fn fuel_pressure_acquisition(pressure_handles: FuelPressureHandles) {
             fuel_tank_pressure_2: fuel_tank_pressure_2_handle.read_pressure(Irqs).await,
         };
 
-        let filtered = data_publisher.update(measurement);
-        info!(
-            "Pressurization pressure: {}",
-            filtered.pressurization_pressure
-        );
-        info!("Fuel tank pressure 1: {}", filtered.fuel_tank_pressure_1);
-        info!("Fuel tank pressure 2: {}", filtered.fuel_tank_pressure_2);
+        data_publisher.update(measurement);
         ticker.next().await;
     }
 }

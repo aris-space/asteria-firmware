@@ -3,9 +3,13 @@ use datatypes::status::SensorStatus;
 use datatypes::units::BarG;
 use filters::GaussianMovingAverage;
 
-const FILTER_WINDOW: usize = 10;
-const FILTER_MEAN: f32 = 3.0;
-const FILTER_SIGMA: f32 = 9.0;
+const PID_FILTER_WINDOW: usize = 7;
+const PID_FILTER_MEAN: f32 = 6.0;
+const PID_FILTER_SIGMA: f32 = 2.0;
+
+const CAN_FILTER_WINDOW: usize = 25;
+const CAN_FILTER_MEAN: f32 = 24.0;
+const CAN_FILTER_SIGMA: f32 = 7.0;
 
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -16,17 +20,25 @@ pub struct FuelPressureMeasurementRaw {
 }
 
 pub struct FuelPressureDriver {
-    pressurization_pressure_avg: GaussianMovingAverage<FILTER_WINDOW>,
-    fuel_tank_pressure_1_avg: GaussianMovingAverage<FILTER_WINDOW>,
-    fuel_tank_pressure_2_avg: GaussianMovingAverage<FILTER_WINDOW>,
+    pressurization_pressure_avg: GaussianMovingAverage<CAN_FILTER_WINDOW>,
+    fuel_tank_pressure_1_avg: GaussianMovingAverage<CAN_FILTER_WINDOW>,
+    fuel_tank_pressure_2_avg: GaussianMovingAverage<CAN_FILTER_WINDOW>,
+    fuel_tank_pressure_pid_avg: GaussianMovingAverage<PID_FILTER_WINDOW>,
 }
 
 impl FuelPressureDriver {
     pub fn new() -> Self {
         Self {
-            pressurization_pressure_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
-            fuel_tank_pressure_1_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
-            fuel_tank_pressure_2_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
+            pressurization_pressure_avg: GaussianMovingAverage::new(
+                CAN_FILTER_SIGMA,
+                CAN_FILTER_MEAN,
+            ),
+            fuel_tank_pressure_1_avg: GaussianMovingAverage::new(CAN_FILTER_SIGMA, CAN_FILTER_MEAN),
+            fuel_tank_pressure_2_avg: GaussianMovingAverage::new(CAN_FILTER_SIGMA, CAN_FILTER_MEAN),
+            fuel_tank_pressure_pid_avg: GaussianMovingAverage::new(
+                PID_FILTER_SIGMA,
+                PID_FILTER_MEAN,
+            ),
         }
     }
 
@@ -34,6 +46,11 @@ impl FuelPressureDriver {
         let has_error = !value.pressurization_pressure.is_finite()
             || !value.fuel_tank_pressure_1.is_finite()
             || !value.fuel_tank_pressure_2.is_finite();
+
+        let fuel_tank_pressure_pid = update_if_finite(
+            &mut self.fuel_tank_pressure_pid_avg,
+            get_filtered_tank_p(value.fuel_tank_pressure_1, value.fuel_tank_pressure_2),
+        );
 
         value.pressurization_pressure = update_if_finite(
             &mut self.pressurization_pressure_avg,
@@ -63,10 +80,7 @@ impl FuelPressureDriver {
         STATE
             .fuel_tank_pressure_filtered
             .sender()
-            .send(BarG(get_filtered_tank_p(
-                value.fuel_tank_pressure_1,
-                value.fuel_tank_pressure_2,
-            )));
+            .send(BarG(fuel_tank_pressure_pid));
 
         STATE.pressure_bus_status.sender().send(if has_error {
             SensorStatus::Offline
@@ -78,7 +92,7 @@ impl FuelPressureDriver {
     }
 }
 
-fn update_if_finite(avg: &mut GaussianMovingAverage<FILTER_WINDOW>, value: f32) -> f32 {
+fn update_if_finite<const SIZE: usize>(avg: &mut GaussianMovingAverage<SIZE>, value: f32) -> f32 {
     if value.is_finite() {
         avg.update(value)
     } else {
