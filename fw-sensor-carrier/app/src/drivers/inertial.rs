@@ -178,21 +178,17 @@ impl<'a> InertialDriver<'a> {
         ));
 
         // Taken from https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml?#igrfwmm
-        // Calculated for Gadmen, Switzerland
-        // Model Used: 	WMM-2025
-        // Latitude: 	46° 44' 15" N
-        // Longitude: 	8° 21' 8" E
-        // Date 	Declination
-        // 2025-05-26 	3° 24' E  ± 0° 22'  changing by  0° 7' E per year
-        // const DECLINATION_DEG: f32 = 3.4;
+        // Calculated for Gadmen Range, Switzerland
+        // Model Used:  WMMHR-2025
+        // Latitude:    46° 44' 59" N
+        // Longitude:   8° 23' 11" E
+        // Elevation:   1606.0 m Mean Sea Level
+        //
+        // 2026-05-18   Declination: 3° 28' 56" E
+        //              changing by +0° 7' 24"/yr
+        //              uncertainty ±0° 20' (1σ)
+        const DECLINATION_DEG: f32 = 3.4822;
 
-        // Calculated for Constancia, Portugal
-        // Latitude: 	39° 25' 32" N
-        // Longitude: 	8° 17' 29" W
-        // Elevation: 	160.0 m Mean Sea Level
-        // Date     Declination
-        // 2025-10-12 	-0° 47' 48" changing by 0° 9' 13"/yr
-        const DECLINATION_DEG: f32 = -0.7952;
         const DECLINATION_RAD: f32 = DECLINATION_DEG.to_radians();
 
         // rotate around the world-up axis by –declination → TRUE-north quaternion
