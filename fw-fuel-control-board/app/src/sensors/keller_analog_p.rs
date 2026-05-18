@@ -4,10 +4,12 @@ use crate::sensors::{
     ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES, FUEL_TANK_PRESSURE_1_RANGE,
     FUEL_TANK_PRESSURE_2_RANGE, PRESSURIZATION_PRESSURE_RANGE,
 };
+use embassy_futures::join::join3;
 use embassy_stm32::Peri;
 use embassy_stm32::adc::AdcChannel;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH3, DMA1_CH4, DMA2_CH3, PB13, PC0, PC1};
 use embassy_time::{Duration, Ticker};
+use embedded_utils::fmt::info;
 use trafag_pressure::ADCPressure;
 use trafag_pressure::pressures::TrafagPSens;
 
@@ -69,15 +71,27 @@ pub async fn fuel_pressure_acquisition(pressure_handles: FuelPressureHandles) {
     // are not connected to VREFINT and cannot read it out themselves.
     fuel_tank_pressure_1_handle.vref_calib = pressurization_pressure_handle.vref_calib;
     fuel_tank_pressure_2_handle.vref_calib = pressurization_pressure_handle.vref_calib;
-    let mut ticker = Ticker::every(Duration::from_millis(
-        (1000.0 / ACQ_PRESSURE_FREQ_HZ) as u64,
+    let mut ticker = Ticker::every(Duration::from_micros(
+        (1_000_000.0 / ACQ_PRESSURE_FREQ_HZ + 0.5) as u64,
     ));
     loop {
+        let (pressurization_pressure, fuel_tank_pressure_1, fuel_tank_pressure_2) = join3(
+            pressurization_pressure_handle.read_pressure(Irqs),
+            fuel_tank_pressure_1_handle.read_pressure(Irqs),
+            fuel_tank_pressure_2_handle.read_pressure(Irqs),
+        )
+        .await;
+
         let measurement = FuelPressureMeasurementRaw {
-            pressurization_pressure: pressurization_pressure_handle.read_pressure(Irqs).await,
-            fuel_tank_pressure_1: fuel_tank_pressure_1_handle.read_pressure(Irqs).await,
-            fuel_tank_pressure_2: fuel_tank_pressure_2_handle.read_pressure(Irqs).await,
+            pressurization_pressure,
+            fuel_tank_pressure_1,
+            fuel_tank_pressure_2,
         };
+
+        info!(
+            "Pressurization pressure: {}",
+            measurement.pressurization_pressure
+        );
 
         data_publisher.update(measurement);
         ticker.next().await;

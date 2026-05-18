@@ -33,17 +33,6 @@ pub async fn buzzer_task(mut pwm: SimplePwm<'static, TIM3>) {
             BuzzerState::Error => {}
             BuzzerState::Idle => {
                 pwm.set_duty(Ch4, off);
-
-                if Instant::now() - status_beep_time >= STATUS_BEEP_INTERVAL {
-                    pwm.set_duty(Ch4, on);
-                    Timer::after(Duration::from_millis(100)).await;
-                    pwm.set_duty(Ch4, off);
-                    Timer::after(Duration::from_millis(100)).await;
-                    pwm.set_duty(Ch4, on);
-                    Timer::after(Duration::from_millis(100)).await;
-                    pwm.set_duty(Ch4, off);
-                    status_beep_time = Instant::now();
-                }
             }
         }
         Timer::after(Duration::from_millis(500)).await;
