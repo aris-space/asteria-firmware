@@ -10,3 +10,10 @@ embassy-executor.workspace = true
 embassy-stm32.workspace = true
 embassy-time.workspace = true
 embassy-sync.workspace = true
+
+
+defmt = { version = "0.3", optional = true }
+embedded-utils = { path = "../../embedded-utils" }
+
+[features]
+defmt = ["dep:defmt"]

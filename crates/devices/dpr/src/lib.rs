@@ -9,6 +9,8 @@ use datatypes::status::DprLoopInfo::{self, *};
 use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::{Receiver, Sender, Watch};
+use embassy_time::Timer;
+use embedded_utils::info;
 
 #[embassy_executor::task]
 pub async fn pid_controller(
@@ -41,5 +43,6 @@ pub async fn pid_controller(
 
         // Compute controller output and actuate valve
         dpr.step().await;
+
     }
 }

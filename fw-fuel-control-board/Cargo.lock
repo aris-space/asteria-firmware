@@ -433,10 +433,12 @@ name = "dpr"
 version = "0.1.0"
 dependencies = [
  "datatypes",
+ "defmt 0.3.100",
  "embassy-executor",
  "embassy-stm32",
  "embassy-sync",
  "embassy-time",
+ "embedded-utils",
 ]
 
 [[package]]

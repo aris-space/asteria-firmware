@@ -35,14 +35,13 @@ impl PID {
             error,
             setpoint,
             min_ms,
-            max_ms,
+            max_ms: 100000.0,
         }
     }
 
     pub fn update(&mut self, pressure: f32, elapsed_time_s: f32) -> u64 {
         self.error.p = self.setpoint - pressure;
 
-        // If pressure is bigger than setpoint, don't open at all
         if self.error.p < 0.0 {
             return 0;
         }

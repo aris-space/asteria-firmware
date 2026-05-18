@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-space.ch>"]
 
 [dependencies]
-dpr = { path = "../../crates/devices/dpr" }
+dpr = { path = "../../crates/devices/dpr", features = ["defmt"] }
 filters = { path = "../../crates/filters" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 trafag-pressure = { path = "../../crates/devices/trafag-pressure" }

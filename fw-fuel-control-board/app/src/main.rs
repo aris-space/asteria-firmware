@@ -51,6 +51,7 @@ use crate::buzzer::buzzer_task;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
+use datatypes::actuator::DPRValve;
 use trafag_pressure::{config_vref_buf, set_adc_configs};
 
 bind_interrupts!(struct Irqs {
@@ -134,12 +135,12 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // Can Bus
-    let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
+    /*let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (tx, rx, _) = can.split();
     let tx = make_multiplexable(tx);
     STATE
         .start_broadcasting(spawner, tx)
-        .expect("failed to start CAN broadcasting");
+        .expect("failed to start CAN broadcasting");*/
 
     spawner.spawn(
         dpr::pid_controller(
@@ -152,7 +153,7 @@ async fn main(spawner: Spawner) -> ! {
         .expect("failed to prepare pid_controller spawn token"),
     );
 
-    spawner.spawn(
+    /*spawner.spawn(
         valve_task(pressurization_vent_valve, fuel_vent_valve)
             .expect("failed to prepare valve_task spawn token"),
     );
@@ -167,10 +168,10 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     spawner.spawn(buzzer_task(buzzer_pwm).expect("failed to prepare buzzer_task spawn token"));
-
+    */
     spawner.spawn(
         fuel_pressure_acquisition(pressure_handles).expect("failed to prepare pressure task"),
-    );
+    );/*
 
     // TODO: Replace PA0/PA1/PA2 with the correct solenoid detection pins
     spawner.spawn(
@@ -180,7 +181,9 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(
         solenoid_current_task(solenoid_current_i2c)
             .expect("failed to prepare solenoid current task"),
-    );
+    );*/
+
+    STATE.dpr_control_loop.sender().send(DPRValve::Enabled {setpoint: 50.0});
 
     #[allow(unreachable_code)]
     loop {

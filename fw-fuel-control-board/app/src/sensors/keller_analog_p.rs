@@ -88,11 +88,6 @@ pub async fn fuel_pressure_acquisition(pressure_handles: FuelPressureHandles) {
             fuel_tank_pressure_2,
         };
 
-        info!(
-            "Pressurization pressure: {}",
-            measurement.pressurization_pressure
-        );
-
         data_publisher.update(measurement);
         ticker.next().await;
     }

@@ -6,15 +6,16 @@ use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::{Receiver, Sender, Watch};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
+use embedded_utils::info;
 
 const SAFETY_LIMIT_BARG: f32 = 52.0;
 const RELAXED_TICK_DURATION: Duration = Duration::from_millis(50);
-const CRITICAL_TICK_DURATION: Duration = Duration::from_millis(2);
+const CRITICAL_TICK_DURATION: Duration = Duration::from_millis(1);
 
 pub const GAINS: PIDGain = PIDGain {
-    p: 1.0,
+    p: 10.0,
     i: 0.0,
-    d: 8.0,
+    d: 0.0,
 };
 
 pub const MIN_TIME_MS: f32 = 25.0;
@@ -121,13 +122,19 @@ impl<'a> DPR<'a> {
                 let opening_time = self.pid.update(self.pressure, elapsed_ms);
 
                 self.last_time = Instant::now();
-                self.actuate_valve(opening_time).await;
+
+                if opening_time > 0 {
+                    self.actuate_valve(opening_time).await;
+                }
             }
             _ => {
                 self.valve_pin.set_low();
                 Timer::after(RELAXED_TICK_DURATION).await;
             }
         }
+
+        info!("[DPR] State: {}, Pressure {}", self.loop_state, self.pressure);
+        Timer::after(RELAXED_TICK_DURATION).await;
     }
 
     pub async fn actuate_valve(&mut self, time_ms: u64) {
@@ -140,7 +147,8 @@ impl<'a> DPR<'a> {
         let _ = with_timeout(Duration::from_millis(time_ms), async {
             loop {
                 self.update_pressure();
-                if self.pressure > SAFETY_LIMIT_BARG {
+                if self.pressure > SAFETY_LIMIT_BARG ||
+                    self.pressure > self.pid.setpoint {
                     return;
                 }
                 Timer::after(CRITICAL_TICK_DURATION).await;
