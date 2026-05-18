@@ -21,8 +21,8 @@ pub const PUB: usize = 1;
 pub const SUB: usize = 2;
 pub const WATCH: usize = 3;
 
-const GNSS_SOURCE_TIMEOUT: Duration = Duration::from_secs(2);
-const GNSS_SOURCE_MIN_DWELL: Duration = Duration::from_secs(1);
+const GNSS_SOURCE_TIMEOUT: Duration = Duration::from_millis(500);
+const GNSS_SOURCE_MIN_DWELL: Duration = Duration::from_secs(5);
 const GNSS_PDOP_SWITCH_MARGIN: f32 = 0.9;
 
 pub static POSITION_WATCH: Watch<ThreadModeRawMutex, PositionData, WATCH> = Watch::new();
