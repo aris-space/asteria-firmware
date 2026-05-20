@@ -75,23 +75,36 @@ impl<'a> InactiveImuSensor<'a> {
 
     pub async fn run(mut self) -> ActiveImuSensor<'a> {
         loop {
-            debug!("{:?} IMU initializing", self.sensor_id);
+            debug!("{:?} initializing", self.sensor_id);
             let sensor = Lsm6dso32::<Interface, Uninitialised>::new(self.iface);
 
             match sensor.init(&mut Delay).await {
-                Ok(mut sensor_init) => {
-                    let res = configure_imu(&mut sensor_init).await;
-                    info!("{:?} IMU initialized", self.sensor_id);
-                    return ActiveImuSensor::new(
-                        self.driver,
-                        sensor_init,
-                        self.int,
-                        self.config,
-                        self.sensor_id,
-                    );
-                }
+                Ok(mut sensor_init) => match configure_imu(&mut sensor_init).await {
+                    Ok(()) => {
+                        info!("{:?} initialized", self.sensor_id);
+                        return ActiveImuSensor::new(
+                            self.driver,
+                            sensor_init,
+                            self.int,
+                            self.config,
+                            self.sensor_id,
+                        );
+                    }
+                    Err(err) => {
+                        error!(
+                            "{:?} configuration failed: {:?}",
+                            self.sensor_id,
+                            Debug2Format(&err)
+                        );
+                        self.iface = sensor_init.destroy();
+                    }
+                },
                 Err(err) => {
-                    // Reclaim the interface from the failed sensor
+                    error!(
+                        "{:?} init failed: {:?}",
+                        self.sensor_id,
+                        Debug2Format(&err.kind)
+                    );
                     self.iface = err.sensor.destroy();
                 }
             }
@@ -212,14 +225,13 @@ impl<'a> ActiveImuSensor<'a> {
             let fifo_level = match self.sensor.read_fifo_level().await {
                 Ok(level) => level,
                 Err(e) => {
-                    error!(
+                    warn!(
                         "{:?} FIFO level read error: {:?}",
                         self.sensor_id,
                         Debug2Format(&e)
                     );
                     error_count += 1;
                     if error_count >= self.config.max_consecutive_errors {
-                        error!("{:?} IMU sensor offline (too many errors)", self.sensor_id);
                         break;
                     }
                     continue;
@@ -241,7 +253,6 @@ impl<'a> ActiveImuSensor<'a> {
                 warn!("{:?} FIFO empty or not enough data", self.sensor_id);
                 error_count += 1;
                 if error_count >= self.config.max_consecutive_errors {
-                    error!("{:?} IMU sensor offline (too many errors)", self.sensor_id);
                     break;
                 }
                 continue;
@@ -252,14 +263,13 @@ impl<'a> ActiveImuSensor<'a> {
                 .read_multiple_fifo_data(&mut fifo_data_out[..fifo_entries])
                 .await
             {
-                error!(
+                warn!(
                     "{:?} FIFO data read error: {:?}",
                     self.sensor_id,
                     Debug2Format(&e)
                 );
                 error_count += 1;
                 if error_count >= self.config.max_consecutive_errors {
-                    error!("{:?} IMU sensor offline (too many errors)", self.sensor_id);
                     break;
                 }
                 continue;
@@ -282,7 +292,7 @@ impl<'a> ActiveImuSensor<'a> {
                     (TagSensor::AccelerometerNC, TagSensor::GyroscopeNC) => (a, b),
                     (TagSensor::GyroscopeNC, TagSensor::AccelerometerNC) => (b, a),
                     other => {
-                        warn!("Unexpected tag in chunk: {:?}", other);
+                        warn!("{:?} unexpected FIFO tag pair: {:?}", self.sensor_id, other);
                         continue;
                     }
                 };
@@ -347,6 +357,8 @@ impl<'a> ActiveImuSensor<'a> {
             // On a successful loop, reset the error counter.
             error_count = 0;
         }
+
+        error!("{:?} offline (too many consecutive errors)", self.sensor_id);
 
         // Transition back to inactive state if too many errors occur.
         let iface = self.sensor.destroy();
