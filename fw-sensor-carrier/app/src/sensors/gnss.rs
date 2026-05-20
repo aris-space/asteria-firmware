@@ -106,13 +106,14 @@ where
                             GpsFix::Fix2D
                             | GpsFix::Fix3D
                             | GpsFix::GPSPlusDeadReckoning
+                            | GpsFix::DeadReckoningOnly
                             | GpsFix::TimeOnlyFix => {
                                 fix_type = stat.fix_type();
                                 break 'outer;
                             }
                             _ => {
-                                // GpsFix::NoFix | GpsFix::DeadReckoningOnly are ok, but we have to wait until
-                                // we do have a fix
+                                // GpsFix::NoFix is ok, but we have to wait until
+                                // we do have a usable fix.
                                 self.attempt = 0;
                                 consecutive_errors = 0;
                             }
@@ -185,8 +186,15 @@ where
                                 //todo: send time to the driver
                             }
                             Ok(PacketRef::NavPvt(pvt))
-                                if matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D) =>
+                                if matches!(
+                                    pvt.fix_type(),
+                                    GpsFix::Fix2D
+                                        | GpsFix::Fix3D
+                                        | GpsFix::GPSPlusDeadReckoning
+                                        | GpsFix::DeadReckoningOnly
+                                ) =>
                             {
+                                // TODO: we might want to check that for the GPS_FIX_OK flag
                                 let data = PvtData {
                                     lon_deg: pvt.lon_degrees(),
                                     lat_deg: pvt.lat_degrees(),
