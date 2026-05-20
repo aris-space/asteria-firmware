@@ -187,7 +187,7 @@ impl<'a> InertialDriver<'a> {
         // 2026-05-18   Declination: 3° 28' 56" E
         //              changing by +0° 7' 24"/yr
         //              uncertainty ±0° 20' (1σ)
-        const DECLINATION_DEG: f32 = 3.4822;
+        const DECLINATION_DEG: f32 = 3.0 + 28.0 / 60.0 + 56.0 / 3600.0;
 
         const DECLINATION_RAD: f32 = DECLINATION_DEG.to_radians();
 
