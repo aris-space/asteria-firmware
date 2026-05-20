@@ -91,6 +91,21 @@ where
             }
         }
     }
+
+    /*todo can we make the top thingy nicer by adding this?
+    // Backoff + recreate
+    async fn handle_retry(&mut self, err: InitError<I2C, E>) {
+        self.attempt_count += 1;
+        let backoff = ExponentialBackoff::new(
+            self.config.base_backoff_ms,
+            self.config.max_backoff_ms,
+        );
+        backoff.wait(self.attempt_count).await;
+        let old_addr = err.sensor.address();
+        let i2c = err.sensor.destroy();
+        self.sensor = Ms5607::new_with_addr(i2c, old_addr);
+    }
+     */
 }
 
 /// Represents the sensor when it is actively taking measurements.
