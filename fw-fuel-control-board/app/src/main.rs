@@ -96,6 +96,12 @@ async fn main(spawner: Spawner) -> ! {
 
     let fuel_dpr_valve = Output::new(p.PB2, Level::Low, Speed::VeryHigh);
 
+    // Solenoid Standby Control
+    let mut sol1_stby = Output::new(p.PB15, Level::High, Speed::Low);
+    let mut sol2_stby = Output::new(p.PB1, Level::High, Speed::Low);
+    sol1_stby.set_high();
+    sol2_stby.set_high();
+
     let buzzer_pwm_pin = PwmPin::new(p.PB7, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
         p.TIM3,
@@ -170,7 +176,6 @@ async fn main(spawner: Spawner) -> ! {
         fuel_pressure_acquisition(pressure_handles).expect("failed to prepare pressure task"),
     );
 
-    // TODO: Replace PA0/PA1/PA2 with the correct solenoid detection pins
     spawner.spawn(
         solenoid_detection_task(p.PC3, p.PB6, p.PC2)
             .expect("failed to prepare solenoid detection task"),
