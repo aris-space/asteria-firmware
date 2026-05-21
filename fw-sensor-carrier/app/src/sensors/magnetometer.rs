@@ -183,10 +183,11 @@ impl<'a> ActiveMagSensor<'a> {
 
                     let calibrated = soft_iron_matrix * (vector - hard_iron_bias);
 
+                    // calibrated is in nT; MagneticField stores raw LSB (1 LSB = 150 nT).
                     let mag_calibrated = MagneticField::new(
-                        calibrated.x as i16 as u16,
-                        calibrated.y as i16 as u16,
-                        calibrated.z as i16 as u16,
+                        (calibrated.x / 150.0) as i16 as u16,
+                        (calibrated.y / 150.0) as i16 as u16,
+                        (calibrated.z / 150.0) as i16 as u16,
                     );
                     let measurement = (now, mag_calibrated);
 
