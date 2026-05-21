@@ -118,14 +118,12 @@ impl<'a> DPR<'a> {
     pub async fn step(&mut self) {
         match self.loop_state {
             ActiveNominal => {
-                let elapsed_ms = self.last_time.elapsed().as_millis() as f32;
-                let opening_time = self.pid.update(self.pressure, elapsed_ms);
+                // let elapsed_ms = self.last_time.elapsed().as_millis() as f32;
+                // let opening_time = self.pid.update(self.pressure, elapsed_ms);
 
-                self.last_time = Instant::now();
-
-                if opening_time > 0 {
-                    self.actuate_valve(opening_time).await;
-                }
+                // self.last_time = Instant::now();
+                self.actuate_valve(self.pid.min_ms as u64).await;
+                self.loop_state = Passive;
             }
             _ => {
                 self.valve_pin.set_low();
