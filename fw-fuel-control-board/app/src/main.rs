@@ -92,11 +92,17 @@ async fn main(spawner: Spawner) -> ! {
     let _yellow = Output::new(p.PC14, Level::High, Speed::Low);
     let red = Output::new(p.PC13, Level::High, Speed::Low);
 
-    // Solenoids (TODO: Change to correct pins!!)
+    // Solenoids
     let pressurization_vent_valve = Output::new(p.PA10, Level::Low, Speed::Medium);
     let fuel_vent_valve = Output::new(p.PB11, Level::Low, Speed::Medium);
 
     let fuel_dpr_valve = Output::new(p.PB2, Level::Low, Speed::VeryHigh);
+
+    // Solenoid Standby Control
+    let mut sol1_stby = Output::new(p.PB15, Level::High, Speed::Low);
+    let mut sol2_stby = Output::new(p.PB1, Level::High, Speed::Low);
+    sol1_stby.set_high();
+    sol2_stby.set_high();
 
     let buzzer_pwm_pin = PwmPin::new(p.PB7, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
