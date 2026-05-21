@@ -269,7 +269,7 @@ impl<'a> ActiveImuSensor<'a> {
 
             let processing_start = Instant::now();
             let measurement_duration = this_data_end.duration_since(this_data_start);
-            let average_dt: f32 = measurement_duration.as_secs_f32() / f32::from(fifo_level / 2);
+            let average_dt: f32 = measurement_duration.as_secs_f32() / (fifo_entries / 2) as f32;
             let dt_multiplier: f32 = average_dt * 1_000_000.0;
 
             // Process each pair of samples.
