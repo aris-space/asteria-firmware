@@ -290,17 +290,17 @@ impl<'a> ActiveImuSensor<'a> {
                 // This transformation transforms the sensor coordinates to the board coordinates.
                 let accel_data = Acceleration::from_raw(
                     AccelerationRaw {
-                        x: -acc.x(),
+                        x: acc.x().saturating_neg(),
                         y: acc.y(),
-                        z: -acc.z(),
+                        z: acc.z().saturating_neg(),
                     },
                     self.sensor.accel_full_scale(),
                 );
                 let gyr_data = AngularRate::from_raw(
                     AngularRateRaw {
-                        x: -gyr.x(),
+                        x: gyr.x().saturating_neg(),
                         y: gyr.y(),
-                        z: -gyr.z(),
+                        z: gyr.z().saturating_neg(),
                     },
                     self.sensor.gyro_full_scale(),
                 );
