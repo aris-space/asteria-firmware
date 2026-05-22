@@ -6,7 +6,7 @@ use embassy_sync::{
     mutex::Mutex,
     once_lock::OnceLock,
     pubsub::{ImmediatePublisher, PubSubChannel},
-    watch::{Sender, Watch},
+    watch::Sender,
 };
 use embassy_time::Instant;
 use embedded_utils::ExtendTime;
@@ -20,8 +20,6 @@ pub const WATCH: usize = 3;
 const PRESSURE_TAU_S: f32 = 120.0;
 const TH_TAU_S: f32 = 20.0;
 
-pub static ENVIRONMENTAL_DRIVER_WATCH: Watch<ThreadModeRawMutex, EnvironmentalData, WATCH> =
-    Watch::new();
 pub static ENVIRONMENTAL_DRIVER_PUBSUB: PubSubChannel<
     ThreadModeRawMutex,
     EnvironmentalData,

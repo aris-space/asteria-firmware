@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::drivers::inertial::ORIENTATION_WATCH;
+use crate::can_io::OUTPUTS;
 use crate::sensors::SensorId;
 use crate::sensors::gnss::PvtData;
 use dp_sensor_carrier::{PositionData, VelocityData};
@@ -8,7 +8,7 @@ use embassy_sync::{
     mutex::Mutex,
     once_lock::OnceLock,
     pubsub::{ImmediatePublisher, PubSubChannel},
-    watch::{Sender, Watch},
+    watch::Sender,
 };
 use embassy_time::{Duration, Instant};
 use embedded_utils::{error, info};
@@ -24,11 +24,9 @@ const GNSS_SOURCE_TIMEOUT: Duration = Duration::from_millis(500);
 const GNSS_SOURCE_MIN_DWELL: Duration = Duration::from_secs(5);
 const GNSS_PDOP_SWITCH_MARGIN: f32 = 0.9;
 
-pub static POSITION_WATCH: Watch<ThreadModeRawMutex, PositionData, WATCH> = Watch::new();
 pub static POSITION_PUBSUB: PubSubChannel<ThreadModeRawMutex, PositionData, CAP, SUB, PUB> =
     PubSubChannel::new();
 
-pub static VELOCITY_WATCH: Watch<ThreadModeRawMutex, VelocityData, WATCH> = Watch::new();
 pub static VELOCITY_PUBSUB: PubSubChannel<ThreadModeRawMutex, VelocityData, CAP, SUB, PUB> =
     PubSubChannel::new();
 
@@ -83,7 +81,8 @@ impl<'a> PositionVelocityTimeDriver<'a> {
             vertical_accuracy: data.vert_accuracy as f32 / 1000.0,
         };
 
-        let orientation = ORIENTATION_WATCH
+        let orientation = OUTPUTS
+            .orientation
             .anon_receiver()
             .try_get()
             .unwrap_or(UnitQuaternion::identity());
