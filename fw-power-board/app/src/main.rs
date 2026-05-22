@@ -6,7 +6,7 @@ mod board;
 mod build_info;
 mod buzzer;
 mod can;
-mod can_impl;
+mod can_io;
 mod power_indicators;
 mod sensor_readout;
 mod unix_time;
