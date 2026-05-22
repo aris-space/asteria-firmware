@@ -15,18 +15,18 @@ const FALLBACK_TH_DT_S: f32 = 1.0;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
-    let mut p0 = signals::PRESSURE_CHANNELS[BAROMETER_0.index()]
+    let mut p0 = signals::BARO_CHANNELS[BAROMETER_0.index()]
         .subscriber()
-        .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
-    let mut p1 = signals::PRESSURE_CHANNELS[BAROMETER_1.index()]
+        .expect("too many subs on BARO_CHANNELS; increase SUBS");
+    let mut p1 = signals::BARO_CHANNELS[BAROMETER_1.index()]
         .subscriber()
-        .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
-    let mut e0 = signals::ENV_CHANNELS[DHT_0.index()]
+        .expect("too many subs on BARO_CHANNELS; increase SUBS");
+    let mut e0 = signals::DHT_CHANNELS[DHT_0.index()]
         .subscriber()
-        .expect("too many subs on ENV_CHANNELS; increase SUBS");
-    let mut e1 = signals::ENV_CHANNELS[DHT_1.index()]
+        .expect("too many subs on DHT_CHANNELS; increase SUBS");
+    let mut e1 = signals::DHT_CHANNELS[DHT_1.index()]
         .subscriber()
-        .expect("too many subs on ENV_CHANNELS; increase SUBS");
+        .expect("too many subs on DHT_CHANNELS; increase SUBS");
 
     let mut pressure_filter = Ema::<f32>::new();
     let mut temp_filter = Ema::<f32>::new();

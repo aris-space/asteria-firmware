@@ -79,7 +79,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                         temperature_c,
                         humidity_rh,
                     };
-                    signals::submit_env_sample(sample);
+                    signals::submit_dht_sample(sample);
                     trace!("{} t={} c rh={} %", self.id, temperature_c, humidity_rh);
                 }
                 Err(e) => {

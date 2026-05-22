@@ -17,12 +17,12 @@ const FALLBACK_DT_S: f32 = 1.0 / BAROMETER_HZ as f32;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
-    let mut sub0 = signals::PRESSURE_CHANNELS[BAROMETER_0.index()]
+    let mut sub0 = signals::BARO_CHANNELS[BAROMETER_0.index()]
         .subscriber()
-        .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
-    let mut sub1 = signals::PRESSURE_CHANNELS[BAROMETER_1.index()]
+        .expect("too many subs on BARO_CHANNELS; increase SUBS");
+    let mut sub1 = signals::BARO_CHANNELS[BAROMETER_1.index()]
         .subscriber()
-        .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
+        .expect("too many subs on BARO_CHANNELS; increase SUBS");
 
     let mut filter = Ema::<f32>::new();
     let mut last_ts: Option<Instant> = None;

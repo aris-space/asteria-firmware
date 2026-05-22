@@ -68,7 +68,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                         pressure_mbar: m.pressure_mbar,
                         temperature_c: m.temperature_c,
                     };
-                    signals::submit_pressure_sample(sample);
+                    signals::submit_baro_sample(sample);
                     trace!("{} p={} mbar", self.id, m.pressure_mbar);
                 }
                 Err(e) => {

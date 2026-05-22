@@ -44,7 +44,7 @@ macro_rules! define_sample_channels {
 define_sample_channels!(IMU_CHANNELS, submit_imu_sample, submit_imu_sample_batch:
     ImuSample, cap = 64, subs = 1, count = IMU_COUNT);
 
-define_sample_channels!(PRESSURE_CHANNELS, submit_pressure_sample, submit_pressure_sample_batch:
+define_sample_channels!(BARO_CHANNELS, submit_baro_sample, submit_baro_sample_batch:
     BaroSample, cap = 16, subs = 2, count = BAROMETER_COUNT);
 
 define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch:
@@ -53,7 +53,7 @@ define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch
 define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_batch:
     GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);
 
-define_sample_channels!(ENV_CHANNELS, submit_env_sample, submit_env_sample_batch:
+define_sample_channels!(DHT_CHANNELS, submit_dht_sample, submit_dht_sample_batch:
     DhtSample, cap = 8, subs = 1, count = DHT_COUNT);
 
 pub static PRESSURE_WATCH: Watch<CriticalSectionRawMutex, Pressure, 1> = Watch::new();
