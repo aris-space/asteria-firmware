@@ -7,9 +7,9 @@ use ublox::{GpsFix, PacketRef, Parser};
 use core::sync::atomic::Ordering;
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
-use crate::measurements::{GnssSample, Pvt};
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
+use crate::types::{GnssSample, Pvt};
 
 struct Inactive<'a, RX> {
     rx: RX,

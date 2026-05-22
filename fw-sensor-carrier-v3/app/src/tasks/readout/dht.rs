@@ -7,10 +7,10 @@ use embassy_time::{Delay, Duration, Instant, Timer};
 use sht4x::{Precision, Sht4xAsync};
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
-use crate::measurements::EnvSample;
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{DHT_STATUS, DhtId, SensorStatus};
 use crate::signals;
+use crate::types::DhtSample;
 
 pub const SAMPLE_HZ: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
@@ -73,7 +73,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                     errors = 0;
                     let temperature_c: f32 = m.temperature_celsius().to_num();
                     let humidity_rh: f32 = m.humidity_percent().to_num();
-                    let sample = EnvSample {
+                    let sample = DhtSample {
                         src: self.id,
                         ts: Instant::now() - self.delay,
                         temperature_c,

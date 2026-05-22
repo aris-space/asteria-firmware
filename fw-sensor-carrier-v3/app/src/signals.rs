@@ -9,11 +9,11 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 
-use crate::measurements::{
-    EnvSample, Environment, GnssSample, ImuSample, Inertial, MagSample, Orientation, Position,
-    Pressure, PressureSample, RawMagSample, Velocity,
-};
 use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
+use crate::types::{
+    BaroSample, DhtSample, Environment, GnssSample, ImuSample, Inertial, MagSample, Orientation,
+    Position, Pressure, RawMagSample, Velocity,
+};
 
 macro_rules! define_sample_channels {
     (
@@ -45,7 +45,7 @@ define_sample_channels!(IMU_CHANNELS, submit_imu_sample, submit_imu_sample_batch
     ImuSample, cap = 64, subs = 1, count = IMU_COUNT);
 
 define_sample_channels!(PRESSURE_CHANNELS, submit_pressure_sample, submit_pressure_sample_batch:
-    PressureSample, cap = 16, subs = 2, count = BAROMETER_COUNT);
+    BaroSample, cap = 16, subs = 2, count = BAROMETER_COUNT);
 
 define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch:
     RawMagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
@@ -54,7 +54,7 @@ define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_ba
     GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);
 
 define_sample_channels!(ENV_CHANNELS, submit_env_sample, submit_env_sample_batch:
-    EnvSample, cap = 8, subs = 1, count = DHT_COUNT);
+    DhtSample, cap = 8, subs = 1, count = DHT_COUNT);
 
 pub static PRESSURE_WATCH: Watch<CriticalSectionRawMutex, Pressure, 1> = Watch::new();
 pub static ENVIRONMENT_WATCH: Watch<CriticalSectionRawMutex, Environment, 1> = Watch::new();

@@ -4,10 +4,10 @@ use embassy_time::{Duration, Instant};
 use imu_fusion::{Fusion, FusionAhrsSettings, FusionVector};
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
-use crate::measurements::{ImuSample, Inertial, MagSample, Orientation};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
+use crate::types::{ImuSample, Inertial, MagSample, Orientation};
 
 // Taken from https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml?#igrfwmm
 // Calculated for Gadmen Range, Switzerland

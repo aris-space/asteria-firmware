@@ -7,10 +7,10 @@ use embassy_time::{Delay, Duration, Instant, Timer};
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
-use crate::measurements::RawMagSample;
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{MAGNETOMETER_STATUS, MagnetometerId, SensorStatus};
 use crate::signals;
+use crate::types::RawMagSample;
 
 /// Matches `MagOutputDataRate::Hz10` set in `initialise`.
 pub const SAMPLE_HZ: u32 = 10;

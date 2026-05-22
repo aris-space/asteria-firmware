@@ -4,9 +4,9 @@ use embassy_time::{Duration, Instant};
 use nalgebra::Vector3;
 use ublox::GpsFix;
 
-use crate::measurements::{GnssSample, Position, Pvt, Velocity};
 use crate::sensors::{GNSS_0, GNSS_1, GnssId};
 use crate::signals;
+use crate::types::{GnssSample, Position, Pvt, Velocity};
 
 const GNSS_SOURCE_TIMEOUT: Duration = Duration::from_millis(500);
 const GNSS_SOURCE_MIN_DWELL: Duration = Duration::from_secs(5);

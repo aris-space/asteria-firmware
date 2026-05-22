@@ -3,10 +3,10 @@ use embassy_futures::select::{Either, select};
 use embassy_time::Instant;
 
 use crate::filters::Ema;
-use crate::measurements::{Pressure, PressureSample};
 use crate::sensors::{BAROMETER_0, BAROMETER_1};
 use crate::signals;
 use crate::tasks::readout::barometer::SAMPLE_HZ as BAROMETER_HZ;
+use crate::types::{BaroSample, Pressure};
 
 /// EMA time constant. Sets a sample-rate-independent low-pass with
 /// 3 dB cutoff ~ 1 / (2 * pi * tau) Hz.
@@ -29,7 +29,7 @@ pub async fn task() -> ! {
     let sender = signals::PRESSURE_WATCH.sender();
 
     loop {
-        let sample: PressureSample =
+        let sample: BaroSample =
             match select(sub0.next_message_pure(), sub1.next_message_pure()).await {
                 Either::First(s) | Either::Second(s) => s,
             };

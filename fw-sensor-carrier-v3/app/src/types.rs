@@ -19,7 +19,7 @@ pub struct ImuSample {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct PressureSample {
+pub struct BaroSample {
     pub src: BarometerId,
     pub ts: Instant,
     pub pressure_mbar: f32,
@@ -27,7 +27,7 @@ pub struct PressureSample {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct EnvSample {
+pub struct DhtSample {
     pub src: DhtId,
     pub ts: Instant,
     pub temperature_c: f32,

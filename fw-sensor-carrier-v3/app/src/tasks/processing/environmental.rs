@@ -3,9 +3,9 @@ use embassy_futures::select::{Either4, select4};
 use embassy_time::Instant;
 
 use crate::filters::Ema;
-use crate::measurements::Environment;
 use crate::sensors::{BAROMETER_0, BAROMETER_1, DHT_0, DHT_1};
 use crate::signals;
+use crate::types::Environment;
 
 const PRESSURE_TAU_S: f32 = 120.0;
 const TH_TAU_S: f32 = 20.0;
