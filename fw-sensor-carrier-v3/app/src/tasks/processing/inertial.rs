@@ -6,7 +6,7 @@ use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
-use crate::tasks::readout::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
+use crate::tasks::readout::imu::{GYRO_RANGE_DPS, IMU_ODR_HZ, IMU_TARGET_DT};
 use crate::types::{ImuSample, Inertial, MagSample, Orientation};
 
 // Taken from https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml?#igrfwmm
@@ -122,7 +122,7 @@ pub async fn task() -> ! {
 
 fn fusion_instance() -> Fusion {
     let mut s = FusionAhrsSettings::new();
-    s.gyr_range = 2_000.0;
+    s.gyr_range = GYRO_RANGE_DPS;
     s.gain = 2.0;
     s.acc_rejection = 10.0;
     s.recovery_trigger_period = 300; // ~360 ms at 833 Hz

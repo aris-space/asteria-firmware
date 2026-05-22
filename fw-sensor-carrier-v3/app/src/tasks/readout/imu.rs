@@ -6,9 +6,9 @@ use embassy_stm32::mode::Async;
 use embassy_time::{Delay, Duration, Instant, Timer, with_timeout};
 use lsm6dso32::spi::Lsm6Dso32SpiInterface;
 use lsm6dso32::{
-    Acceleration, AccelerationRaw, AccelerometerFullScale, AngularRate, AngularRateRaw,
-    FifoDataOut, FifoMode, GyroscopeFullScale, Initialised, Int1Config, Lsm6dso32, TagSensor,
-    Uninitialised,
+    AccelBatchDataRate, Acceleration, AccelerationRaw, AccelerometerFullScale, AccelerometerOdr,
+    AngularRate, AngularRateRaw, FifoDataOut, FifoMode, GyroBatchDataRate, GyroscopeFullScale,
+    GyroscopeOdr, Initialised, Int1Config, Lsm6dso32, TagSensor, Uninitialised,
 };
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
@@ -17,35 +17,56 @@ use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
 use crate::types::ImuSample;
 
+/// Accelerometer output data rate. Should match [`IMU_ODR_HZ`]
+const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
+/// Gyroscope output data rate. Should match [`IMU_ODR_HZ`]
+const GYRO_ODR: GyroscopeOdr = GyroscopeOdr::Hz833;
+/// Accelerometer batch data rate. Should match [`ACCEL_ODR`]
+const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
+/// Gyroscope batch data rate. Should match [`GYRO_ODR`]
+const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
+/// IMU output data rate in Hz. MUST match the above ODR and BDR settings.
+/// Do not change without also updating the above settings!
 pub const IMU_ODR_HZ: u32 = 833;
+/// Target IMU loop data rate
 pub const IMU_TARGET_DT: f32 = 1.0 / IMU_ODR_HZ as f32;
+/// Accelerometer full-scale range
+const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G8;
+/// Gyroscope full-scale range
+const GYRO_FULL_SCALE: GyroscopeFullScale = GyroscopeFullScale::Dps2000;
+pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
+    GyroscopeFullScale::Dps250 => 250.0,
+    GyroscopeFullScale::Dps500 => 500.0,
+    GyroscopeFullScale::Dps1000 => 1000.0,
+    GyroscopeFullScale::Dps2000 => 2000.0,
+};
 
+/// Local scratch buffer for FIFO drains. Sized larger than the expected
+/// per-interrupt batch; the sensor's hardware FIFO is independent.
 const FIFO_BUFFER_SIZE: usize = 512;
+/// FIFO watermark in entries. With paired accel+gyro at 833 Hz, the
+/// watermark interrupt fires every ~15.6 ms (13 pairs).
 const FIFO_WATERMARK: u16 = 26;
+/// Max wait for the FIFO watermark interrupt before retrying. Roughly
+/// 2x the expected period, to catch a missed/stuck interrupt.
 const LOOP_TIMEOUT_MS: u64 = 30;
 
 async fn configure<SPI: embedded_hal_async::spi::SpiDevice>(
     sensor: &mut Lsm6dso32<Lsm6Dso32SpiInterface<SPI>, Initialised>,
 ) -> Result<(), ()> {
     sensor
-        .set_accelerometer_odr_and_full_scale(
-            Some(lsm6dso32::AccelerometerOdr::Hz833),
-            Some(AccelerometerFullScale::G8),
-        )
+        .set_accelerometer_odr_and_full_scale(Some(ACCEL_ODR), Some(ACCEL_FULL_SCALE))
         .await
         .map_err(|_| ())?;
     sensor
-        .set_gyroscope_odr_and_full_scale(
-            Some(lsm6dso32::GyroscopeOdr::Hz833),
-            Some(GyroscopeFullScale::Dps2000),
-        )
+        .set_gyroscope_odr_and_full_scale(Some(GYRO_ODR), Some(GYRO_FULL_SCALE))
         .await
         .map_err(|_| ())?;
     sensor.set_fifo_mode(FifoMode::Fifo).await.map_err(|_| ())?;
     sensor
         .set_fifo_batch_data_rates(
-            Some(lsm6dso32::AccelBatchDataRate::Hz833),
-            Some(lsm6dso32::GyroBatchDataRate::Hz833),
+            Some(ACCEL_BDR),
+            Some(GYRO_BDR),
             Some(lsm6dso32::TempBatchDataRate::NotBatched),
             Some(lsm6dso32::DecTsBatch::NotBatched),
         )
