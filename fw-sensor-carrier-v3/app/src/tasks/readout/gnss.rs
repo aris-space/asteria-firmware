@@ -4,8 +4,10 @@ use embassy_stm32::usart::UartRx;
 use embassy_time::Duration;
 use ublox::{GpsFix, PacketRef, Parser};
 
+use core::sync::atomic::Ordering;
+
 use crate::measurements::{GnssSample, PvtData, Timestamped};
-use crate::sensors::GnssId;
+use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
 use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
@@ -70,6 +72,7 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
 
             if got_fix {
                 info!("gnss: active (fix acquired)");
+                GNSS_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
                 return Active {
                     rx: self.rx,
                     parser: self.parser,
@@ -152,6 +155,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
 
             if self.errors >= MAX_CONSECUTIVE_ERRORS {
                 warn!("gnss: inactive (too many errors)");
+                GNSS_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
                 return Inactive {
                     rx: self.rx,
                     parser: self.parser,

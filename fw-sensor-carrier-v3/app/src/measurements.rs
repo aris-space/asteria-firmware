@@ -3,7 +3,7 @@
 use embassy_time::{Duration, Instant};
 use lsm6dso32::types::{Acceleration, AngularRate};
 
-use crate::sensors::{BarometerId, GnssId, ImuId, MagnetometerId};
+use crate::sensors::{BarometerId, DhtId, GnssId, ImuId, MagnetometerId};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Timestamped<T> {
@@ -55,6 +55,9 @@ pub struct GnssSample {
     pub data: Timestamped<PvtData>,
 }
 
+/// Raw magnetometer sample (sensor-frame, raw counts).
+///
+/// Board-frame axis flips and nT scaling happen in the processing task.
 #[derive(Clone, Copy, Debug)]
 pub struct MagSample {
     pub sensor_id: MagnetometerId,
@@ -66,6 +69,18 @@ pub struct MagData {
     pub x: i16,
     pub y: i16,
     pub z: i16,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EnvSample {
+    pub sensor_id: DhtId,
+    pub data: Timestamped<EnvData>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EnvData {
+    pub temperature_c: f32,
+    pub humidity_rh: f32,
 }
 
 #[derive(Clone, Copy, Debug)]

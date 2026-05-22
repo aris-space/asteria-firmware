@@ -6,25 +6,24 @@ use embassy_stm32::usart::UartRx;
 use embassy_time::Duration;
 
 use crate::resources::buses::SharedI2cBus;
-use crate::resources::flash::BoardFlash;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
-    BAROMETER_0, BAROMETER_1, GNSS_0, GNSS_1, IMU_0, IMU_1, MAGNETOMETER_0, MAGNETOMETER_1,
+    BAROMETER_0, BAROMETER_1, DHT_0, DHT_1, GNSS_0, GNSS_1, IMU_0, IMU_1, MAGNETOMETER_0,
+    MAGNETOMETER_1,
 };
-use crate::storage;
-use defmt_brtt::DefmtConsumer;
 
 use crate::{resources, tasks};
 
 const BAROMETER_DELAY: Duration = Duration::from_millis(20); // TODO: calibrate
 const MAGNETOMETER_DELAY: Duration = Duration::from_millis(0); // TODO: calibrate
 const GNSS_DELAY: Duration = Duration::from_millis(100); // TODO: calibrate
+const DHT_DELAY: Duration = Duration::from_millis(0);
 
 #[allow(dead_code)]
 pub struct PreparedBoard {
     pub services: ServiceResources,
     pub sensors: SensorResources,
-    pub flash: &'static mut BoardFlash,
+    pub can: embassy_stm32::can::Can<'static>,
 }
 
 #[allow(dead_code)]
@@ -60,10 +59,10 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let bus1 = resources.bus1.setup();
     let bus2 = resources.bus2.setup();
 
-    let flash = resources.flash.setup();
+    let can = resources.can_bus.setup();
 
     PreparedBoard {
-        flash,
+        can,
         services: ServiceResources {
             green_led,
             yellow_led,
@@ -80,16 +79,12 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     }
 }
 
-pub fn spawn_tasks(
-    board: PreparedBoard,
-    thread_spawner: Spawner,
-    level_0_spawner: SendSpawner,
-    defmt_consumer: DefmtConsumer,
-) {
+pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawner: SendSpawner) {
     level_0_spawner.spawn(
         tasks::blinky::task(board.services.yellow_led).expect("Failed to spawn blinky task"),
     );
 
+    // --- Readouts -----------------------------------------------------------
     let (imu1_spi, imu1_int1) = board.sensors.imu1;
     let (imu2_spi, imu2_int1) = board.sensors.imu2;
     level_0_spawner.spawn(
@@ -127,10 +122,33 @@ pub fn spawn_tasks(
     );
 
     level_0_spawner.spawn(
-        tasks::processing::inertial::task().expect("Failed to spawn inertial processing task"),
+        tasks::readout::dht::task(board.sensors.bus1, DHT_0, DHT_DELAY)
+            .expect("Failed to spawn DHT 0 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::dht::task(board.sensors.bus2, DHT_1, DHT_DELAY)
+            .expect("Failed to spawn DHT 1 task"),
     );
 
-    // Storage/config init runs on thread-mode so blocking flash I/O never starves readouts.
+    // --- Processing ---------------------------------------------------------
     thread_spawner
-        .spawn(storage::task(board.flash, defmt_consumer).expect("Failed to spawn storage task"));
+        .spawn(tasks::processing::pressure::task().expect("Failed to spawn pressure proc task"));
+    thread_spawner.spawn(
+        tasks::processing::environmental::task().expect("Failed to spawn environmental proc task"),
+    );
+    thread_spawner.spawn(
+        tasks::processing::magnetic_field::task()
+            .expect("Failed to spawn magnetic field proc task"),
+    );
+    thread_spawner
+        .spawn(tasks::processing::inertial::task().expect("Failed to spawn inertial proc task"));
+    thread_spawner.spawn(
+        tasks::processing::position_velocity::task()
+            .expect("Failed to spawn position/velocity proc task"),
+    );
+
+    // --- CAN ----------------------------------------------------------------
+    let (can_tx, can_rx, _options) = board.can.split();
+    thread_spawner.spawn(tasks::can::rx_task(can_rx).expect("Failed to spawn CAN RX task"));
+    tasks::can::spawn_tx_tasks(can_tx, thread_spawner);
 }

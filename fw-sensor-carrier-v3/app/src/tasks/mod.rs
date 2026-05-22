@@ -1,12 +1,14 @@
-//! Task modules.
+//! Tasks.
 //!
-//! Sensor tasks follow the generic-inner / concrete-wrapper pattern:
-//!   1. A generic `run_inner(...)` with embedded-hal trait bounds (board-agnostic).
-//!   2. A `#[embassy_executor::task]` wrapper `task(...)` with concrete types that delegates to it.
+//! Readouts (`readout`) drive individual sensors and publish raw samples to
+//! per-sensor signals. Processing tasks (`processing`) consume raw samples and
+//! publish derived/fused signals. CAN (`can`) transmits derived signals to the
+//! bus and listens for control frames.
 
 use embassy_time::Duration;
 
 pub mod blinky;
+pub mod can;
 pub mod processing;
 pub mod readout;
 

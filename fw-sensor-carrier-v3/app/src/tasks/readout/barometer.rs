@@ -4,9 +4,11 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use ms5607::{Ms5607, Oversampling};
 
+use core::sync::atomic::Ordering;
+
 use crate::measurements::{PressureData, PressureSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
-use crate::sensors::BarometerId;
+use crate::sensors::{BAROMETER_STATUS, BarometerId, SensorStatus};
 use crate::signals;
 use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
@@ -25,6 +27,8 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
             match self.sensor.init(&mut Delay).await {
                 Ok(sensor) => {
                     info!("barometer: active");
+                    BAROMETER_STATUS[self.id.index()]
+                        .store(SensorStatus::Active, Ordering::Relaxed);
                     return Active {
                         sensor,
                         id: self.id,
@@ -87,6 +91,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         }
 
         warn!("barometer: inactive (too many errors)");
+        BAROMETER_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             sensor: Ms5607::new(self.sensor.destroy(), false),
             id: self.id,
