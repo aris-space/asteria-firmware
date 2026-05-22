@@ -31,9 +31,9 @@ const fn min_period(target_hz: f32) -> Duration {
 }
 
 const PRESSURE_MIN_PERIOD: Duration = min_period(40.0);
-const ENVIRONMENTAL_MIN_PERIOD: Duration = min_period(1.0);
+const ENVIRONMENT_MIN_PERIOD: Duration = min_period(1.0);
 const ORIENTATION_MIN_PERIOD: Duration = min_period(40.0);
-const MAGNETIC_FIELD_MIN_PERIOD: Duration = min_period(10.0);
+const MAG_MIN_PERIOD: Duration = min_period(10.0);
 const POSITION_MIN_PERIOD: Duration = min_period(20.0);
 const VELOCITY_MIN_PERIOD: Duration = min_period(20.0);
 const INERTIAL_MIN_PERIOD: Duration = min_period(40.0);
@@ -48,9 +48,9 @@ pub fn spawn_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
     let can_tx = CAN_TX.try_get().expect("CAN TX not yet initialized");
 
     spawner.spawn(pressure_task(can_tx).expect("spawn can pressure"));
-    spawner.spawn(environmental_task(can_tx).expect("spawn can env"));
+    spawner.spawn(environment_task(can_tx).expect("spawn can env"));
     spawner.spawn(orientation_task(can_tx).expect("spawn can orientation"));
-    spawner.spawn(magnetic_field_task(can_tx).expect("spawn can mag"));
+    spawner.spawn(mag_task(can_tx).expect("spawn can mag"));
     spawner.spawn(position_task(can_tx).expect("spawn can position"));
     spawner.spawn(velocity_task(can_tx).expect("spawn can velocity"));
     spawner.spawn(inertial_task(can_tx).expect("spawn can inertial"));
@@ -109,20 +109,16 @@ async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>
 }
 
 #[embassy_executor::task]
-async fn environmental_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+async fn environment_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::EnvironmentalData;
-    watch_loop!(
-        signals::ENVIRONMENT_WATCH,
-        ENVIRONMENTAL_MIN_PERIOD,
-        |env| {
-            let msg = EnvironmentalData {
-                temperature: env.temperature_c,
-                humidity: env.humidity_rh,
-                pressure: env.pressure_mbar,
-            };
-            send(can_tx, msg).await;
-        }
-    );
+    watch_loop!(signals::ENVIRONMENT_WATCH, ENVIRONMENT_MIN_PERIOD, |env| {
+        let msg = EnvironmentalData {
+            temperature: env.temperature_c,
+            humidity: env.humidity_rh,
+            pressure: env.pressure_mbar,
+        };
+        send(can_tx, msg).await;
+    });
 }
 
 #[embassy_executor::task]
@@ -140,10 +136,10 @@ async fn orientation_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'stat
 }
 
 #[embassy_executor::task]
-async fn magnetic_field_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+async fn mag_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::MagnetometerData;
     let mut orientation_rx = signals::ORIENTATION_WATCH.anon_receiver();
-    watch_loop!(signals::MAG_WATCH, MAGNETIC_FIELD_MIN_PERIOD, |field| {
+    watch_loop!(signals::MAG_WATCH, MAG_MIN_PERIOD, |field| {
         let orientation = orientation_rx.try_get().map(|o| o.q).unwrap_or_default();
         // nT -> uT. xyz is body-frame; orientation is body -> NED.
         let xyz = Vector3::new(field.x * 1e-3, field.y * 1e-3, field.z * 1e-3);
