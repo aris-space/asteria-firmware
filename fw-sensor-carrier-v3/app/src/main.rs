@@ -10,13 +10,14 @@ use embassy_executor::Spawner;
 
 mod build_info;
 mod built;
+mod filters;
 mod macros;
-mod measurements;
 mod resources;
 mod sensors;
 mod signals;
 mod startup;
 mod tasks;
+mod types;
 
 mod clocks {
     include!(concat!(

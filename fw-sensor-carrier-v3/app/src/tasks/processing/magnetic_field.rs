@@ -3,9 +3,9 @@ use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant};
 use nalgebra::{Matrix3, Vector3};
 
-use crate::measurements::{MagFieldNt, MagSample};
 use crate::sensors::{MAGNETOMETER_0, MAGNETOMETER_1, MagnetometerId};
 use crate::signals;
+use crate::types::{MagSample, RawMagSample};
 
 /// LSM303AGR raw count -> nT (datasheet sensitivity).
 const NT_PER_COUNT: f32 = 150.0;
@@ -17,33 +17,35 @@ const MAG_TIMEOUT: Duration = Duration::from_millis(100);
 pub async fn task() -> ! {
     let mut sub0 = signals::MAG_CHANNELS[MAGNETOMETER_0.index()]
         .subscriber()
-        .expect("mag: subscribe 0");
+        .expect("too many subs on MAG_CHANNELS; increase SUBS");
     let mut sub1 = signals::MAG_CHANNELS[MAGNETOMETER_1.index()]
         .subscriber()
-        .expect("mag: subscribe 1");
+        .expect("too many subs on MAG_CHANNELS; increase SUBS");
 
     let mut selector = TimeoutSelector::new(MAG_TIMEOUT);
-    let sender = signals::MAG_FIELD_WATCH.sender();
+    let sender = signals::MAG_WATCH.sender();
 
     loop {
-        let sample: MagSample =
+        let sample: RawMagSample =
             match select(sub0.next_message_pure(), sub1.next_message_pure()).await {
                 Either::First(s) | Either::Second(s) => s,
             };
 
-        if !selector.accept(sample.sensor_id, sample.data.ts) {
+        if !selector.accept(sample.src, sample.ts) {
             continue;
         }
 
-        let (hard_iron, soft_iron) = calibration_for(sample.sensor_id);
+        let (hard_iron, soft_iron) = calibration_for(sample.src);
         let raw_nt = Vector3::new(
-            sample.data.value.x as f32 * NT_PER_COUNT,
-            sample.data.value.y as f32 * NT_PER_COUNT,
-            sample.data.value.z as f32 * NT_PER_COUNT,
+            sample.x as f32 * NT_PER_COUNT,
+            sample.y as f32 * NT_PER_COUNT,
+            sample.z as f32 * NT_PER_COUNT,
         );
         let calibrated = soft_iron * (raw_nt - hard_iron);
 
-        let out = MagFieldNt {
+        let out = MagSample {
+            src: sample.src,
+            ts: sample.ts,
             x: calibrated.x,
             y: calibrated.y,
             z: calibrated.z,

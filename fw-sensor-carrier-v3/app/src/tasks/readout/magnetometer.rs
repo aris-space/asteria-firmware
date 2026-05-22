@@ -7,13 +7,18 @@ use embassy_time::{Delay, Duration, Instant, Timer};
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
-use crate::measurements::{MagData, MagSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{MAGNETOMETER_STATUS, MagnetometerId, SensorStatus};
 use crate::signals;
+use crate::types::RawMagSample;
 
-/// Matches `MagOutputDataRate::Hz10` set in `initialise`.
-pub const SAMPLE_HZ: u32 = 10;
+const MAG_ODR: MagOutputDataRate = MagOutputDataRate::Hz10;
+pub const SAMPLE_HZ: u32 = match MAG_ODR {
+    MagOutputDataRate::Hz10 => 10,
+    MagOutputDataRate::Hz20 => 20,
+    MagOutputDataRate::Hz50 => 50,
+    MagOutputDataRate::Hz100 => 100,
+};
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 async fn initialise<I2C: embedded_hal_async::i2c::I2c>(
@@ -37,7 +42,7 @@ async fn initialise<I2C: embedded_hal_async::i2c::I2c>(
     };
 
     if let Err(e) = sensor
-        .set_mag_mode_and_odr(&mut Delay, MagMode::HighResolution, MagOutputDataRate::Hz10)
+        .set_mag_mode_and_odr(&mut Delay, MagMode::HighResolution, MAG_ODR)
         .await
     {
         error!("{} init failed: {:?}", id, Debug2Format(&e));
@@ -113,16 +118,12 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                     errors = 0;
                     // Sensor -> board frame: negate all three axes (saturating so
                     // an `i16::MIN` raw count doesn't silently wrap).
-                    let sample = MagSample {
-                        sensor_id: self.id,
-                        data: Timestamped::now_with_delay(
-                            MagData {
-                                x: (field.x_raw() as i16).saturating_neg(),
-                                y: (field.y_raw() as i16).saturating_neg(),
-                                z: (field.z_raw() as i16).saturating_neg(),
-                            },
-                            self.delay,
-                        ),
+                    let sample = RawMagSample {
+                        src: self.id,
+                        ts: Instant::now() - self.delay,
+                        x: (field.x_raw() as i16).saturating_neg(),
+                        y: (field.y_raw() as i16).saturating_neg(),
+                        z: (field.z_raw() as i16).saturating_neg(),
                     };
                     signals::submit_mag_sample(sample);
                     trace!(

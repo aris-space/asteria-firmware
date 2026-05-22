@@ -1,5 +1,4 @@
 use embassy_sync::lazy_lock::LazyLock;
-use hermes_can::messages::debug_info::BuildInformationCommon;
 
 use crate::built;
 
@@ -25,26 +24,29 @@ const fn parse_commit_hash(s: Option<&str>) -> [u8; 7] {
     hash
 }
 
-pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
+#[derive(Clone, Copy, Debug)]
+pub struct BuildInfo {
+    pub unix_timestamp: u32,
+    pub author_initials: [u8; 2],
+    pub is_release: bool,
+    pub debug_defmt_rtt: bool,
+    pub commit_hash: [u8; 7],
+    pub is_git_dirty: bool,
+}
+
+pub static BUILD_INFO: LazyLock<BuildInfo> = LazyLock::new(|| {
     const TIMESTAMP: u64 = parse_unix_timestamp(env!("BUILT_UNIX_TS"));
     let commit_hash = parse_commit_hash(built::GIT_COMMIT_HASH_SHORT);
     let is_release = built::PROFILE == "release";
     let debug_defmt_rtt = built::FEATURES.contains(&"debug");
     let is_git_dirty = built::GIT_DIRTY.unwrap_or(false);
-    let author_initials = [b'L', b'S'];
-    let can_semver = [
-        hermes_can::VERSION_MAJOR,
-        hermes_can::VERSION_MINOR,
-        hermes_can::VERSION_PATCH,
-    ];
 
-    BuildInformationCommon {
+    BuildInfo {
         unix_timestamp: u32::try_from(TIMESTAMP).unwrap_or(u32::MAX),
-        author_initials,
+        author_initials: [b'L', b'S'],
         is_release,
         debug_defmt_rtt,
         commit_hash,
         is_git_dirty,
-        can_semver,
     }
 });

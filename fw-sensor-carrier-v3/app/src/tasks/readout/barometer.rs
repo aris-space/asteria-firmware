@@ -7,10 +7,10 @@ use ms5607::{Ms5607, Oversampling};
 use core::sync::atomic::Ordering;
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
-use crate::measurements::{PressureData, PressureSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{BAROMETER_STATUS, BarometerId, SensorStatus};
 use crate::signals;
+use crate::types::BaroSample;
 
 pub const SAMPLE_HZ: u32 = 40;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
@@ -62,17 +62,13 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
             match self.sensor.measure(Oversampling::Osr2048, &mut Delay).await {
                 Ok(m) => {
                     errors = 0;
-                    let sample = PressureSample {
-                        sensor_id: self.id,
-                        data: Timestamped::now_with_delay(
-                            PressureData {
-                                pressure_mbar: m.pressure_mbar,
-                                temperature_c: m.temperature_c,
-                            },
-                            self.delay,
-                        ),
+                    let sample = BaroSample {
+                        src: self.id,
+                        ts: Instant::now() - self.delay,
+                        pressure_mbar: m.pressure_mbar,
+                        temperature_c: m.temperature_c,
                     };
-                    signals::submit_pressure_sample(sample);
+                    signals::submit_baro_sample(sample);
                     trace!("{} p={} mbar", self.id, m.pressure_mbar);
                 }
                 Err(e) => {

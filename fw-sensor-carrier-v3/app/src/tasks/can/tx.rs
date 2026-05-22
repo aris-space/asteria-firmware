@@ -31,9 +31,9 @@ const fn min_period(target_hz: f32) -> Duration {
 }
 
 const PRESSURE_MIN_PERIOD: Duration = min_period(40.0);
-const ENVIRONMENTAL_MIN_PERIOD: Duration = min_period(1.0);
+const ENVIRONMENT_MIN_PERIOD: Duration = min_period(1.0);
 const ORIENTATION_MIN_PERIOD: Duration = min_period(40.0);
-const MAGNETIC_FIELD_MIN_PERIOD: Duration = min_period(10.0);
+const MAG_MIN_PERIOD: Duration = min_period(10.0);
 const POSITION_MIN_PERIOD: Duration = min_period(20.0);
 const VELOCITY_MIN_PERIOD: Duration = min_period(20.0);
 const INERTIAL_MIN_PERIOD: Duration = min_period(40.0);
@@ -48,9 +48,9 @@ pub fn spawn_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
     let can_tx = CAN_TX.try_get().expect("CAN TX not yet initialized");
 
     spawner.spawn(pressure_task(can_tx).expect("spawn can pressure"));
-    spawner.spawn(environmental_task(can_tx).expect("spawn can env"));
+    spawner.spawn(environment_task(can_tx).expect("spawn can env"));
     spawner.spawn(orientation_task(can_tx).expect("spawn can orientation"));
-    spawner.spawn(magnetic_field_task(can_tx).expect("spawn can mag"));
+    spawner.spawn(mag_task(can_tx).expect("spawn can mag"));
     spawner.spawn(position_task(can_tx).expect("spawn can position"));
     spawner.spawn(velocity_task(can_tx).expect("spawn can velocity"));
     spawner.spawn(inertial_task(can_tx).expect("spawn can inertial"));
@@ -97,83 +97,115 @@ macro_rules! watch_loop {
 #[embassy_executor::task]
 async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::PressureData;
-    watch_loop!(
-        signals::PRESSURE_FUSED_WATCH,
-        PRESSURE_MIN_PERIOD,
-        |pressure| {
-            send(can_tx, PressureData { pressure }).await;
-        }
-    );
+    watch_loop!(signals::PRESSURE_WATCH, PRESSURE_MIN_PERIOD, |pressure| {
+        send(
+            can_tx,
+            PressureData {
+                pressure: pressure.mbar,
+            },
+        )
+        .await;
+    });
 }
 
 #[embassy_executor::task]
-async fn environmental_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    watch_loop!(
-        signals::ENVIRONMENTAL_WATCH,
-        ENVIRONMENTAL_MIN_PERIOD,
-        |env| {
-            send(can_tx, env).await;
-        }
-    );
-}
-
-#[embassy_executor::task]
-async fn orientation_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::OrientationData;
-    watch_loop!(signals::ORIENTATION_WATCH, ORIENTATION_MIN_PERIOD, |q| {
-        let msg = OrientationData {
-            orientation_w: q.w,
-            orientation_x: q.i,
-            orientation_y: q.j,
-            orientation_z: q.k,
+async fn environment_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::EnvironmentalData;
+    watch_loop!(signals::ENVIRONMENT_WATCH, ENVIRONMENT_MIN_PERIOD, |env| {
+        let msg = EnvironmentalData {
+            temperature: env.temperature_c,
+            humidity: env.humidity_rh,
+            pressure: env.pressure_mbar,
         };
         send(can_tx, msg).await;
     });
 }
 
 #[embassy_executor::task]
-async fn magnetic_field_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+async fn orientation_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::OrientationData;
+    watch_loop!(signals::ORIENTATION_WATCH, ORIENTATION_MIN_PERIOD, |o| {
+        let msg = OrientationData {
+            orientation_w: o.q.w,
+            orientation_x: o.q.i,
+            orientation_y: o.q.j,
+            orientation_z: o.q.k,
+        };
+        send(can_tx, msg).await;
+    });
+}
+
+#[embassy_executor::task]
+async fn mag_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::MagnetometerData;
     let mut orientation_rx = signals::ORIENTATION_WATCH.anon_receiver();
-    watch_loop!(
-        signals::MAG_FIELD_WATCH,
-        MAGNETIC_FIELD_MIN_PERIOD,
-        |field| {
-            let orientation = orientation_rx.try_get().unwrap_or_default();
-            // nT -> uT. xyz is body-frame; orientation is body -> NED.
-            let xyz = Vector3::new(field.x * 1e-3, field.y * 1e-3, field.z * 1e-3);
-            let ned = orientation * xyz;
-            let msg = MagnetometerData {
-                magnetic_field_x: xyz.x,
-                magnetic_field_y: xyz.y,
-                magnetic_field_z: xyz.z,
-                magnetic_field_north: ned.x,
-                magnetic_field_east: ned.y,
-                magnetic_field_down: ned.z,
-            };
-            send(can_tx, msg).await;
-        }
-    );
+    watch_loop!(signals::MAG_WATCH, MAG_MIN_PERIOD, |field| {
+        let orientation = orientation_rx.try_get().map(|o| o.q).unwrap_or_default();
+        // nT -> uT. xyz is body-frame; orientation is body -> NED.
+        let xyz = Vector3::new(field.x * 1e-3, field.y * 1e-3, field.z * 1e-3);
+        let ned = orientation * xyz;
+        let msg = MagnetometerData {
+            magnetic_field_x: xyz.x,
+            magnetic_field_y: xyz.y,
+            magnetic_field_z: xyz.z,
+            magnetic_field_north: ned.x,
+            magnetic_field_east: ned.y,
+            magnetic_field_down: ned.z,
+        };
+        send(can_tx, msg).await;
+    });
 }
 
 #[embassy_executor::task]
 async fn position_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::PositionData;
     watch_loop!(signals::POSITION_WATCH, POSITION_MIN_PERIOD, |pos| {
-        send(can_tx, pos).await;
+        let msg = PositionData {
+            location_latitude: pos.lat_deg,
+            location_longitude: pos.lon_deg,
+            location_hamsl: pos.height_msl_m,
+            horizontal_accuracy: pos.horizontal_accuracy_m,
+            vertical_accuracy: pos.vertical_accuracy_m,
+        };
+        send(can_tx, msg).await;
     });
 }
 
 #[embassy_executor::task]
 async fn velocity_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::VelocityData;
     watch_loop!(signals::VELOCITY_WATCH, VELOCITY_MIN_PERIOD, |vel| {
-        send(can_tx, vel).await;
+        let msg = VelocityData {
+            velocity_x: vel.body_x,
+            velocity_y: vel.body_y,
+            velocity_z: vel.body_z,
+            velocity_north: vel.ned_north,
+            velocity_east: vel.ned_east,
+            velocity_down: vel.ned_down,
+        };
+        send(can_tx, msg).await;
     });
 }
 
 #[embassy_executor::task]
 async fn inertial_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    watch_loop!(signals::INERTIAL_WATCH, INERTIAL_MIN_PERIOD, |imu| {
-        send(can_tx, imu).await;
+    use hermes_can::messages::sensor_data::ImuData;
+    watch_loop!(signals::INERTIAL_WATCH, INERTIAL_MIN_PERIOD, |inertial| {
+        let msg = ImuData {
+            acceleration_x: inertial.body_accel_x,
+            acceleration_y: inertial.body_accel_y,
+            acceleration_z: inertial.body_accel_z,
+            angular_velocity_x: inertial.body_gyro_x,
+            angular_velocity_y: inertial.body_gyro_y,
+            angular_velocity_z: inertial.body_gyro_z,
+            acceleration_north: inertial.ned_accel_north,
+            acceleration_east: inertial.ned_accel_east,
+            acceleration_down: inertial.ned_accel_down,
+            angular_velocity_north: inertial.ned_gyro_north,
+            angular_velocity_east: inertial.ned_gyro_east,
+            angular_velocity_down: inertial.ned_gyro_down,
+        };
+        send(can_tx, msg).await;
     });
 }
 
@@ -218,9 +250,23 @@ async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>)
 
 #[embassy_executor::task]
 async fn build_information_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::debug_info::SensorCarrierBuildInfo;
+    use hermes_can::messages::debug_info::{BuildInformationCommon, SensorCarrierBuildInfo};
     let info = crate::build_info::BUILD_INFO.get();
-    let msg = SensorCarrierBuildInfo { data: info.clone() };
+    let msg = SensorCarrierBuildInfo {
+        data: BuildInformationCommon {
+            unix_timestamp: info.unix_timestamp,
+            author_initials: info.author_initials,
+            is_release: info.is_release,
+            debug_defmt_rtt: info.debug_defmt_rtt,
+            commit_hash: info.commit_hash,
+            is_git_dirty: info.is_git_dirty,
+            can_semver: [
+                hermes_can::VERSION_MAJOR,
+                hermes_can::VERSION_MINOR,
+                hermes_can::VERSION_PATCH,
+            ],
+        },
+    };
     let mut ticker = Ticker::every(BUILD_INFO_PERIOD);
     loop {
         send(can_tx, msg.clone()).await;

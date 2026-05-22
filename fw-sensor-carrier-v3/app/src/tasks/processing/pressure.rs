@@ -1,35 +1,52 @@
 use defmt::trace;
 use embassy_futures::select::{Either, select};
+use embassy_time::Instant;
 
-use super::filters::MovingAverage;
-use crate::measurements::PressureSample;
+use crate::filters::Ema;
 use crate::sensors::{BAROMETER_0, BAROMETER_1};
 use crate::signals;
 use crate::tasks::readout::barometer::SAMPLE_HZ as BAROMETER_HZ;
+use crate::types::{BaroSample, Pressure};
 
-/// Window length for a ~5 Hz output cutoff at the barometer's sample rate.
-const MOVING_AVERAGE_COUNT: usize = (BAROMETER_HZ as usize + 4) / 5;
+/// EMA time constant. Sets a sample-rate-independent low-pass with
+/// 3 dB cutoff ~ 1 / (2 * pi * tau) Hz.
+const PRESSURE_TAU_S: f32 = 1.0 / (2.0 * core::f32::consts::PI * 5.0);
+
+/// First-sample fallback dt; matches the nominal barometer rate.
+const FALLBACK_DT_S: f32 = 1.0 / BAROMETER_HZ as f32;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
-    let mut sub0 = signals::PRESSURE_CHANNELS[BAROMETER_0.index()]
+    let mut sub0 = signals::BARO_CHANNELS[BAROMETER_0.index()]
         .subscriber()
-        .expect("pressure: failed to subscribe to barometer 0");
-    let mut sub1 = signals::PRESSURE_CHANNELS[BAROMETER_1.index()]
+        .expect("too many subs on BARO_CHANNELS; increase SUBS");
+    let mut sub1 = signals::BARO_CHANNELS[BAROMETER_1.index()]
         .subscriber()
-        .expect("pressure: failed to subscribe to barometer 1");
+        .expect("too many subs on BARO_CHANNELS; increase SUBS");
 
-    let mut filter = MovingAverage::<f32, MOVING_AVERAGE_COUNT>::new();
-    let sender = signals::PRESSURE_FUSED_WATCH.sender();
+    let mut filter = Ema::<f32>::new();
+    let mut last_ts: Option<Instant> = None;
+    let sender = signals::PRESSURE_WATCH.sender();
 
     loop {
-        let sample: PressureSample =
+        let sample: BaroSample =
             match select(sub0.next_message_pure(), sub1.next_message_pure()).await {
                 Either::First(s) | Either::Second(s) => s,
             };
 
-        let filtered = filter.update(sample.data.value.pressure_mbar);
-        sender.send(filtered);
+        let dt = last_ts
+            .map(|prev| sample.ts.saturating_duration_since(prev).as_micros() as f32 / 1e6)
+            .unwrap_or(FALLBACK_DT_S);
+        last_ts = Some(sample.ts);
+
+        let alpha = dt / (PRESSURE_TAU_S + dt);
+        let filtered = filter.update_with_alpha(sample.pressure_mbar, alpha);
+
+        let out = Pressure {
+            ts: sample.ts,
+            mbar: filtered,
+        };
+        sender.send(out);
         trace!("pressure: filtered={} mbar", filtered);
     }
 }

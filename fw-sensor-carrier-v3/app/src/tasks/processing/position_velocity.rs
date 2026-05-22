@@ -1,13 +1,12 @@
 use defmt::{info, trace};
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant};
-use hermes_can::messages::sensor_data::{PositionData, VelocityData};
-use nalgebra::{UnitQuaternion, Vector3};
+use nalgebra::Vector3;
 use ublox::GpsFix;
 
-use crate::measurements::{GnssSample, PvtData};
 use crate::sensors::{GNSS_0, GNSS_1, GnssId};
 use crate::signals;
+use crate::types::{GnssSample, Position, Pvt, Velocity};
 
 const GNSS_SOURCE_TIMEOUT: Duration = Duration::from_millis(500);
 const GNSS_SOURCE_MIN_DWELL: Duration = Duration::from_secs(5);
@@ -17,10 +16,10 @@ const GNSS_PDOP_SWITCH_MARGIN: f32 = 0.9;
 pub async fn task() -> ! {
     let mut sub0 = signals::GNSS_CHANNELS[GNSS_0.index()]
         .subscriber()
-        .expect("pv: subscribe GNSS 0");
+        .expect("too many subs on GNSS_CHANNELS; increase SUBS");
     let mut sub1 = signals::GNSS_CHANNELS[GNSS_1.index()]
         .subscriber()
-        .expect("pv: subscribe GNSS 1");
+        .expect("too many subs on GNSS_CHANNELS; increase SUBS");
     let mut orientation_recv = signals::ORIENTATION_WATCH.anon_receiver();
 
     let mut selector = QualitySelector::new(
@@ -38,33 +37,36 @@ pub async fn task() -> ! {
                 Either::First(s) | Either::Second(s) => s,
             };
 
-        let quality = GnssQuality::from_pvt(&sample.data.value);
-        if !selector.accept(sample.sensor_id, sample.data.ts, quality) {
+        let quality = GnssQuality::from_pvt(&sample.pvt);
+        if !selector.accept(sample.src, sample.ts, quality) {
             continue;
         }
 
-        let data = sample.data.value;
-        let pos = PositionData {
-            location_latitude: data.lat_deg,
-            location_longitude: data.lon_deg,
-            location_hamsl: data.height_msl,
-            horizontal_accuracy: data.horiz_accuracy as f32 / 1000.0,
-            vertical_accuracy: data.vert_accuracy as f32 / 1000.0,
+        let data = sample.pvt;
+        let pos = Position {
+            ts: sample.ts,
+            lat_deg: data.lat_deg,
+            lon_deg: data.lon_deg,
+            height_msl_m: data.height_msl,
+            horizontal_accuracy_m: data.horiz_accuracy as f32 / 1000.0,
+            vertical_accuracy_m: data.vert_accuracy as f32 / 1000.0,
         };
 
         let orientation = orientation_recv
             .try_get()
-            .unwrap_or_else(UnitQuaternion::identity);
+            .map(|o| o.q)
+            .unwrap_or_else(nalgebra::UnitQuaternion::identity);
         let v_inertial = Vector3::new(data.vel_north, data.vel_east, data.vel_down);
         let v_body = orientation.inverse_transform_vector(&v_inertial);
 
-        let vel = VelocityData {
-            velocity_x: v_body.x,
-            velocity_y: v_body.y,
-            velocity_z: v_body.z,
-            velocity_north: data.vel_north,
-            velocity_east: data.vel_east,
-            velocity_down: data.vel_down,
+        let vel = Velocity {
+            ts: sample.ts,
+            body_x: v_body.x,
+            body_y: v_body.y,
+            body_z: v_body.z,
+            ned_north: data.vel_north,
+            ned_east: data.vel_east,
+            ned_down: data.vel_down,
         };
 
         pos_sender.send(pos);
@@ -80,7 +82,7 @@ struct GnssQuality {
 }
 
 impl GnssQuality {
-    fn from_pvt(data: &PvtData) -> Self {
+    fn from_pvt(data: &Pvt) -> Self {
         let fix_tier = match data.fix_type {
             GpsFix::Fix3D | GpsFix::GPSPlusDeadReckoning => 3,
             GpsFix::Fix2D => 2,
