@@ -6,10 +6,10 @@ use ublox::{GpsFix, PacketRef, Parser};
 
 use core::sync::atomic::Ordering;
 
+use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{GnssSample, PvtData, Timestamped};
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
 struct Inactive<'a, RX> {
     rx: RX,
