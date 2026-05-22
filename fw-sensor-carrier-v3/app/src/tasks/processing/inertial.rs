@@ -125,7 +125,7 @@ fn fusion_instance() -> Fusion {
     s.gyr_range = 2_000.0;
     s.gain = 2.0;
     s.acc_rejection = 10.0;
-    s.recovery_trigger_period = 300; // ~8 s
+    s.recovery_trigger_period = 300; // ~360 ms at 833 Hz
     s.mag_rejection = 10.0;
     s.convention = imu_fusion::FusionConvention::NED;
     Fusion::new(IMU_ODR_HZ, s)
