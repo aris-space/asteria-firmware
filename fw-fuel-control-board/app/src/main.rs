@@ -51,6 +51,7 @@ use crate::buzzer::buzzer_task;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
+use data_core::can::sparse_decodable_can_message;
 use datatypes::actuator::DPRValve;
 use trafag_pressure::{config_vref_buf, set_adc_configs};
 
@@ -146,6 +147,11 @@ async fn main(spawner: Spawner) -> ! {
         .expect("failed to start CAN broadcasting");
 
     spawner.spawn(
+      pid_controller(fuel_dpr_valve)
+          .expect("failed to goon"),
+    );
+
+    /*spawner.spawn(
         dpr::pid_controller(
             fuel_dpr_valve,
             STATE.dpr_control_loop.receiver().unwrap(),
@@ -154,7 +160,7 @@ async fn main(spawner: Spawner) -> ! {
             STATE.dpr_info.sender(),
         )
         .expect("failed to prepare pid_controller spawn token"),
-    );
+    );*/
 
     spawner.spawn(
         valve_task(pressurization_vent_valve, fuel_vent_valve)
