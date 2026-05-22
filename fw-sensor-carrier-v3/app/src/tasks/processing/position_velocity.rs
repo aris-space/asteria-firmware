@@ -1,7 +1,7 @@
 use defmt::{info, trace};
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant};
-use nalgebra::{UnitQuaternion, Vector3};
+use nalgebra::Vector3;
 use ublox::GpsFix;
 
 use crate::measurements::{GnssSample, Position, Pvt, Velocity};
@@ -44,6 +44,7 @@ pub async fn task() -> ! {
 
         let data = sample.pvt;
         let pos = Position {
+            ts: sample.ts,
             lat_deg: data.lat_deg,
             lon_deg: data.lon_deg,
             height_msl_m: data.height_msl,
@@ -53,11 +54,13 @@ pub async fn task() -> ! {
 
         let orientation = orientation_recv
             .try_get()
-            .unwrap_or_else(UnitQuaternion::identity);
+            .map(|o| o.q)
+            .unwrap_or_else(nalgebra::UnitQuaternion::identity);
         let v_inertial = Vector3::new(data.vel_north, data.vel_east, data.vel_down);
         let v_body = orientation.inverse_transform_vector(&v_inertial);
 
         let vel = Velocity {
+            ts: sample.ts,
             body_x: v_body.x,
             body_y: v_body.y,
             body_z: v_body.z,

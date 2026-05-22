@@ -97,20 +97,22 @@ macro_rules! watch_loop {
 #[embassy_executor::task]
 async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::PressureData;
-    watch_loop!(
-        signals::PRESSURE_FUSED_WATCH,
-        PRESSURE_MIN_PERIOD,
-        |pressure| {
-            send(can_tx, PressureData { pressure }).await;
-        }
-    );
+    watch_loop!(signals::PRESSURE_WATCH, PRESSURE_MIN_PERIOD, |pressure| {
+        send(
+            can_tx,
+            PressureData {
+                pressure: pressure.mbar,
+            },
+        )
+        .await;
+    });
 }
 
 #[embassy_executor::task]
 async fn environmental_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::EnvironmentalData;
     watch_loop!(
-        signals::ENVIRONMENTAL_WATCH,
+        signals::ENVIRONMENT_WATCH,
         ENVIRONMENTAL_MIN_PERIOD,
         |env| {
             let msg = EnvironmentalData {
@@ -126,12 +128,12 @@ async fn environmental_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'st
 #[embassy_executor::task]
 async fn orientation_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::OrientationData;
-    watch_loop!(signals::ORIENTATION_WATCH, ORIENTATION_MIN_PERIOD, |q| {
+    watch_loop!(signals::ORIENTATION_WATCH, ORIENTATION_MIN_PERIOD, |o| {
         let msg = OrientationData {
-            orientation_w: q.w,
-            orientation_x: q.i,
-            orientation_y: q.j,
-            orientation_z: q.k,
+            orientation_w: o.q.w,
+            orientation_x: o.q.i,
+            orientation_y: o.q.j,
+            orientation_z: o.q.k,
         };
         send(can_tx, msg).await;
     });
@@ -141,25 +143,21 @@ async fn orientation_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'stat
 async fn magnetic_field_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::MagnetometerData;
     let mut orientation_rx = signals::ORIENTATION_WATCH.anon_receiver();
-    watch_loop!(
-        signals::MAG_FIELD_WATCH,
-        MAGNETIC_FIELD_MIN_PERIOD,
-        |field| {
-            let orientation = orientation_rx.try_get().unwrap_or_default();
-            // nT -> uT. xyz is body-frame; orientation is body -> NED.
-            let xyz = Vector3::new(field.x * 1e-3, field.y * 1e-3, field.z * 1e-3);
-            let ned = orientation * xyz;
-            let msg = MagnetometerData {
-                magnetic_field_x: xyz.x,
-                magnetic_field_y: xyz.y,
-                magnetic_field_z: xyz.z,
-                magnetic_field_north: ned.x,
-                magnetic_field_east: ned.y,
-                magnetic_field_down: ned.z,
-            };
-            send(can_tx, msg).await;
-        }
-    );
+    watch_loop!(signals::MAG_WATCH, MAGNETIC_FIELD_MIN_PERIOD, |field| {
+        let orientation = orientation_rx.try_get().map(|o| o.q).unwrap_or_default();
+        // nT -> uT. xyz is body-frame; orientation is body -> NED.
+        let xyz = Vector3::new(field.x * 1e-3, field.y * 1e-3, field.z * 1e-3);
+        let ned = orientation * xyz;
+        let msg = MagnetometerData {
+            magnetic_field_x: xyz.x,
+            magnetic_field_y: xyz.y,
+            magnetic_field_z: xyz.z,
+            magnetic_field_north: ned.x,
+            magnetic_field_east: ned.y,
+            magnetic_field_down: ned.z,
+        };
+        send(can_tx, msg).await;
+    });
 }
 
 #[embassy_executor::task]

@@ -2,7 +2,7 @@ use defmt::trace;
 use embassy_futures::select::{Either, select};
 
 use super::filters::MovingAverage;
-use crate::measurements::PressureSample;
+use crate::measurements::{Pressure, PressureSample};
 use crate::sensors::{BAROMETER_0, BAROMETER_1};
 use crate::signals;
 use crate::tasks::readout::barometer::SAMPLE_HZ as BAROMETER_HZ;
@@ -20,7 +20,7 @@ pub async fn task() -> ! {
         .expect("pressure: failed to subscribe to barometer 1");
 
     let mut filter = MovingAverage::<f32, MOVING_AVERAGE_COUNT>::new();
-    let sender = signals::PRESSURE_FUSED_WATCH.sender();
+    let sender = signals::PRESSURE_WATCH.sender();
 
     loop {
         let sample: PressureSample =
@@ -29,7 +29,11 @@ pub async fn task() -> ! {
             };
 
         let filtered = filter.update(sample.pressure_mbar);
-        sender.send(filtered);
+        let out = Pressure {
+            ts: sample.ts,
+            mbar: filtered,
+        };
+        sender.send(out);
         trace!("pressure: filtered={} mbar", filtered);
     }
 }

@@ -4,7 +4,7 @@ use embassy_time::{Duration, Instant};
 use imu_fusion::{Fusion, FusionAhrsSettings, FusionVector};
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
-use crate::measurements::{ImuSample, Inertial, MagSample};
+use crate::measurements::{ImuSample, Inertial, MagSample, Orientation};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
@@ -37,7 +37,7 @@ pub async fn task() -> ! {
     let mut sub1 = signals::IMU_CHANNELS[IMU_1.index()]
         .subscriber()
         .expect("inertial: subscribe IMU 1");
-    let mut mag_recv = signals::MAG_FIELD_WATCH.anon_receiver();
+    let mut mag_recv = signals::MAG_WATCH.anon_receiver();
 
     let mut fusion = fusion_instance();
     let mut selector = TimeoutSelector::new(TIMEOUT);
@@ -96,6 +96,7 @@ pub async fn task() -> ! {
         let inertial_accel_comp = inertial_accel + GRAVITY;
 
         let out = Inertial {
+            ts: sample.ts,
             body_accel_x: body_accel.x,
             body_accel_y: body_accel.y,
             body_accel_z: body_accel.z,
@@ -110,7 +111,10 @@ pub async fn task() -> ! {
             ned_gyro_down: inertial_gyro.z,
         };
 
-        orientation_sender.send(orientation);
+        orientation_sender.send(Orientation {
+            ts: sample.ts,
+            q: orientation,
+        });
         inertial_sender.send(out);
         trace!("inertial: dt={} s", dt);
     }

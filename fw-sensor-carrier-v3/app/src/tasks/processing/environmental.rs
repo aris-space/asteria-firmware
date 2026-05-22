@@ -35,10 +35,10 @@ pub async fn task() -> ! {
     let mut last_pressure_ts: Option<Instant> = None;
     let mut last_th_ts: Option<Instant> = None;
 
-    let sender = signals::ENVIRONMENTAL_WATCH.sender();
+    let sender = signals::ENVIRONMENT_WATCH.sender();
 
     loop {
-        match select4(
+        let latest_ts = match select4(
             p0.next_message_pure(),
             p1.next_message_pure(),
             e0.next_message_pure(),
@@ -54,6 +54,7 @@ pub async fn task() -> ! {
                 last_pressure_ts = Some(ts);
                 let alpha = dt / (PRESSURE_TAU_S + dt);
                 pressure_filter.update_with_alpha(p.pressure_mbar, alpha);
+                ts
             }
             Either4::Third(env) | Either4::Fourth(env) => {
                 let ts = env.ts;
@@ -64,10 +65,12 @@ pub async fn task() -> ! {
                 let alpha = dt / (TH_TAU_S + dt);
                 temp_filter.update_with_alpha(env.temperature_c, alpha);
                 hum_filter.update_with_alpha(env.humidity_rh, alpha);
+                ts
             }
-        }
+        };
 
         let fused = Environment {
+            ts: latest_ts,
             temperature_c: temp_filter.current_value(),
             humidity_rh: hum_filter.current_value(),
             pressure_mbar: pressure_filter.current_value(),

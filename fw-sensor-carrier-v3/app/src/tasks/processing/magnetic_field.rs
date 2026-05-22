@@ -23,7 +23,7 @@ pub async fn task() -> ! {
         .expect("mag: subscribe 1");
 
     let mut selector = TimeoutSelector::new(MAG_TIMEOUT);
-    let sender = signals::MAG_FIELD_WATCH.sender();
+    let sender = signals::MAG_WATCH.sender();
 
     loop {
         let sample: RawMagSample =
