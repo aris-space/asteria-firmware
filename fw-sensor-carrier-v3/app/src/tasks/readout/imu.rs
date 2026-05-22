@@ -1,4 +1,6 @@
-use defmt::{info, trace, warn};
+use core::sync::atomic::Ordering;
+
+use defmt::{Debug2Format, debug, error, info, trace, warn};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::mode::Async;
 use embassy_time::{Delay, Duration, Instant, Timer, with_timeout};
@@ -8,8 +10,6 @@ use lsm6dso32::{
     FifoDataOut, FifoMode, GyroscopeFullScale, Initialised, Int1Config, Lsm6dso32, TagSensor,
     Uninitialised,
 };
-
-use core::sync::atomic::Ordering;
 
 use crate::measurements::{ImuData, ImuSample, Timestamped};
 use crate::resources::sensors::SpiDevice;
@@ -80,31 +80,31 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 {
     async fn run(mut self) -> Active<SPI, INT> {
         loop {
+            debug!("{} initializing", self.id);
             let uninit = Lsm6dso32::<_, Uninitialised>::new(self.iface);
             match uninit.init(&mut Delay).await {
-                Ok(mut sensor) => {
-                    if configure(&mut sensor).await.is_err() {
-                        warn!("imu: configuration failed, retrying...");
-                        self.iface = sensor.destroy();
-                        self.attempt = self.attempt.saturating_add(1);
-                        Timer::after(backoff(self.attempt)).await;
-                        continue;
+                Ok(mut sensor) => match configure(&mut sensor).await {
+                    Ok(()) => {
+                        info!("{} initialized", self.id);
+                        IMU_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
+                        return Active {
+                            sensor,
+                            int1: self.int1,
+                            id: self.id,
+                        };
                     }
-                    info!("imu: active");
-                    IMU_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
-                    return Active {
-                        sensor,
-                        int1: self.int1,
-                        id: self.id,
-                    };
-                }
+                    Err(()) => {
+                        error!("{} configuration failed", self.id);
+                        self.iface = sensor.destroy();
+                    }
+                },
                 Err(err) => {
-                    self.attempt = self.attempt.saturating_add(1);
-                    warn!("imu: init failed (attempt {})", self.attempt);
+                    error!("{} init failed: {:?}", self.id, Debug2Format(&err.kind));
                     self.iface = err.sensor.destroy();
-                    Timer::after(backoff(self.attempt)).await;
                 }
             }
+            self.attempt = self.attempt.saturating_add(1);
+            Timer::after(backoff(self.attempt)).await;
         }
     }
 }
@@ -132,12 +132,9 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 
             let fifo_level = match self.sensor.read_fifo_level().await {
                 Ok(level) => level,
-                Err(_) => {
+                Err(e) => {
+                    warn!("{} FIFO level read error: {:?}", self.id, Debug2Format(&e));
                     errors = errors.saturating_add(1);
-                    warn!(
-                        "imu: fifo level read error ({}/{})",
-                        errors, MAX_CONSECUTIVE_ERRORS
-                    );
                     if errors >= MAX_CONSECUTIVE_ERRORS {
                         break;
                     }
@@ -150,6 +147,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 
             let fifo_entries = (fifo_level as usize).min(fifo_buf.len()) & !1;
             if fifo_entries == 0 {
+                warn!("{} FIFO empty", self.id);
                 errors = errors.saturating_add(1);
                 if errors >= MAX_CONSECUTIVE_ERRORS {
                     break;
@@ -157,17 +155,13 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 continue;
             }
 
-            if self
+            if let Err(e) = self
                 .sensor
                 .read_multiple_fifo_data(&mut fifo_buf[..fifo_entries])
                 .await
-                .is_err()
             {
+                warn!("{} FIFO data read error: {:?}", self.id, Debug2Format(&e));
                 errors = errors.saturating_add(1);
-                warn!(
-                    "imu: fifo read error ({}/{})",
-                    errors, MAX_CONSECUTIVE_ERRORS
-                );
                 if errors >= MAX_CONSECUTIVE_ERRORS {
                     break;
                 }
@@ -183,7 +177,14 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 let (acc, gyr) = match (chunk[0].tag_sensor(), chunk[1].tag_sensor()) {
                     (TagSensor::AccelerometerNC, TagSensor::GyroscopeNC) => (chunk[0], chunk[1]),
                     (TagSensor::GyroscopeNC, TagSensor::AccelerometerNC) => (chunk[1], chunk[0]),
-                    _ => continue,
+                    other => {
+                        warn!(
+                            "{} unexpected FIFO tag pair: {:?}",
+                            self.id,
+                            Debug2Format(&other)
+                        );
+                        continue;
+                    }
                 };
 
                 // Sensor -> board frame: flip X and Z. Saturate, since `i16::MIN`
@@ -214,10 +215,10 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 
             signals::submit_imu_samples(&samples);
             errors = 0;
-            trace!("imu: read {} pairs, dt={} us", num_pairs, avg_dt_us);
+            trace!("{} FIFO {} pairs, dt={} us", self.id, num_pairs, avg_dt_us);
         }
 
-        warn!("imu: inactive (too many errors)");
+        error!("{} offline (too many consecutive errors)", self.id);
         IMU_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             iface: self.sensor.destroy(),

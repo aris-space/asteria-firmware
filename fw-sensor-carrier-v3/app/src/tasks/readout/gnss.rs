@@ -1,4 +1,4 @@
-use defmt::{info, warn};
+use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
 use embassy_time::Duration;
@@ -21,21 +21,25 @@ struct Inactive<'a, RX> {
 
 impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
     async fn run(mut self) -> Active<'a, RX> {
+        debug!("{} initializing", self.id);
+
         let mut consecutive_errors: u8 = 0;
         let mut recv_buf = [0u8; 64];
+        let mut fix_type = GpsFix::NoFix;
 
         loop {
             if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                 self.attempt = self.attempt.saturating_add(1);
-                warn!("gnss: too many parse errors (attempt {})", self.attempt);
                 consecutive_errors = 0;
+                debug!("{} re-initializing", self.id);
                 embassy_time::Timer::after(backoff(self.attempt)).await;
             }
 
             let n = match self.rx.read(&mut recv_buf).await {
                 Ok(0) => continue,
                 Ok(n) => n,
-                Err(_) => {
+                Err(e) => {
+                    warn!("{} read error: {:?}", self.id, Debug2Format(&e));
                     consecutive_errors = consecutive_errors.saturating_add(1);
                     continue;
                 }
@@ -51,6 +55,7 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                             | GpsFix::Fix3D
                             | GpsFix::GPSPlusDeadReckoning
                             | GpsFix::TimeOnlyFix => {
+                                fix_type = stat.fix_type();
                                 got_fix = true;
                                 break;
                             }
@@ -63,7 +68,8 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                             self.attempt = 0;
                             consecutive_errors = 0;
                         }
-                        Err(_) => {
+                        Err(e) => {
+                            warn!("{} parse error: {:?}", self.id, Debug2Format(&e));
                             consecutive_errors = consecutive_errors.saturating_add(1);
                         }
                     }
@@ -71,7 +77,11 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
             }
 
             if got_fix {
-                info!("gnss: active (fix acquired)");
+                info!(
+                    "{} initialized (fix type: {:?})",
+                    self.id,
+                    Debug2Format(&fix_type)
+                );
                 GNSS_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
                 return Active {
                     rx: self.rx,
@@ -141,20 +151,22 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                 signals::submit_gnss_sample(sample);
                             }
                             Ok(_) => {}
-                            Err(_) => {
+                            Err(e) => {
+                                warn!("{} parse error: {:?}", self.id, Debug2Format(&e));
                                 self.errors = self.errors.saturating_add(1);
                             }
                         }
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    warn!("{} read error: {:?}", self.id, Debug2Format(&e));
                     self.errors = self.errors.saturating_add(1);
                 }
                 _ => {}
             }
 
             if self.errors >= MAX_CONSECUTIVE_ERRORS {
-                warn!("gnss: inactive (too many errors)");
+                error!("{} offline (too many consecutive errors)", self.id);
                 GNSS_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
                 return Inactive {
                     rx: self.rx,

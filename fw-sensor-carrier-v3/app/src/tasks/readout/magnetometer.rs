@@ -1,10 +1,10 @@
-use defmt::{info, trace, warn};
+use core::sync::atomic::Ordering;
+
+use defmt::{Debug2Format, debug, error, info, trace, warn};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
-
-use core::sync::atomic::Ordering;
 
 use crate::measurements::{MagData, MagSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
@@ -16,40 +16,47 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(100); // 10 Hz, matches 
 
 async fn initialise<I2C: embedded_hal_async::i2c::I2c>(
     i2c: I2C,
+    id: MagnetometerId,
 ) -> Result<Lsm303agr<lsm303agr::interface::I2cInterface<I2C>, lsm303agr::mode::MagContinuous>, I2C>
 {
     let mut sensor = Lsm303agr::new_with_i2c(i2c);
 
-    if sensor.init().await.is_err() {
+    if let Err(e) = sensor.init().await {
+        error!("{} init failed: {:?}", id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
     let mut sensor = match sensor.into_mag_continuous().await {
         Ok(s) => s,
-        Err(e) => return Err(e.dev.destroy()),
+        Err(e) => {
+            error!("{} init failed: {:?}", id, Debug2Format(&e.error));
+            return Err(e.dev.destroy());
+        }
     };
 
-    if sensor
+    if let Err(e) = sensor
         .set_mag_mode_and_odr(&mut Delay, MagMode::HighResolution, MagOutputDataRate::Hz10)
         .await
-        .is_err()
     {
+        error!("{} init failed: {:?}", id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
-    if sensor.enable_mag_offset_cancellation().await.is_err() {
+    if let Err(e) = sensor.enable_mag_offset_cancellation().await {
+        error!("{} init failed: {:?}", id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
-    if sensor.mag_enable_low_pass_filter().await.is_err() {
+    if let Err(e) = sensor.mag_enable_low_pass_filter().await {
+        error!("{} init failed: {:?}", id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
-    if sensor
+    if let Err(e) = sensor
         .set_accel_mode_and_odr(&mut Delay, AccelMode::Normal, AccelOutputDataRate::Hz50)
         .await
-        .is_err()
     {
+        error!("{} init failed: {:?}", id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
@@ -66,9 +73,10 @@ struct Inactive<I2C> {
 impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
     async fn run(mut self) -> Active<I2C> {
         loop {
-            match initialise(self.i2c).await {
+            debug!("{} initializing", self.id);
+            match initialise(self.i2c, self.id).await {
                 Ok(sensor) => {
-                    info!("magnetometer: active");
+                    info!("{} initialized", self.id);
                     MAGNETOMETER_STATUS[self.id.index()]
                         .store(SensorStatus::Active, Ordering::Relaxed);
                     return Active {
@@ -78,9 +86,8 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
                     };
                 }
                 Err(i2c) => {
-                    self.attempt = self.attempt.saturating_add(1);
-                    warn!("magnetometer: init failed (attempt {})", self.attempt);
                     self.i2c = i2c;
+                    self.attempt = self.attempt.saturating_add(1);
                     Timer::after(backoff(self.attempt)).await;
                 }
             }
@@ -119,28 +126,30 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                     };
                     signals::submit_mag_sample(sample);
                     trace!(
-                        "mag: x={} y={} z={}",
+                        "{} x={} y={} z={}",
+                        self.id,
                         field.x_raw(),
                         field.y_raw(),
                         field.z_raw()
                     );
                 }
-                Err(_) => {
+                Err(e) => {
+                    warn!("{} read error: {:?}", self.id, Debug2Format(&e));
                     errors = errors.saturating_add(1);
-                    warn!(
-                        "magnetometer: read error ({}/{})",
-                        errors, MAX_CONSECUTIVE_ERRORS
-                    );
                     if errors >= MAX_CONSECUTIVE_ERRORS {
                         break;
                     }
                 }
             }
 
-            Timer::at(next_sample).await;
+            if Instant::now() > next_sample {
+                warn!("{} can't keep up with sample interval", self.id);
+            } else {
+                Timer::at(next_sample).await;
+            }
         }
 
-        warn!("magnetometer: inactive (too many errors)");
+        error!("{} offline (too many consecutive errors)", self.id);
         MAGNETOMETER_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             i2c: self.sensor.destroy(),

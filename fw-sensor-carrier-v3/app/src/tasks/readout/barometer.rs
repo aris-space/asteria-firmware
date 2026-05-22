@@ -1,4 +1,4 @@
-use defmt::{info, trace, warn};
+use defmt::{Debug2Format, debug, error, info, trace, warn};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
@@ -24,9 +24,10 @@ struct Inactive<I2C> {
 impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
     async fn run(mut self) -> Active<I2C> {
         loop {
+            debug!("{} initializing", self.id);
             match self.sensor.init(&mut Delay).await {
                 Ok(sensor) => {
-                    info!("barometer: active");
+                    info!("{} initialized", self.id);
                     BAROMETER_STATUS[self.id.index()]
                         .store(SensorStatus::Active, Ordering::Relaxed);
                     return Active {
@@ -36,8 +37,8 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
                     };
                 }
                 Err(err) => {
+                    error!("{} init failed: {:?}", self.id, Debug2Format(&err.kind));
                     self.attempt = self.attempt.saturating_add(1);
-                    warn!("barometer: init failed (attempt {})", self.attempt);
                     self.sensor = Ms5607::new(err.sensor.destroy(), false);
                     Timer::after(backoff(self.attempt)).await;
                 }
@@ -73,24 +74,25 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                         ),
                     };
                     signals::submit_pressure_sample(sample);
-                    trace!("barometer: p={} mbar", m.pressure_mbar);
+                    trace!("{} p={} mbar", self.id, m.pressure_mbar);
                 }
-                Err(_) => {
+                Err(e) => {
+                    warn!("{} read error: {:?}", self.id, Debug2Format(&e));
                     errors = errors.saturating_add(1);
-                    warn!(
-                        "barometer: read error ({}/{})",
-                        errors, MAX_CONSECUTIVE_ERRORS
-                    );
                     if errors >= MAX_CONSECUTIVE_ERRORS {
                         break;
                     }
                 }
             }
 
-            Timer::at(next_sample).await;
+            if Instant::now() > next_sample {
+                warn!("{} can't keep up with sample interval", self.id);
+            } else {
+                Timer::at(next_sample).await;
+            }
         }
 
-        warn!("barometer: inactive (too many errors)");
+        error!("{} offline (too many consecutive errors)", self.id);
         BAROMETER_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             sensor: Ms5607::new(self.sensor.destroy(), false),

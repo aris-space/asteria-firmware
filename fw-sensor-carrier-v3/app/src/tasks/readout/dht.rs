@@ -1,6 +1,6 @@
 use core::sync::atomic::Ordering;
 
-use defmt::{info, trace, warn};
+use defmt::{Debug2Format, debug, error, info, trace, warn};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
@@ -24,32 +24,33 @@ struct Inactive<I2C> {
 impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
     async fn run(mut self) -> Active<I2C> {
         loop {
-            if self.sensor.soft_reset(&mut Delay).await.is_err() {
-                self.attempt = self.attempt.saturating_add(1);
-                warn!("dht: soft reset failed (attempt {})", self.attempt);
-                Timer::after(backoff(self.attempt)).await;
-                continue;
-            }
+            debug!("{} initializing", self.id);
 
-            if self
-                .sensor
-                .measure(Precision::Low, &mut Delay)
-                .await
-                .is_err()
-            {
-                self.attempt = self.attempt.saturating_add(1);
-                warn!("dht: first measurement failed (attempt {})", self.attempt);
-                Timer::after(backoff(self.attempt)).await;
-                continue;
-            }
-
-            info!("dht: active");
-            DHT_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
-            return Active {
-                sensor: self.sensor,
-                id: self.id,
-                delay: self.delay,
+            let result = match self.sensor.soft_reset(&mut Delay).await {
+                Ok(()) => self
+                    .sensor
+                    .measure(Precision::Low, &mut Delay)
+                    .await
+                    .map(|_| ()),
+                Err(e) => Err(e),
             };
+
+            match result {
+                Ok(()) => {
+                    info!("{} initialized", self.id);
+                    DHT_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
+                    return Active {
+                        sensor: self.sensor,
+                        id: self.id,
+                        delay: self.delay,
+                    };
+                }
+                Err(e) => {
+                    error!("{} init failed: {:?}", self.id, Debug2Format(&e));
+                    self.attempt = self.attempt.saturating_add(1);
+                    Timer::after(backoff(self.attempt)).await;
+                }
+            }
         }
     }
 }
@@ -83,23 +84,25 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                         ),
                     };
                     signals::submit_env_sample(sample);
-                    trace!("dht: t={} c, rh={} %", temperature_c, humidity_rh);
+                    trace!("{} t={} c rh={} %", self.id, temperature_c, humidity_rh);
                 }
-                Err(_) => {
+                Err(e) => {
+                    warn!("{} read error: {:?}", self.id, Debug2Format(&e));
                     errors = errors.saturating_add(1);
-                    warn!("dht: read error ({}/{})", errors, MAX_CONSECUTIVE_ERRORS);
                     if errors >= MAX_CONSECUTIVE_ERRORS {
                         break;
                     }
                 }
             }
 
-            if Instant::now() <= next_sample {
+            if Instant::now() > next_sample {
+                warn!("{} can't keep up with sample interval", self.id);
+            } else {
                 Timer::at(next_sample).await;
             }
         }
 
-        warn!("dht: inactive (too many errors)");
+        error!("{} offline (too many consecutive errors)", self.id);
         DHT_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             sensor: Sht4xAsync::new(self.sensor.destroy()),
