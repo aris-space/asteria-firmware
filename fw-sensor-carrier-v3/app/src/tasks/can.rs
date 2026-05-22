@@ -237,9 +237,9 @@ async fn magnetic_field_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'s
         MAGNETIC_FIELD_MIN_PERIOD,
         |field| {
             let orientation = orientation_rx.try_get().unwrap_or_default();
-            // nT -> uT
+            // nT -> uT. xyz is body-frame; orientation is body -> NED.
             let xyz = Vector3::new(field.x * 1e-3, field.y * 1e-3, field.z * 1e-3);
-            let ned = orientation.inverse() * xyz;
+            let ned = orientation * xyz;
             let msg = MagnetometerData {
                 magnetic_field_x: xyz.x,
                 magnetic_field_y: xyz.y,

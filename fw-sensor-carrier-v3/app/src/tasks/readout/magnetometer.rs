@@ -104,14 +104,15 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
             match self.sensor.magnetic_field().await {
                 Ok(field) => {
                     errors = 0;
-                    // Sensor -> board frame: negate all three axes.
+                    // Sensor -> board frame: negate all three axes (saturating so
+                    // an `i16::MIN` raw count doesn't silently wrap).
                     let sample = MagSample {
                         sensor_id: self.id,
                         data: Timestamped::now_with_delay(
                             MagData {
-                                x: (field.x_raw() as i16).wrapping_neg(),
-                                y: (field.y_raw() as i16).wrapping_neg(),
-                                z: (field.z_raw() as i16).wrapping_neg(),
+                                x: (field.x_raw() as i16).saturating_neg(),
+                                y: (field.y_raw() as i16).saturating_neg(),
+                                z: (field.z_raw() as i16).saturating_neg(),
                             },
                             self.delay,
                         ),

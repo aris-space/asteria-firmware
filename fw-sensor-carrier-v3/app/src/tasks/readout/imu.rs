@@ -186,20 +186,21 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                     _ => continue,
                 };
 
-                // Sensor -> board frame: flip X and Z.
+                // Sensor -> board frame: flip X and Z. Saturate, since `i16::MIN`
+                // would silently overflow under plain negation.
                 let accel = Acceleration::from_raw(
                     AccelerationRaw {
-                        x: -acc.x(),
+                        x: acc.x().saturating_neg(),
                         y: acc.y(),
-                        z: -acc.z(),
+                        z: acc.z().saturating_neg(),
                     },
                     self.sensor.accel_full_scale(),
                 );
                 let gyro = AngularRate::from_raw(
                     AngularRateRaw {
-                        x: -gyr.x(),
+                        x: gyr.x().saturating_neg(),
                         y: gyr.y(),
-                        z: -gyr.z(),
+                        z: gyr.z().saturating_neg(),
                     },
                     self.sensor.gyro_full_scale(),
                 );

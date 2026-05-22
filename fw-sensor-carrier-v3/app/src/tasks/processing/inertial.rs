@@ -84,8 +84,11 @@ pub async fn task() -> ! {
 
         let q = fusion.quaternion();
         let orientation_mag = UnitQuaternion::new_normalize(Quaternion::new(q.w, q.x, q.y, q.z));
+        // Fusion aligns its +x with the measured horizontal field (magnetic north).
+        // Mag-NED is the true-NED frame rotated by +declination about z-down, so
+        // body -> true-NED is R_z(+declination) * body -> mag-NED.
         let orientation =
-            UnitQuaternion::from_axis_angle(&Vector3::z_axis(), -DECLINATION_RAD) * orientation_mag;
+            UnitQuaternion::from_axis_angle(&Vector3::z_axis(), DECLINATION_RAD) * orientation_mag;
 
         // Derived inertial CAN frame: body-frame accel/gyro (units: m/s^2, deg/s)
         // plus NED-rotated accel/gyro with gravity-compensated accel.
