@@ -49,7 +49,7 @@ const FIFO_BUFFER_SIZE: usize = 512;
 const FIFO_WATERMARK: u16 = 26;
 /// Max wait for the FIFO watermark interrupt before retrying. Roughly
 /// 2x the expected period, to catch a missed/stuck interrupt.
-const LOOP_TIMEOUT_MS: u64 = 30;
+const LOOP_TIMEOUT: Duration = Duration::from_millis(30);
 
 async fn configure<SPI: embedded_hal_async::spi::SpiDevice>(
     sensor: &mut Lsm6dso32<Lsm6Dso32SpiInterface<SPI>, Initialised>,
@@ -144,11 +144,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
         let mut errors: u8 = 0;
 
         loop {
-            let _ = with_timeout(
-                Duration::from_millis(LOOP_TIMEOUT_MS),
-                self.int1.wait_for_rising_edge(),
-            )
-            .await;
+            let _ = with_timeout(LOOP_TIMEOUT, self.int1.wait_for_rising_edge()).await;
 
             let fifo_level = match self.sensor.read_fifo_level().await {
                 Ok(level) => level,
