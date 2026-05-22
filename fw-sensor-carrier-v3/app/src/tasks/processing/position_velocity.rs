@@ -16,10 +16,10 @@ const GNSS_PDOP_SWITCH_MARGIN: f32 = 0.9;
 pub async fn task() -> ! {
     let mut sub0 = signals::GNSS_CHANNELS[GNSS_0.index()]
         .subscriber()
-        .expect("pv: subscribe GNSS 0");
+        .expect("too many subs on GNSS_CHANNELS; increase SUBS");
     let mut sub1 = signals::GNSS_CHANNELS[GNSS_1.index()]
         .subscriber()
-        .expect("pv: subscribe GNSS 1");
+        .expect("too many subs on GNSS_CHANNELS; increase SUBS");
     let mut orientation_recv = signals::ORIENTATION_WATCH.anon_receiver();
 
     let mut selector = QualitySelector::new(

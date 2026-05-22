@@ -17,16 +17,16 @@ const FALLBACK_TH_DT_S: f32 = 1.0;
 pub async fn task() -> ! {
     let mut p0 = signals::PRESSURE_CHANNELS[BAROMETER_0.index()]
         .subscriber()
-        .expect("env: subscribe pressure 0");
+        .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
     let mut p1 = signals::PRESSURE_CHANNELS[BAROMETER_1.index()]
         .subscriber()
-        .expect("env: subscribe pressure 1");
+        .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
     let mut e0 = signals::ENV_CHANNELS[DHT_0.index()]
         .subscriber()
-        .expect("env: subscribe dht 0");
+        .expect("too many subs on ENV_CHANNELS; increase SUBS");
     let mut e1 = signals::ENV_CHANNELS[DHT_1.index()]
         .subscriber()
-        .expect("env: subscribe dht 1");
+        .expect("too many subs on ENV_CHANNELS; increase SUBS");
 
     let mut pressure_filter = Ema::<f32>::new();
     let mut temp_filter = Ema::<f32>::new();

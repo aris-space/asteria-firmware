@@ -17,10 +17,10 @@ const MAG_TIMEOUT: Duration = Duration::from_millis(100);
 pub async fn task() -> ! {
     let mut sub0 = signals::MAG_CHANNELS[MAGNETOMETER_0.index()]
         .subscriber()
-        .expect("mag: subscribe 0");
+        .expect("too many subs on MAG_CHANNELS; increase SUBS");
     let mut sub1 = signals::MAG_CHANNELS[MAGNETOMETER_1.index()]
         .subscriber()
-        .expect("mag: subscribe 1");
+        .expect("too many subs on MAG_CHANNELS; increase SUBS");
 
     let mut selector = TimeoutSelector::new(MAG_TIMEOUT);
     let sender = signals::MAG_WATCH.sender();

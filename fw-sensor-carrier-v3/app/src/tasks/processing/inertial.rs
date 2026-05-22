@@ -33,10 +33,10 @@ const MAG_FRESH: Duration = Duration::from_millis(100);
 pub async fn task() -> ! {
     let mut sub0 = signals::IMU_CHANNELS[IMU_0.index()]
         .subscriber()
-        .expect("inertial: subscribe IMU 0");
+        .expect("too many subs on IMU_CHANNELS; increase SUBS");
     let mut sub1 = signals::IMU_CHANNELS[IMU_1.index()]
         .subscriber()
-        .expect("inertial: subscribe IMU 1");
+        .expect("too many subs on IMU_CHANNELS; increase SUBS");
     let mut mag_recv = signals::MAG_WATCH.anon_receiver();
 
     let mut fusion = fusion_instance();

@@ -14,10 +14,10 @@ const MOVING_AVERAGE_COUNT: usize = (BAROMETER_HZ as usize + 4) / 5;
 pub async fn task() -> ! {
     let mut sub0 = signals::PRESSURE_CHANNELS[BAROMETER_0.index()]
         .subscriber()
-        .expect("pressure: failed to subscribe to barometer 0");
+        .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
     let mut sub1 = signals::PRESSURE_CHANNELS[BAROMETER_1.index()]
         .subscriber()
-        .expect("pressure: failed to subscribe to barometer 1");
+        .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
 
     let mut filter = MovingAverage::<f32, MOVING_AVERAGE_COUNT>::new();
     let sender = signals::PRESSURE_WATCH.sender();
