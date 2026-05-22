@@ -1,14 +1,19 @@
 use defmt::trace;
 use embassy_futures::select::{Either, select};
+use embassy_time::Instant;
 
-use crate::filters::MovingAverage;
+use crate::filters::Ema;
 use crate::measurements::{Pressure, PressureSample};
 use crate::sensors::{BAROMETER_0, BAROMETER_1};
 use crate::signals;
 use crate::tasks::readout::barometer::SAMPLE_HZ as BAROMETER_HZ;
 
-/// Window length for a ~5 Hz output cutoff at the barometer's sample rate.
-const MOVING_AVERAGE_COUNT: usize = (BAROMETER_HZ as usize + 4) / 5;
+/// EMA time constant. Sets a sample-rate-independent low-pass with
+/// 3 dB cutoff ~ 1 / (2 * pi * tau) Hz.
+const PRESSURE_TAU_S: f32 = 1.0 / (2.0 * core::f32::consts::PI * 5.0);
+
+/// First-sample fallback dt; matches the nominal barometer rate.
+const FALLBACK_DT_S: f32 = 1.0 / BAROMETER_HZ as f32;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
@@ -19,7 +24,8 @@ pub async fn task() -> ! {
         .subscriber()
         .expect("too many subs on PRESSURE_CHANNELS; increase SUBS");
 
-    let mut filter = MovingAverage::<f32, MOVING_AVERAGE_COUNT>::new();
+    let mut filter = Ema::<f32>::new();
+    let mut last_ts: Option<Instant> = None;
     let sender = signals::PRESSURE_WATCH.sender();
 
     loop {
@@ -28,7 +34,14 @@ pub async fn task() -> ! {
                 Either::First(s) | Either::Second(s) => s,
             };
 
-        let filtered = filter.update(sample.pressure_mbar);
+        let dt = last_ts
+            .map(|prev| sample.ts.saturating_duration_since(prev).as_micros() as f32 / 1e6)
+            .unwrap_or(FALLBACK_DT_S);
+        last_ts = Some(sample.ts);
+
+        let alpha = dt / (PRESSURE_TAU_S + dt);
+        let filtered = filter.update_with_alpha(sample.pressure_mbar, alpha);
+
         let out = Pressure {
             ts: sample.ts,
             mbar: filtered,
