@@ -170,9 +170,16 @@ async fn main(spawner: Spawner) -> ! {
         Default::default(),
     );
 
+    //Solenoids
     let oss_ml_vlv = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
     let fss_ml_vlv = Output::new(p.PA10, Level::Low, Speed::VeryHigh);
 
+    // Solenoid Standby Control
+    let mut sol1_stby = Output::new(p.PB15, Level::High, Speed::Low);
+    let mut sol2_stby = Output::new(p.PB1, Level::High, Speed::Low);
+    sol1_stby.set_high();
+    sol2_stby.set_high();
+    
     let heating_pad_switching = Output::new(p.PB2, Level::Low, Speed::Medium);
 
     let main_arming_pin = Input::new(p.PC12, Pull::Down);
