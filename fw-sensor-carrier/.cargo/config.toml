@@ -1,8 +1,19 @@
 [target.thumbv7em-none-eabihf]
-rustflags = ["-C", "linker=flip-link", "-C", "link-arg=-Tlink.x", "-C", "link-arg=--nmagic"]
+rustflags = [
+    "-C",
+    "linker=flip-link",
+    "-C",
+    "link-arg=-Tlink.x",
+    "-C",
+    "link-arg=--nmagic",
+    # STM32H723ZG is a Cortex-M7F with FPv5-D16 (double-precision FPU).
+    # Selecting the CPU enables hardware f64 codegen instead of soft-float calls.
+    "-C",
+    "target-cpu=cortex-m7",
+]
 
 [build]
-target = "thumbv7em-none-eabihf" # Cortex-M4F (with FPU)
+target = "thumbv7em-none-eabihf" # Cortex-M7F (with single and double-precision FPU)
 
 [env]
 DEFMT_LOG = "trace"
