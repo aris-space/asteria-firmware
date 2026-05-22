@@ -5,6 +5,15 @@ use lsm6dso32::types::{Acceleration, AngularRate};
 
 use crate::sensors::{BarometerId, DhtId, GnssId, ImuId, MagnetometerId};
 
+/// Derived signal payloads. These are the hermes-can wire types, re-exported
+/// so processing tasks and the CAN task can refer to them by their semantic
+/// name without dragging the `hermes_can` path everywhere. `ImuData` is
+/// re-named to `InertialFrame` since `ImuData` clashes with the raw IMU
+/// reading defined below.
+pub use hermes_can::messages::sensor_data::{
+    EnvironmentalData, ImuData as InertialFrame, PositionData, VelocityData,
+};
+
 #[derive(Clone, Copy, Debug)]
 pub struct Timestamped<T> {
     pub ts: Instant,
@@ -69,6 +78,15 @@ pub struct MagData {
     pub x: i16,
     pub y: i16,
     pub z: i16,
+}
+
+/// Calibrated magnetic field in nT, in board frame. Output of the magnetic
+/// field processing task; consumed by the inertial fusion and CAN tasks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MagFieldNt {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 #[derive(Clone, Copy, Debug)]

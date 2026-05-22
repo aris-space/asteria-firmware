@@ -3,9 +3,9 @@ use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant};
 use nalgebra::{Matrix3, Vector3};
 
-use crate::measurements::MagSample;
+use crate::measurements::{MagFieldNt, MagSample};
 use crate::sensors::{MAGNETOMETER_0, MAGNETOMETER_1, MagnetometerId};
-use crate::signals::{self, MagFieldNt};
+use crate::signals;
 
 /// LSM303AGR raw count -> nT (datasheet sensitivity).
 const NT_PER_COUNT: f32 = 150.0;
