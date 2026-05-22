@@ -1,3 +1,28 @@
+//! LSM6DSO32 IMU readout.
+//!
+//! Like every readout in this module, the task follows the shared
+//! `Inactive` <-> `Active` shape (see [`super`]): `Inactive` tries to
+//! init the sensor and retries with exponential backoff on failure;
+//! `Active` runs the FIFO drain loop until too many consecutive errors
+//! push it back to `Inactive`. Each transition flips
+//! [`crate::sensors::IMU_STATUS`] so we can publish the state to CAN.
+//!
+//! The sensor batches accel and gyro samples into its hardware FIFO at the
+//! configured ODR. Each FIFO entry carries a `TagSensor` byte that says
+//! whether it's an accel or gyro reading; because [`ACCEL_ODR`] and [`GYRO_ODR`]
+//! are the same, we expect them to be produced in pairs. While it remains undefined
+//! in the datasheet, in practice these pairs are interleaved.
+//!
+//! One of the interrupt lines (INT1) is configured to fire when the FIFO
+//! crosses [`FIFO_WATERMARK`]. We then drain whatever is queued into a local
+//! scratch buffer ([`FIFO_BUFFER_SIZE`] entries) with a single SPI transaction, iterate
+//! it as accel+gyro pairs, apply the sensor-to-board axis flip, and publish one [`ImuSample`]
+//! per pair. Sample timestamps are interpolated across the batch using the wall-clock
+//! interval between consecutive interrupts.
+//!
+//! [`LOOP_TIMEOUT`] bounds the wait on INT1 so a missed interrupt is
+//! recovered after roughly two expected periods.
+
 use core::sync::atomic::Ordering;
 
 use defmt::{Debug2Format, debug, error, info, trace, warn};
@@ -188,6 +213,8 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             let avg_dt_us =
                 this_data_end.duration_since(this_data_start).as_micros() / num_pairs as u64;
 
+            // While the sensor's fifo can in theory produce timestamps, in practice these were
+            // less accurate than simply using the wall clock time and interpolating over samples.
             let mut samples = heapless::Vec::<ImuSample, 256>::new();
             for (i, chunk) in fifo_buf[..fifo_entries].chunks_exact(2).enumerate() {
                 let (acc, gyr) = match (chunk[0].tag_sensor(), chunk[1].tag_sensor()) {
@@ -203,8 +230,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                     }
                 };
 
-                // Sensor -> board frame: flip X and Z. Saturate, since `i16::MIN`
-                // would silently overflow under plain negation.
+                // Convert Sensor -> board frame: flip X and Z
                 let accel = Acceleration::from_raw(
                     AccelerationRaw {
                         x: acc.x().saturating_neg(),
