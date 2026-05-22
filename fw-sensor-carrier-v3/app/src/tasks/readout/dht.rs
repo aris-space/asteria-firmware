@@ -6,13 +6,14 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use sht4x::{Precision, Sht4xAsync};
 
+use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{EnvData, EnvSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{DHT_STATUS, DhtId, SensorStatus};
 use crate::signals;
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
-const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000); // 1 Hz
+pub const SAMPLE_HZ: u32 = 1;
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 struct Inactive<I2C> {
     sensor: Sht4xAsync<I2C, Delay>,

@@ -5,9 +5,10 @@ use super::filters::MovingAverage;
 use crate::measurements::PressureSample;
 use crate::sensors::{BAROMETER_0, BAROMETER_1};
 use crate::signals;
+use crate::tasks::readout::barometer::SAMPLE_HZ as BAROMETER_HZ;
 
-const BAROMETER_SAMPLE_HZ: usize = 40;
-const MOVING_AVERAGE_COUNT: usize = (BAROMETER_SAMPLE_HZ + 4) / 5; // ~5 Hz cutoff
+/// Window length for a ~5 Hz output cutoff at the barometer's sample rate.
+const MOVING_AVERAGE_COUNT: usize = (BAROMETER_HZ as usize + 4) / 5;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {

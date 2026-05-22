@@ -6,13 +6,14 @@ use ms5607::{Ms5607, Oversampling};
 
 use core::sync::atomic::Ordering;
 
+use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{PressureData, PressureSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{BAROMETER_STATUS, BarometerId, SensorStatus};
 use crate::signals;
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
-const SAMPLE_INTERVAL: Duration = Duration::from_millis(25); // ~40 Hz
+pub const SAMPLE_HZ: u32 = 40;
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 struct Inactive<I2C> {
     sensor: Ms5607<I2C, ms5607::Uninitialized>,

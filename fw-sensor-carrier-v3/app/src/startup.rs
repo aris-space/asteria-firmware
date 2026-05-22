@@ -14,6 +14,8 @@ use crate::sensors::{
 
 use crate::{resources, tasks};
 
+// Per-sensor measurement-to-publish latency. The readout subtracts this from
+// `Instant::now()` to estimate when the sample was actually captured.
 const BAROMETER_DELAY: Duration = Duration::from_millis(20); // TODO: calibrate
 const MAGNETOMETER_DELAY: Duration = Duration::from_millis(0); // TODO: calibrate
 const GNSS_DELAY: Duration = Duration::from_millis(100); // TODO: calibrate

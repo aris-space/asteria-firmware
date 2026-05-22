@@ -6,13 +6,15 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 
+use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{MagData, MagSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{MAGNETOMETER_STATUS, MagnetometerId, SensorStatus};
 use crate::signals;
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
-const SAMPLE_INTERVAL: Duration = Duration::from_millis(100); // 10 Hz, matches MagOutputDataRate::Hz10
+/// Matches `MagOutputDataRate::Hz10` set in `initialise`.
+pub const SAMPLE_HZ: u32 = 10;
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 async fn initialise<I2C: embedded_hal_async::i2c::I2c>(
     i2c: I2C,

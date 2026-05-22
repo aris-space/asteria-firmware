@@ -11,11 +11,11 @@ use lsm6dso32::{
     Uninitialised,
 };
 
+use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::measurements::{ImuData, ImuSample, Timestamped};
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
 pub const IMU_ODR_HZ: u32 = 833;
 pub const IMU_TARGET_DT: f32 = 1.0 / IMU_ODR_HZ as f32;
