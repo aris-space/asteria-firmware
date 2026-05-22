@@ -2,6 +2,7 @@
 use crate::drivers::inertial::ORIENTATION_WATCH;
 use crate::sensors::SensorId;
 use crate::sensors::gnss::PvtData;
+use dp_sensor_carrier::{PositionData, VelocityData};
 use embassy_sync::{
     blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
     mutex::Mutex,
@@ -11,8 +12,6 @@ use embassy_sync::{
 };
 use embassy_time::{Duration, Instant};
 use embedded_utils::{error, info};
-use hermes_can::messages::sensor_data::{PositionData, VelocityData};
-use hermes_can::messages::system_management::UTCTimeUpdate;
 use nalgebra::{UnitQuaternion, Vector3};
 use ublox::GpsFix;
 
@@ -32,8 +31,6 @@ pub static POSITION_PUBSUB: PubSubChannel<ThreadModeRawMutex, PositionData, CAP,
 pub static VELOCITY_WATCH: Watch<ThreadModeRawMutex, VelocityData, WATCH> = Watch::new();
 pub static VELOCITY_PUBSUB: PubSubChannel<ThreadModeRawMutex, VelocityData, CAP, SUB, PUB> =
     PubSubChannel::new();
-
-pub static TIME_WATCH: Watch<ThreadModeRawMutex, UTCTimeUpdate, WATCH> = Watch::new();
 
 pub static POSITION_VELOCITY_TIME_DRIVER: OnceLock<PositionVelocityTimeDriver> = OnceLock::new();
 

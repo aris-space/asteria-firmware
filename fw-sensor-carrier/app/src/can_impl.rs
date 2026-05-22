@@ -4,193 +4,57 @@ use crate::sensors::{
     DHT_BUS_2_STATUS, GPS1_STATUS, GPS2_STATUS, IMU1_STATUS, IMU2_STATUS,
     MAGNETOMETER_BUS_1_STATUS, MAGNETOMETER_BUS_2_STATUS,
 };
+use can_utils::rxtx::{TypedCanReceive, TypedCanTransmit};
 use core::sync::atomic::Ordering;
+use data_core::can::{hal::CanDecode, sparse_decodable_can_message};
+use datatypes::status::{BoardId, SensorStatus, StatusCommonMessage};
+use datatypes::units::HPa;
+use dp_sensor_carrier::{
+    EnvironmentalData, ImuData, MagnetometerData, Message, OrientationData, PositionData,
+    SensorCarrierStatus, SensorsHealth, VelocityData,
+};
 use embassy_executor::Spawner;
-use embassy_stm32::can::enums::BusError;
-use embassy_stm32::can::filter::{Action, FilterType, StandardFilter};
-use embassy_stm32::can::frame::{self, FdFrame, Header};
-use embassy_stm32::can::{Can, CanConfigurator, CanRx, CanTx, OperatingMode, RxPin, TxPin};
-use embassy_stm32::interrupt::typelevel::Binding;
-use embassy_stm32::{Peri, can};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_stm32::can::{CanRx, CanTx};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_sync::once_lock::OnceLock;
-use embassy_time::{Instant, Ticker, TimeoutError, with_timeout};
-use embedded_can::Id;
+use embassy_time::{Instant, Ticker, with_timeout};
 use embedded_utils::fmt::*;
-use hermes_can::messages::Message;
-use hermes_can::messages::board_status::SensorStatus;
-use hermes_can::{CanDecodeError, CanEncodeError, CanMessage, next_valid_length};
 use nalgebra::Vector3;
 
-/// Error type for CAN operations.
-#[allow(unused)]
-#[derive(Debug, thiserror::Error)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum CanError {
-    #[error("CAN bus error")]
-    Bus(BusError),
+const THIS_BOARD_ID: BoardId = BoardId::SensorCarrier;
 
-    #[error("CAN timeout")]
-    Timeout(TimeoutError),
-
-    #[error("Encoding CAN message failed: {0}")]
-    Encode(#[from] CanEncodeError),
-
-    #[error("Decoding CAN message failed: {0}")]
-    Decode(#[from] CanDecodeError),
-
-    #[error("Invalid frame or Id sent/received")]
-    Other,
-}
-
-/// Trait for types that can transmit CAN messages asynchronously.
-pub trait CanTransmitter {
-    /// Transmit a CAN message.
-    ///
-    /// Returns `Err(CanError)` if encoding or bus transmission fails.
-    async fn transmit<M: CanMessage>(&mut self, msg: M) -> Result<(), CanError>;
-}
-
-/// Trait for types that can receive CAN messages asynchronously.
-pub trait CanReceiver {
-    /// Receive the next CAN message and its timestamp.
-    ///
-    /// Returns `Err(CanError)` if the frame is invalid or bus read fails.
-    async fn recv(&mut self) -> Result<(Message, frame::Timestamp), CanError>;
-}
-
-macro_rules! impl_can_transmitter {
-    ($ty:ty) => {
-        impl CanTransmitter for $ty {
-            async fn transmit<M: CanMessage>(&mut self, msg: M) -> Result<(), CanError> {
-                let mut buf = [0u8; 64];
-                let (id, len) = msg.try_write_into(&mut buf)?;
-
-                // `next_valid_length` should never return `None`, since payload length is already checked
-                // to be less than 64.
-                let dlc = next_valid_length(len).ok_or(CanError::Other)?;
-
-                // zero-pad the payload to the next valid length.
-                let payload = &buf[..dlc];
-
-                // Barring embassy changes their implementation, this will never fail
-                // since we've already ensured that the payload length is valid.
-                let frame = FdFrame::new(Header::new(id.into(), dlc as u8, false), payload)
-                    .map_err(|_| CanError::Other)?;
-
-                // todo: (should we?) come up with a better way to handle dropped frames
-                if let Some(pushed) = self.write_fd(&frame).await {
-                    warn!("CAN dropped frame: {:?}", pushed);
-                    // goodbye frame :(
-                }
-
-                Ok(())
-            }
-        }
-    };
-}
-
-macro_rules! impl_can_receiver {
-    ($ty:ty) => {
-        impl CanReceiver for $ty {
-            async fn recv(&mut self) -> Result<(Message, frame::Timestamp), CanError> {
-                let envelope = self.read_fd().await.map_err(CanError::Bus)?;
-                let frame = envelope.frame;
-
-                let id = match frame.id() {
-                    Id::Standard(id) => id,
-                    Id::Extended(_id) => {
-                        // should really be unreachable, since we only use standard ids,
-                        // but let's stay on the safe side
-                        return Err(CanError::Other);
-                    }
-                };
-
-                let x = Message::try_from_parts(*id, frame.data())?;
-                Ok((x, envelope.ts))
-            }
-        }
-    };
-}
-
-impl_can_receiver!(Can<'_>);
-impl_can_transmitter!(Can<'_>);
-impl_can_receiver!(CanRx<'_>);
-impl_can_transmitter!(CanTx<'_>);
-
-pub fn setup_can<'a, T: can::Instance>(
-    peri: Peri<'a, T>,
-    rx: Peri<'a, impl RxPin<T>>,
-    tx: Peri<'a, impl TxPin<T>>,
-    _irqs: impl Binding<T::IT0Interrupt, can::IT0InterruptHandler<T>>
-    + Binding<T::IT1Interrupt, can::IT1InterruptHandler<T>>
-    + 'a,
-) -> Can<'a> {
-    let mut can = CanConfigurator::new(peri, rx, tx, _irqs);
-    can.set_bitrate(1_000_000);
-    can.set_fd_data_bitrate(1_000_000, false);
-
-    const FILTER_COUNT: usize = 28;
-    let mut filters: [StandardFilter; FILTER_COUNT] = [StandardFilter {
-        filter: FilterType::Disabled,
-        action: Action::Disable,
-    }; FILTER_COUNT];
-
-    // This will fail to compile if the number of enabled ids exceeds the number of filters
-    const __ASSERT_LEN_OK: () = {
-        if Message::NUM_ENABLED_IDS >= FILTER_COUNT - 1 {
-            core::panic!("Too many receiving can ids");
-        }
-    };
-    filters[Message::NUM_ENABLED_IDS] = StandardFilter::reject_all();
-
-    // Configure the IDs based on the enabled messages in the `hermes-can` crate.
-    for (filter_idx, id) in Message::ENABLED_IDS.iter().enumerate() {
-        trace!("Setting up filter for id: {:#X}", id.as_raw());
-        filters[filter_idx] = StandardFilter {
-            filter: FilterType::DedicatedSingle(*id),
-            action: Action::StoreInFifo1,
-        };
+// Messages received on the bus that the Sensor Carrier cares about.
+sparse_decodable_can_message! {
+    enum ReceivedMessage {
+        ResetAll(dp_system_management::Message::ResetAll),
+        ResetSpecific(dp_system_management::Message::ResetSpecific),
     }
-    can.properties().set_standard_filters(&filters);
-
-    /* todo: unsure if this works, did not work in last year's project
-    let mut config = can.config();
-    config.global_filter = GlobalFilter::accept_all();
-    can.set_config(config);
-     */
-
-    // TODO: Do not EVER forget to change this back to `NormalOperationMode` again after testing
-    //  See :defeated-louis: meme (╯°□°)╯︵ ┻━┻
-    can.start(OperatingMode::NormalOperationMode)
 }
 
-const THIS_BOARD_ID: hermes_can::messages::BoardId = hermes_can::messages::BoardId::SensorCarrier;
+// This will fail to compile if the number of enabled ids exceeds the number of filters.
+const __ASSERT_LEN_OK: () = {
+    const FILTER_COUNT: usize = 28;
+    if ReceivedMessage::SUPPORTED_IDS.len() >= FILTER_COUNT - 1 {
+        core::panic!("Too many receiving can ids");
+    }
+};
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
     loop {
-        match can_rx.recv().await {
-            Ok((msg, ts)) => {
-                trace!("Received message {:?} on bus at {:?}", msg, ts);
-
-                match msg {
-                    Message::ResetAll(_) => {
-                        warn!("Received ResetAll message, resetting Sensor Carrier");
+        match can_rx.recv::<ReceivedMessage>().await {
+            Ok(msg) => match msg {
+                ReceivedMessage::ResetAll(_) => {
+                    warn!("Received ResetAll message, resetting Sensor Carrier");
+                    reset_now();
+                }
+                ReceivedMessage::ResetSpecific(board_id) => {
+                    if board_id == THIS_BOARD_ID {
+                        warn!("Received ResetSpecific message, resetting Sensor Carrier");
                         reset_now();
                     }
-                    Message::ResetSpecific(x) => {
-                        if x.board_id == THIS_BOARD_ID {
-                            warn!("Received ResetSpecific message, resetting Sensor Carrier");
-                            reset_now();
-                        }
-                    }
-                    _ => {
-                        warn!("Received unknown CAN message: {:?}", msg);
-                    }
-                };
-            }
+                }
+            },
             Err(err) => {
                 error!("CAN RX error: {:?}", err);
             }
@@ -198,14 +62,13 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
     }
 }
 
-pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
+pub async fn spawn_can_tx_tasks(
+    can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>,
+    spawner: Spawner,
+) {
     // Our transmission policy is as follows:
     // Send new data when available, but only if a minimum period has elapsed since the last
     // transmission. Otherwise, discard and wait for the next data.
-
-    mod messages {
-        pub use hermes_can::messages::sensor_data::*;
-    }
 
     /// A module to group all CAN transmission configuration constants.
     mod task_config {
@@ -234,18 +97,9 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
         pub const NEW_DATA_TIMEOUT: Duration = Duration::from_secs(10);
     }
 
-    static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
-
-    CAN_TX
-        .init(Mutex::new(can_tx))
-        .ok()
-        .expect("Failed to set CAN TX mutex");
-
-    let can_tx = CAN_TX.get().await;
-
     // Pressure task (≈40 Hz)
     #[embassy_executor::task]
-    async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn pressure_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut pressure_watch = pressure::PRESSURE_DRIVER_WATCH
             .receiver()
@@ -262,13 +116,18 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
             };
 
             let now = Instant::now();
-            let can_data = messages::PressureData { pressure };
+            let payload = HPa(pressure);
 
             if now - last_sent >= task_config::PRESSURE_MIN_PERIOD {
                 let mut tx = can_tx.lock().await;
-                match with_timeout(task_config::TX_TIMEOUT, tx.transmit(can_data.clone())).await {
+                match with_timeout(
+                    task_config::TX_TIMEOUT,
+                    tx.transmit(Message::PressureData(payload)),
+                )
+                .await
+                {
                     Ok(Ok(())) => {
-                        trace!("Sent pressure data: {:?}", can_data);
+                        trace!("Sent pressure data: {:?}", payload);
                         last_sent = now;
                     }
                     Ok(Err(err)) => error!("CAN TX error: {:?}", err),
@@ -278,21 +137,21 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                     ),
                 }
             } else {
-                trace!("Discarding pressure data: {:?}", can_data);
+                trace!("Discarding pressure data: {:?}", payload);
             }
         }
     }
 
     // Environmental task (≈1 Hz)
     #[embassy_executor::task]
-    async fn environmental_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn environmental_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut environmental_watch = environmental::ENVIRONMENTAL_DRIVER_WATCH
             .receiver()
             .expect("failed to get environmental watch");
 
         loop {
-            let env_data = loop {
+            let env_data: EnvironmentalData = loop {
                 if let Ok(e) =
                     with_timeout(task_config::NEW_DATA_TIMEOUT, environmental_watch.changed()).await
                 {
@@ -304,7 +163,12 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
             let now = Instant::now();
             if now - last_sent >= task_config::ENVIRONMENTAL_MIN_PERIOD {
                 let mut tx = can_tx.lock().await;
-                match with_timeout(task_config::TX_TIMEOUT, tx.transmit(env_data.clone())).await {
+                match with_timeout(
+                    task_config::TX_TIMEOUT,
+                    tx.transmit(Message::EnvironmentalData(env_data.clone())),
+                )
+                .await
+                {
                     Ok(Ok(())) => {
                         trace!("sent environmental data: {:?}", env_data);
                         last_sent = now;
@@ -323,7 +187,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Orientation task (≈40 Hz)
     #[embassy_executor::task]
-    async fn orientation_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn orientation_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut orientation_watch = inertial::ORIENTATION_WATCH
             .receiver()
@@ -339,7 +203,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                 error!("Timeout waiting for orientation data");
             };
 
-            let can_data = messages::OrientationData {
+            let payload = OrientationData {
                 orientation_w: orientation.w,
                 orientation_x: orientation.i,
                 orientation_y: orientation.j,
@@ -349,9 +213,14 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
             let now = Instant::now();
             if now - last_sent >= task_config::ORIENTATION_MIN_PERIOD {
                 let mut tx = can_tx.lock().await;
-                match with_timeout(task_config::TX_TIMEOUT, tx.transmit(can_data.clone())).await {
+                match with_timeout(
+                    task_config::TX_TIMEOUT,
+                    tx.transmit(Message::OrientationData(payload.clone())),
+                )
+                .await
+                {
                     Ok(Ok(())) => {
-                        trace!("sent orientation data: {:?}", can_data);
+                        trace!("sent orientation data: {:?}", payload);
                         last_sent = now;
                     }
                     Ok(Err(err)) => error!("CAN TX error: {:?}", err),
@@ -361,14 +230,14 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                     ),
                 }
             } else {
-                trace!("Discarding orientation data: {:?}", can_data);
+                trace!("Discarding orientation data: {:?}", payload);
             }
         }
     }
 
     // Magnetic field task (≈10 Hz)
     #[embassy_executor::task]
-    async fn magnetic_field_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn magnetic_field_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut orientation_anon = inertial::ORIENTATION_WATCH.anon_receiver();
         let mut magnetic_field_watch = magnetic_field::MAGNETIC_FIELD_WATCH
@@ -400,7 +269,7 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
             // passive rotation NED → body
             let ned = orientation.inverse() * xyz;
 
-            let can_data = messages::MagnetometerData {
+            let payload = MagnetometerData {
                 magnetic_field_x: xyz.x,
                 magnetic_field_y: xyz.y,
                 magnetic_field_z: xyz.z,
@@ -412,9 +281,14 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
             let now = Instant::now();
             if now - last_sent >= task_config::MAGNETIC_FIELD_MIN_PERIOD {
                 let mut tx = can_tx.lock().await;
-                match with_timeout(task_config::TX_TIMEOUT, tx.transmit(can_data.clone())).await {
+                match with_timeout(
+                    task_config::TX_TIMEOUT,
+                    tx.transmit(Message::MagnetometerData(payload.clone())),
+                )
+                .await
+                {
                     Ok(Ok(())) => {
-                        trace!("sent magnetic field data: {:?}", can_data);
+                        trace!("sent magnetic field data: {:?}", payload);
                         last_sent = now;
                     }
                     Ok(Err(err)) => error!("CAN TX error: {:?}", err),
@@ -424,20 +298,20 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                     ),
                 }
             } else {
-                trace!("Discarding magnetic field data: {:?}", can_data);
+                trace!("Discarding magnetic field data: {:?}", payload);
             }
         }
     }
 
     // Position task (≈20 Hz)
     #[embassy_executor::task]
-    async fn position_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn position_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut position_watch = position_velocity::POSITION_WATCH
             .receiver()
             .expect("failed to get position watch");
         loop {
-            let can_data = loop {
+            let payload: PositionData = loop {
                 if let Ok(p) =
                     with_timeout(task_config::NEW_DATA_TIMEOUT, position_watch.changed()).await
                 {
@@ -449,9 +323,14 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
             let now = Instant::now();
             if now - last_sent >= task_config::POSITION_MIN_PERIOD {
                 let mut tx = can_tx.lock().await;
-                match with_timeout(task_config::TX_TIMEOUT, tx.transmit(can_data.clone())).await {
+                match with_timeout(
+                    task_config::TX_TIMEOUT,
+                    tx.transmit(Message::PositionData(payload.clone())),
+                )
+                .await
+                {
                     Ok(Ok(())) => {
-                        trace!("sent position data: {:?}", can_data);
+                        trace!("sent position data: {:?}", payload);
                         last_sent = now;
                     }
                     Ok(Err(err)) => error!("CAN TX error: {:?}", err),
@@ -461,20 +340,20 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                     ),
                 }
             } else {
-                trace!("Discarding position data: {:?}", can_data);
+                trace!("Discarding position data: {:?}", payload);
             }
         }
     }
 
     // Velocity task (≈20 Hz)
     #[embassy_executor::task]
-    async fn velocity_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn velocity_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut velocity_watch = position_velocity::VELOCITY_WATCH
             .receiver()
             .expect("failed to get velocity watch");
         loop {
-            let can_data = loop {
+            let payload: VelocityData = loop {
                 if let Ok(v) =
                     with_timeout(task_config::NEW_DATA_TIMEOUT, velocity_watch.changed()).await
                 {
@@ -486,9 +365,14 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
             let now = Instant::now();
             if now - last_sent >= task_config::VELOCITY_MIN_PERIOD {
                 let mut tx = can_tx.lock().await;
-                match with_timeout(task_config::TX_TIMEOUT, tx.transmit(can_data.clone())).await {
+                match with_timeout(
+                    task_config::TX_TIMEOUT,
+                    tx.transmit(Message::VelocityData(payload.clone())),
+                )
+                .await
+                {
                     Ok(Ok(())) => {
-                        trace!("sent velocity data: {:?}", can_data);
+                        trace!("sent velocity data: {:?}", payload);
                         last_sent = now;
                     }
                     Ok(Err(err)) => error!("CAN TX error: {:?}", err),
@@ -498,21 +382,21 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                     ),
                 }
             } else {
-                trace!("Discarding velocity data: {:?}", can_data);
+                trace!("Discarding velocity data: {:?}", payload);
             }
         }
     }
 
     // Inertial task (≈40 Hz)
     #[embassy_executor::task]
-    async fn inertial_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn inertial_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let mut last_sent = Instant::now();
         let mut inertial_watch = inertial::INERTIAL_WATCH
             .receiver()
             .expect("failed to get inertial watch");
 
         loop {
-            let can_data = loop {
+            let payload: ImuData = loop {
                 if let Ok(i) =
                     with_timeout(task_config::NEW_DATA_TIMEOUT, inertial_watch.changed()).await
                 {
@@ -525,9 +409,14 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
             if now - last_sent >= task_config::INERTIAL_MIN_PERIOD {
                 let mut tx = can_tx.lock().await;
-                match with_timeout(task_config::TX_TIMEOUT, tx.transmit(can_data.clone())).await {
+                match with_timeout(
+                    task_config::TX_TIMEOUT,
+                    tx.transmit(Message::ImuData(payload.clone())),
+                )
+                .await
+                {
                     Ok(Ok(())) => {
-                        trace!("sent inertial data: {:?}", can_data);
+                        trace!("sent inertial data: {:?}", payload);
                         last_sent = now;
                     }
                     Ok(Err(err)) => error!("CAN TX error: {:?}", err),
@@ -537,17 +426,14 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                     ),
                 }
             } else {
-                trace!("Discarding inertial data: {:?}", can_data);
+                trace!("Discarding inertial data: {:?}", payload);
             }
         }
     }
 
     // Status task (1 Hz)
     #[embassy_executor::task]
-    async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-        use hermes_can::messages::board_status::{
-            SensorCarrierStatus, SensorsHealth, StatusCommonMessage,
-        };
+    async fn status_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let mut interval = Ticker::every(task_config::STATUS_PERIOD);
 
         loop {
@@ -576,10 +462,9 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                 },
             };
 
-            // This scope guard ensures the lock is released before the next await point.
             {
-                let mut can = can_tx.lock().await;
-                if let Err(err) = can.transmit(full_status.clone()).await {
+                let mut tx = can_tx.lock().await;
+                if let Err(err) = tx.transmit(Message::BoardStatus(full_status.clone())).await {
                     error!("CAN TX error: {:?}", err);
                 } else {
                     trace!("sent status data: {:?}", full_status);
@@ -592,24 +477,23 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 
     // Build Information task
     #[embassy_executor::task]
-    async fn build_information(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    async fn build_information(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
         let build_info = crate::build_info::BUILD_INFO.get();
-        let build_info_msg = hermes_can::messages::debug_info::SensorCarrierBuildInfo {
-            data: build_info.clone(),
-        };
 
         let mut ticker = Ticker::every(task_config::BUILD_INFO_PERIOD);
         loop {
-            // This scope is necessary to ensure the lock is released.
             {
                 let mut tx = can_tx.lock().await;
-                match with_timeout(task_config::TX_TIMEOUT, tx.transmit(build_info_msg.clone()))
-                    .await
+                match with_timeout(
+                    task_config::TX_TIMEOUT,
+                    tx.transmit(Message::BuildInfo(build_info.clone())),
+                )
+                .await
                 {
-                    Ok(Ok(())) => trace!("Sent SensorCarrierBuildInfo: {:?}", build_info_msg),
-                    Ok(Err(err)) => error!("Error sending SensorCarrierBuildInfo: {:?}", err),
+                    Ok(Ok(())) => trace!("Sent build info: {:?}", build_info),
+                    Ok(Err(err)) => error!("Error sending build info: {:?}", err),
                     Err(_) => error!(
-                        "Timeout sending SensorCarrierBuildInfo after {} ms",
+                        "Timeout sending build info after {} ms",
                         task_config::TX_TIMEOUT.as_millis()
                     ),
                 }
@@ -640,6 +524,6 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
 }
 
 /// Resets the system instantly and restarts the firmware.
-fn reset_now() {
+fn reset_now() -> ! {
     cortex_m::peripheral::SCB::sys_reset();
 }

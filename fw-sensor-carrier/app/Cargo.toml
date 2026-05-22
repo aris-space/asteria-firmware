@@ -8,7 +8,15 @@ authors = ["Louis Schell <louis.schell1@gmx.de>"]
 embedded-utils = { path = "../../crates/embedded-utils" }
 ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
 lsm6dso32 = { path = "../../crates/devices/lsm6dso32", features = ["defmt-03"] }
-hermes-can = { path = "../../hermes-can", version = "=0.3", features = ["defmt"] }
+can-utils = { path = "../../crates/can-utils" }
+data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
+dp-sensor-carrier = { path = "../../data-definitions/datapoints/dp-sensor-carrier", version = "=0.3", features = [
+    "can",
+] }
+dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [
+    "can",
+] }
+datatypes = { path = "../../data-definitions/datatypes" }
 thiserror = { version = "2.0.11", default-features = false }
 cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
@@ -60,6 +68,10 @@ debug = ["defmt", "dep:panic-probe"]
 defmt = [
     "dep:defmt",
     "dep:defmt-rtt",
+    "can-utils/defmt",
+    "data-core/defmt",
+    "dp-sensor-carrier/derive_defmt",
+    "dp-system-management/derive_defmt",
     "panic-probe/defmt",
     "panic-probe/defmt-error",
     "panic-probe/print-defmt",
@@ -71,6 +83,7 @@ defmt = [
     "embassy-stm32/defmt",
     "embedded-hal-async/defmt-03",
     "embedded-hal-bus/defmt-03",
+    "embedded-utils/defmt",
 ]
 
 [[bin]]

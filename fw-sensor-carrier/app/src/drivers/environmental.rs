@@ -1,4 +1,6 @@
 use crate::{filters::ExponentialMovingAverage, sensors::dht};
+use datatypes::units::{Celsius, HPa};
+use dp_sensor_carrier::EnvironmentalData;
 use embassy_sync::{
     blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
     mutex::Mutex,
@@ -8,7 +10,6 @@ use embassy_sync::{
 };
 use embassy_time::Instant;
 use embedded_utils::ExtendTime;
-use hermes_can::messages::sensor_data::EnvironmentalData;
 use nalgebra::Vector2;
 
 pub const CAP: usize = 10;
@@ -108,9 +109,9 @@ impl<'a> EnvironmentalDriver<'a> {
 
     fn publish(&self, th: Vector2<f32>, pressure: f32) {
         let fused = EnvironmentalData {
-            temperature: th.x,
+            temperature: Celsius(th.x),
             humidity: th.y,
-            pressure,
+            pressure: HPa(pressure),
         };
         self.publisher.publish_immediate(fused.clone());
         self.watch.send(fused);

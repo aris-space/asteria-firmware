@@ -405,8 +405,15 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(blink(led_yellow).expect("Error spawning blinking task."));
 
     // setup CAN on FDCAN3 PF6/PF7 and start the loops
-    let can = can_impl::setup_can(p.FDCAN3, p.PF6, p.PF7, Irqs); // TX=PF7, RX=PF6
+    let can = can_utils::setup::setup_can(
+        p.FDCAN3,
+        p.PF6, // RX
+        p.PF7, // TX
+        Irqs,
+        <can_impl::ReceivedMessage as data_core::can::hal::CanDecode>::SUPPORTED_IDS,
+    );
     let (tx, rx, _options) = can.split();
+    let tx = can_utils::setup::make_multiplexable(tx);
 
     spawner.spawn(can_impl::can_rx_task(rx).expect("Failed to spawn CAN RX task."));
 
