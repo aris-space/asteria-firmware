@@ -4,9 +4,11 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 
+use core::sync::atomic::Ordering;
+
 use crate::measurements::{MagData, MagSample, Timestamped};
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
-use crate::sensors::MagnetometerId;
+use crate::sensors::{MAGNETOMETER_STATUS, MagnetometerId, SensorStatus};
 use crate::signals;
 use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
 
@@ -67,6 +69,8 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
             match initialise(self.i2c).await {
                 Ok(sensor) => {
                     info!("magnetometer: active");
+                    MAGNETOMETER_STATUS[self.id.index()]
+                        .store(SensorStatus::Active, Ordering::Relaxed);
                     return Active {
                         sensor,
                         id: self.id,
@@ -100,13 +104,14 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
             match self.sensor.magnetic_field().await {
                 Ok(field) => {
                     errors = 0;
+                    // Sensor -> board frame: negate all three axes.
                     let sample = MagSample {
                         sensor_id: self.id,
                         data: Timestamped::now_with_delay(
                             MagData {
-                                x: field.x_raw() as i16,
-                                y: field.y_raw() as i16,
-                                z: field.z_raw() as i16,
+                                x: (field.x_raw() as i16).wrapping_neg(),
+                                y: (field.y_raw() as i16).wrapping_neg(),
+                                z: (field.z_raw() as i16).wrapping_neg(),
                             },
                             self.delay,
                         ),
@@ -135,6 +140,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         }
 
         warn!("magnetometer: inactive (too many errors)");
+        MAGNETOMETER_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             i2c: self.sensor.destroy(),
             id: self.id,

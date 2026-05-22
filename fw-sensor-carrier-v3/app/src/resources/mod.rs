@@ -3,11 +3,9 @@ use embassy_stm32::{Peri, Peripherals, peripherals};
 
 pub mod buses;
 pub mod can;
-pub mod flash;
 pub mod leds;
 pub mod sensors;
 pub mod uart;
-pub mod usb;
 
 assign_resources! {
     buzzer: Buzzer {
@@ -76,18 +74,6 @@ assign_resources! {
         periph: FDCAN3,
         rx: PF6,
         tx: PF7,
-    }
-    flash: Flash {
-        periph: SPI2,
-        sck: PB13,
-        miso: PB14,
-        mosi: PB15,
-        cs: PB12,
-    }
-    usb: Usb {
-        usb: USB_OTG_HS,
-        dp: PA12,
-        dm: PA11,
     }
 }
 

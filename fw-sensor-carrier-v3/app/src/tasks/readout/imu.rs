@@ -9,11 +9,16 @@ use lsm6dso32::{
     Uninitialised,
 };
 
+use core::sync::atomic::Ordering;
+
 use crate::measurements::{ImuData, ImuSample, Timestamped};
 use crate::resources::sensors::SpiDevice;
-use crate::sensors::ImuId;
+use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
 use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
+
+pub const IMU_ODR_HZ: u32 = 833;
+pub const IMU_TARGET_DT: f32 = 1.0 / IMU_ODR_HZ as f32;
 
 const FIFO_BUFFER_SIZE: usize = 512;
 const FIFO_WATERMARK: u16 = 26;
@@ -86,6 +91,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                         continue;
                     }
                     info!("imu: active");
+                    IMU_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
                     return Active {
                         sensor,
                         int1: self.int1,
@@ -180,19 +186,20 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                     _ => continue,
                 };
 
+                // Sensor -> board frame: flip X and Z.
                 let accel = Acceleration::from_raw(
                     AccelerationRaw {
-                        x: acc.x(),
+                        x: -acc.x(),
                         y: acc.y(),
-                        z: acc.z(),
+                        z: -acc.z(),
                     },
                     self.sensor.accel_full_scale(),
                 );
                 let gyro = AngularRate::from_raw(
                     AngularRateRaw {
-                        x: gyr.x(),
+                        x: -gyr.x(),
                         y: gyr.y(),
-                        z: gyr.z(),
+                        z: -gyr.z(),
                     },
                     self.sensor.gyro_full_scale(),
                 );
@@ -210,6 +217,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
         }
 
         warn!("imu: inactive (too many errors)");
+        IMU_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             iface: self.sensor.destroy(),
             int1: self.int1,
