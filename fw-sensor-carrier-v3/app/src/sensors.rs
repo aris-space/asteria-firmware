@@ -7,11 +7,11 @@ macro_rules! define_sensor_family {
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
-        $vis struct $name(usize);
+        $vis struct $name(u8);
 
         impl $name {
             pub const fn index(self) -> usize {
-                self.0
+                self.0 as usize
             }
         }
 
