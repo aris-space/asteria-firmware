@@ -1,7 +1,7 @@
 use defmt::trace;
 use embassy_futures::select::{Either, select};
 
-use super::filters::MovingAverage;
+use crate::filters::MovingAverage;
 use crate::measurements::{Pressure, PressureSample};
 use crate::sensors::{BAROMETER_0, BAROMETER_1};
 use crate::signals;

@@ -2,7 +2,7 @@ use defmt::trace;
 use embassy_futures::select::{Either4, select4};
 use embassy_time::Instant;
 
-use super::filters::Ema;
+use crate::filters::Ema;
 use crate::measurements::Environment;
 use crate::sensors::{BAROMETER_0, BAROMETER_1, DHT_0, DHT_1};
 use crate::signals;
