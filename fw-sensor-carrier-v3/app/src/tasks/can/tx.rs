@@ -108,11 +108,17 @@ async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>
 
 #[embassy_executor::task]
 async fn environmental_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::EnvironmentalData;
     watch_loop!(
         signals::ENVIRONMENTAL_WATCH,
         ENVIRONMENTAL_MIN_PERIOD,
         |env| {
-            send(can_tx, env).await;
+            let msg = EnvironmentalData {
+                temperature: env.temperature_c,
+                humidity: env.humidity_rh,
+                pressure: env.pressure_mbar,
+            };
+            send(can_tx, msg).await;
         }
     );
 }
@@ -158,22 +164,54 @@ async fn magnetic_field_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'s
 
 #[embassy_executor::task]
 async fn position_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::PositionData;
     watch_loop!(signals::POSITION_WATCH, POSITION_MIN_PERIOD, |pos| {
-        send(can_tx, pos).await;
+        let msg = PositionData {
+            location_latitude: pos.lat_deg,
+            location_longitude: pos.lon_deg,
+            location_hamsl: pos.height_msl_m,
+            horizontal_accuracy: pos.horizontal_accuracy_m,
+            vertical_accuracy: pos.vertical_accuracy_m,
+        };
+        send(can_tx, msg).await;
     });
 }
 
 #[embassy_executor::task]
 async fn velocity_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::VelocityData;
     watch_loop!(signals::VELOCITY_WATCH, VELOCITY_MIN_PERIOD, |vel| {
-        send(can_tx, vel).await;
+        let msg = VelocityData {
+            velocity_x: vel.body_x,
+            velocity_y: vel.body_y,
+            velocity_z: vel.body_z,
+            velocity_north: vel.ned_north,
+            velocity_east: vel.ned_east,
+            velocity_down: vel.ned_down,
+        };
+        send(can_tx, msg).await;
     });
 }
 
 #[embassy_executor::task]
 async fn inertial_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    watch_loop!(signals::INERTIAL_WATCH, INERTIAL_MIN_PERIOD, |imu| {
-        send(can_tx, imu).await;
+    use hermes_can::messages::sensor_data::ImuData;
+    watch_loop!(signals::INERTIAL_WATCH, INERTIAL_MIN_PERIOD, |inertial| {
+        let msg = ImuData {
+            acceleration_x: inertial.body_accel_x,
+            acceleration_y: inertial.body_accel_y,
+            acceleration_z: inertial.body_accel_z,
+            angular_velocity_x: inertial.body_gyro_x,
+            angular_velocity_y: inertial.body_gyro_y,
+            angular_velocity_z: inertial.body_gyro_z,
+            acceleration_north: inertial.ned_accel_north,
+            acceleration_east: inertial.ned_accel_east,
+            acceleration_down: inertial.ned_accel_down,
+            angular_velocity_north: inertial.ned_gyro_north,
+            angular_velocity_east: inertial.ned_gyro_east,
+            angular_velocity_down: inertial.ned_gyro_down,
+        };
+        send(can_tx, msg).await;
     });
 }
 
@@ -218,9 +256,23 @@ async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>)
 
 #[embassy_executor::task]
 async fn build_information_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::debug_info::SensorCarrierBuildInfo;
+    use hermes_can::messages::debug_info::{BuildInformationCommon, SensorCarrierBuildInfo};
     let info = crate::build_info::BUILD_INFO.get();
-    let msg = SensorCarrierBuildInfo { data: info.clone() };
+    let msg = SensorCarrierBuildInfo {
+        data: BuildInformationCommon {
+            unix_timestamp: info.unix_timestamp,
+            author_initials: info.author_initials,
+            is_release: info.is_release,
+            debug_defmt_rtt: info.debug_defmt_rtt,
+            commit_hash: info.commit_hash,
+            is_git_dirty: info.is_git_dirty,
+            can_semver: [
+                hermes_can::VERSION_MAJOR,
+                hermes_can::VERSION_MINOR,
+                hermes_can::VERSION_PATCH,
+            ],
+        },
+    };
     let mut ticker = Ticker::every(BUILD_INFO_PERIOD);
     loop {
         send(can_tx, msg.clone()).await;

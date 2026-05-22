@@ -3,7 +3,7 @@ use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant};
 use nalgebra::{Matrix3, Vector3};
 
-use crate::measurements::{MagFieldNt, MagSample};
+use crate::measurements::{MagSample, RawMagSample};
 use crate::sensors::{MAGNETOMETER_0, MAGNETOMETER_1, MagnetometerId};
 use crate::signals;
 
@@ -26,24 +26,26 @@ pub async fn task() -> ! {
     let sender = signals::MAG_FIELD_WATCH.sender();
 
     loop {
-        let sample: MagSample =
+        let sample: RawMagSample =
             match select(sub0.next_message_pure(), sub1.next_message_pure()).await {
                 Either::First(s) | Either::Second(s) => s,
             };
 
-        if !selector.accept(sample.sensor_id, sample.data.ts) {
+        if !selector.accept(sample.src, sample.ts) {
             continue;
         }
 
-        let (hard_iron, soft_iron) = calibration_for(sample.sensor_id);
+        let (hard_iron, soft_iron) = calibration_for(sample.src);
         let raw_nt = Vector3::new(
-            sample.data.value.x as f32 * NT_PER_COUNT,
-            sample.data.value.y as f32 * NT_PER_COUNT,
-            sample.data.value.z as f32 * NT_PER_COUNT,
+            sample.x as f32 * NT_PER_COUNT,
+            sample.y as f32 * NT_PER_COUNT,
+            sample.z as f32 * NT_PER_COUNT,
         );
         let calibrated = soft_iron * (raw_nt - hard_iron);
 
-        let out = MagFieldNt {
+        let out = MagSample {
+            src: sample.src,
+            ts: sample.ts,
             x: calibrated.x,
             y: calibrated.y,
             z: calibrated.z,

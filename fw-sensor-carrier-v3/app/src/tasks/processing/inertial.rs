@@ -4,15 +4,23 @@ use embassy_time::{Duration, Instant};
 use imu_fusion::{Fusion, FusionAhrsSettings, FusionVector};
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
-use crate::measurements::{ImuSample, InertialFrame, MagFieldNt};
+use crate::measurements::{ImuSample, Inertial, MagSample};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
 
-// Mean magnetic declination at Gadmen Range, Switzerland (WMMHR-2025, 2026-05-18).
-// Used to rotate magnetometer-anchored orientation to true north.
+// Taken from https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml?#igrfwmm
+// Calculated for Gadmen Range, Switzerland
+// Model Used:  WMMHR-2025
+// Latitude:    46° 44' 59" N
+// Longitude:   8° 23' 11" E
+// Elevation:   1606.0 m Mean Sea Level
+//
+// 2026-05-18   Declination: 3° 28' 56" E
+//              changing by +0° 7' 24"/yr
+//              uncertainty ±0° 20' (1σ)
 const DECLINATION_DEG: f32 = 3.0 + 28.0 / 60.0 + 56.0 / 3600.0;
-const DECLINATION_RAD: f32 = DECLINATION_DEG * (core::f32::consts::PI / 180.0);
+const DECLINATION_RAD: f32 = DECLINATION_DEG.to_radians();
 
 const STANDARD_G: f32 = 9.80665;
 const GRAVITY: Vector3<f32> = Vector3::new(0.0, 0.0, STANDARD_G);
@@ -34,7 +42,6 @@ pub async fn task() -> ! {
     let mut fusion = fusion_instance();
     let mut selector = TimeoutSelector::new(TIMEOUT);
     let mut prev_ts: Option<Instant> = None;
-    let mut last_mag_ts: Option<Instant> = None;
 
     let orientation_sender = signals::ORIENTATION_WATCH.sender();
     let inertial_sender = signals::INERTIAL_WATCH.sender();
@@ -45,35 +52,25 @@ pub async fn task() -> ! {
                 Either::First(s) | Either::Second(s) => s,
             };
 
-        if !selector.accept(sample.sensor_id, sample.data.ts) {
+        if !selector.accept(sample.src, sample.ts) {
             continue;
         }
 
         let dt = prev_ts
-            .map(|p| sample.data.ts.saturating_duration_since(p).as_micros() as f32 / 1e6)
+            .map(|p| sample.ts.saturating_duration_since(p).as_micros() as f32 / 1e6)
             .unwrap_or(IMU_TARGET_DT);
-        prev_ts = Some(sample.data.ts);
+        prev_ts = Some(sample.ts);
 
-        let accel = sample.data.value.accel;
-        let gyro = sample.data.value.gyro;
+        let accel = sample.accel;
+        let gyro = sample.gyro;
 
         let gyr_vec = FusionVector::new(gyro.x, gyro.y, gyro.z);
         let acc_vec = FusionVector::new(accel.x, accel.y, accel.z);
 
-        let mag = mag_recv.try_get().and_then(|m| {
-            // If we've already seen this exact value within MAG_FRESH, still use it.
-            // Otherwise prefer accel-only on first sight.
-            let now = Instant::now();
-            let fresh = match last_mag_ts {
-                Some(t) => now.saturating_duration_since(t) <= MAG_FRESH,
-                None => true,
-            };
-            last_mag_ts = Some(now);
-            if fresh { Some(m) } else { None }
-        });
+        let mag = mag_recv.try_get().filter(|m| m.ts.elapsed() <= MAG_FRESH);
 
         match mag {
-            Some(MagFieldNt { x, y, z }) => {
+            Some(MagSample { x, y, z, .. }) => {
                 fusion.update_by_duration_seconds(gyr_vec, acc_vec, FusionVector::new(x, y, z), dt);
             }
             None => {
@@ -98,23 +95,23 @@ pub async fn task() -> ! {
         let inertial_gyro = orientation.transform_vector(&body_angular_vel);
         let inertial_accel_comp = inertial_accel + GRAVITY;
 
-        let imu_data = InertialFrame {
-            acceleration_x: body_accel.x,
-            acceleration_y: body_accel.y,
-            acceleration_z: body_accel.z,
-            angular_velocity_x: body_angular_vel.x,
-            angular_velocity_y: body_angular_vel.y,
-            angular_velocity_z: body_angular_vel.z,
-            acceleration_north: inertial_accel_comp.x,
-            acceleration_east: inertial_accel_comp.y,
-            acceleration_down: inertial_accel_comp.z,
-            angular_velocity_north: inertial_gyro.x,
-            angular_velocity_east: inertial_gyro.y,
-            angular_velocity_down: inertial_gyro.z,
+        let out = Inertial {
+            body_accel_x: body_accel.x,
+            body_accel_y: body_accel.y,
+            body_accel_z: body_accel.z,
+            body_gyro_x: body_angular_vel.x,
+            body_gyro_y: body_angular_vel.y,
+            body_gyro_z: body_angular_vel.z,
+            ned_accel_north: inertial_accel_comp.x,
+            ned_accel_east: inertial_accel_comp.y,
+            ned_accel_down: inertial_accel_comp.z,
+            ned_gyro_north: inertial_gyro.x,
+            ned_gyro_east: inertial_gyro.y,
+            ned_gyro_down: inertial_gyro.z,
         };
 
         orientation_sender.send(orientation);
-        inertial_sender.send(imu_data);
+        inertial_sender.send(out);
         trace!("inertial: dt={} s", dt);
     }
 }

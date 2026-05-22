@@ -1,108 +1,73 @@
 #![allow(dead_code)]
 
-use embassy_time::{Duration, Instant};
+use embassy_time::Instant;
 use lsm6dso32::types::{Acceleration, AngularRate};
 
 use crate::sensors::{BarometerId, DhtId, GnssId, ImuId, MagnetometerId};
 
-/// Derived signal payloads. These are the hermes-can wire types, re-exported
-/// so processing tasks and the CAN task can refer to them by their semantic
-/// name without dragging the `hermes_can` path everywhere. `ImuData` is
-/// re-named to `InertialFrame` since `ImuData` clashes with the raw IMU
-/// reading defined below.
-pub use hermes_can::messages::sensor_data::{
-    EnvironmentalData, ImuData as InertialFrame, PositionData, VelocityData,
-};
-
-#[derive(Clone, Copy, Debug)]
-pub struct Timestamped<T> {
-    pub ts: Instant,
-    pub value: T,
-}
-
-impl<T> Timestamped<T> {
-    pub fn new(ts: Instant, value: T) -> Self {
-        Self { ts, value }
-    }
-
-    pub fn now_with_delay(value: T, delay: Duration) -> Self {
-        Self::new(Instant::now() - delay, value)
-    }
-
-    pub fn at(ts: Instant, value: T) -> Self {
-        Self::new(ts, value)
-    }
-}
+// Per-sensor samples. Each carries its source sensor id and a measurement
+// timestamp inline; downstream code never sees uncalibrated values or
+// untimed observations.
 
 #[derive(Clone, Copy, Debug)]
 pub struct ImuSample {
-    pub sensor_id: ImuId,
-    pub data: Timestamped<ImuData>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ImuData {
+    pub src: ImuId,
+    pub ts: Instant,
     pub accel: Acceleration,
     pub gyro: AngularRate,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct PressureSample {
-    pub sensor_id: BarometerId,
-    pub data: Timestamped<PressureData>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct PressureData {
+    pub src: BarometerId,
+    pub ts: Instant,
     pub pressure_mbar: f32,
     pub temperature_c: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct GnssSample {
-    pub sensor_id: GnssId,
-    pub data: Timestamped<PvtData>,
-}
-
-/// Raw magnetometer sample (sensor-frame, raw counts).
-///
-/// Board-frame axis flips and nT scaling happen in the processing task.
-#[derive(Clone, Copy, Debug)]
-pub struct MagSample {
-    pub sensor_id: MagnetometerId,
-    pub data: Timestamped<MagData>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct MagData {
-    pub x: i16,
-    pub y: i16,
-    pub z: i16,
-}
-
-/// Calibrated magnetic field in nT, in board frame. Output of the magnetic
-/// field processing task; consumed by the inertial fusion and CAN tasks.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MagFieldNt {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
 pub struct EnvSample {
-    pub sensor_id: DhtId,
-    pub data: Timestamped<EnvData>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct EnvData {
+    pub src: DhtId,
+    pub ts: Instant,
     pub temperature_c: f32,
     pub humidity_rh: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct PvtData {
+pub struct GnssSample {
+    pub src: GnssId,
+    pub ts: Instant,
+    pub pvt: Pvt,
+}
+
+/// Raw magnetometer sample, sensor frame, raw counts.
+/// Only crosses the readout-task boundary; calibration in the processing
+/// task converts this to `MagSample`.
+#[derive(Clone, Copy, Debug)]
+pub struct RawMagSample {
+    pub src: MagnetometerId,
+    pub ts: Instant,
+    pub x: i16,
+    pub y: i16,
+    pub z: i16,
+}
+
+/// Calibrated magnetometer sample, board frame, nT.
+/// Output of the magnetic-field processing task; consumed by inertial
+/// fusion and the CAN layer.
+#[derive(Clone, Copy, Debug)]
+pub struct MagSample {
+    pub src: MagnetometerId,
+    pub ts: Instant,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+/// GNSS PVT payload. Kept as a substruct of `GnssSample` because flattening
+/// 16 fields would bury the metadata.
+#[derive(Clone, Copy, Debug)]
+pub struct Pvt {
     pub lon_deg: f64,
     pub lat_deg: f64,
     pub fix_type: ublox::GpsFix,
@@ -119,4 +84,50 @@ pub struct PvtData {
     pub horiz_accuracy: u32,
     pub magnetic_declination_deg: f32,
     pub magnetic_declination_accuracy_deg: f32,
+}
+
+// Fused / derived signals. Board-internal types; conversion to CAN wire
+// formats lives in the CAN tx layer.
+
+#[derive(Clone, Copy, Debug)]
+pub struct Environment {
+    pub temperature_c: f32,
+    pub humidity_rh: f32,
+    pub pressure_mbar: f32,
+}
+
+/// Body-frame accel/gyro plus NED-rotated, gravity-compensated accel/gyro.
+#[derive(Clone, Copy, Debug)]
+pub struct Inertial {
+    pub body_accel_x: f32,
+    pub body_accel_y: f32,
+    pub body_accel_z: f32,
+    pub body_gyro_x: f32,
+    pub body_gyro_y: f32,
+    pub body_gyro_z: f32,
+    pub ned_accel_north: f32,
+    pub ned_accel_east: f32,
+    pub ned_accel_down: f32,
+    pub ned_gyro_north: f32,
+    pub ned_gyro_east: f32,
+    pub ned_gyro_down: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Position {
+    pub lat_deg: f64,
+    pub lon_deg: f64,
+    pub height_msl_m: f32,
+    pub horizontal_accuracy_m: f32,
+    pub vertical_accuracy_m: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Velocity {
+    pub body_x: f32,
+    pub body_y: f32,
+    pub body_z: f32,
+    pub ned_north: f32,
+    pub ned_east: f32,
+    pub ned_down: f32,
 }

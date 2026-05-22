@@ -28,7 +28,7 @@ pub async fn task() -> ! {
                 Either::First(s) | Either::Second(s) => s,
             };
 
-        let filtered = filter.update(sample.data.value.pressure_mbar);
+        let filtered = filter.update(sample.pressure_mbar);
         sender.send(filtered);
         trace!("pressure: filtered={} mbar", filtered);
     }

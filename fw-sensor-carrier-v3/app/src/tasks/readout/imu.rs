@@ -12,7 +12,7 @@ use lsm6dso32::{
 };
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
-use crate::measurements::{ImuData, ImuSample, Timestamped};
+use crate::measurements::ImuSample;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
@@ -207,8 +207,10 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 
                 let ts = this_data_start + Duration::from_micros(avg_dt_us * i as u64);
                 let _ = samples.push(ImuSample {
-                    sensor_id: self.id,
-                    data: Timestamped::at(ts, ImuData { accel, gyro }),
+                    src: self.id,
+                    ts,
+                    accel,
+                    gyro,
                 });
             }
 

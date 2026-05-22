@@ -58,15 +58,6 @@ pub enum SensorStatus {
     Active,
 }
 
-impl From<SensorStatus> for hermes_can::messages::board_status::SensorStatus {
-    fn from(value: SensorStatus) -> Self {
-        match value {
-            SensorStatus::Inactive => hermes_can::messages::board_status::SensorStatus::Offline,
-            SensorStatus::Active => hermes_can::messages::board_status::SensorStatus::Online,
-        }
-    }
-}
-
 macro_rules! status_array {
     ($name:ident, $count:expr) => {
         pub static $name: [AtomicSensorStatus; $count] =

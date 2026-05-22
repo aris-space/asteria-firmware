@@ -11,8 +11,8 @@ use embassy_sync::watch::Watch;
 use nalgebra::UnitQuaternion;
 
 use crate::measurements::{
-    EnvSample, EnvironmentalData, GnssSample, ImuSample, InertialFrame, MagFieldNt, MagSample,
-    PositionData, PressureSample, VelocityData,
+    EnvSample, Environment, GnssSample, ImuSample, Inertial, MagSample, Position, PressureSample,
+    RawMagSample, Velocity,
 };
 use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
 
@@ -26,7 +26,7 @@ macro_rules! define_sample_channels {
 
         #[allow(dead_code)]
         pub fn $submit(sample: $T) {
-            $channels[sample.sensor_id.index()]
+            $channels[sample.src.index()]
                 .immediate_publisher()
                 .publish_immediate(sample);
         }
@@ -34,7 +34,7 @@ macro_rules! define_sample_channels {
         #[allow(dead_code)]
         pub fn $submit_batch(samples: &[$T]) {
             let Some(last) = samples.last() else { return };
-            let publisher = $channels[last.sensor_id.index()].immediate_publisher();
+            let publisher = $channels[last.src.index()].immediate_publisher();
             for sample in samples {
                 publisher.publish_immediate(*sample);
             }
@@ -49,7 +49,7 @@ define_sample_channels!(PRESSURE_CHANNELS, submit_pressure_sample, submit_pressu
     PressureSample, cap = 16, subs = 2, count = BAROMETER_COUNT);
 
 define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch:
-    MagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
+    RawMagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
 
 define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_batch:
     GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);
@@ -58,9 +58,9 @@ define_sample_channels!(ENV_CHANNELS, submit_env_sample, submit_env_sample_batch
     EnvSample, cap = 8, subs = 1, count = DHT_COUNT);
 
 pub static PRESSURE_FUSED_WATCH: Watch<CriticalSectionRawMutex, f32, 1> = Watch::new();
-pub static ENVIRONMENTAL_WATCH: Watch<CriticalSectionRawMutex, EnvironmentalData, 1> = Watch::new();
+pub static ENVIRONMENTAL_WATCH: Watch<CriticalSectionRawMutex, Environment, 1> = Watch::new();
 pub static ORIENTATION_WATCH: Watch<CriticalSectionRawMutex, UnitQuaternion<f32>, 1> = Watch::new();
-pub static INERTIAL_WATCH: Watch<CriticalSectionRawMutex, InertialFrame, 1> = Watch::new();
-pub static MAG_FIELD_WATCH: Watch<CriticalSectionRawMutex, MagFieldNt, 1> = Watch::new();
-pub static POSITION_WATCH: Watch<CriticalSectionRawMutex, PositionData, 1> = Watch::new();
-pub static VELOCITY_WATCH: Watch<CriticalSectionRawMutex, VelocityData, 1> = Watch::new();
+pub static INERTIAL_WATCH: Watch<CriticalSectionRawMutex, Inertial, 1> = Watch::new();
+pub static MAG_FIELD_WATCH: Watch<CriticalSectionRawMutex, MagSample, 1> = Watch::new();
+pub static POSITION_WATCH: Watch<CriticalSectionRawMutex, Position, 1> = Watch::new();
+pub static VELOCITY_WATCH: Watch<CriticalSectionRawMutex, Velocity, 1> = Watch::new();

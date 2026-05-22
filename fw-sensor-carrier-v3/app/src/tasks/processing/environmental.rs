@@ -1,9 +1,9 @@
 use defmt::trace;
 use embassy_futures::select::{Either4, select4};
 use embassy_time::Instant;
-use hermes_can::messages::sensor_data::EnvironmentalData;
 
 use super::filters::Ema;
+use crate::measurements::Environment;
 use crate::sensors::{BAROMETER_0, BAROMETER_1, DHT_0, DHT_1};
 use crate::signals;
 
@@ -47,35 +47,35 @@ pub async fn task() -> ! {
         .await
         {
             Either4::First(p) | Either4::Second(p) => {
-                let ts = p.data.ts;
+                let ts = p.ts;
                 let dt = last_pressure_ts
                     .map(|prev| ts.saturating_duration_since(prev).as_micros() as f32 / 1e6)
                     .unwrap_or(FALLBACK_PRESSURE_DT_S);
                 last_pressure_ts = Some(ts);
                 let alpha = dt / (PRESSURE_TAU_S + dt);
-                pressure_filter.update_with_alpha(p.data.value.pressure_mbar, alpha);
+                pressure_filter.update_with_alpha(p.pressure_mbar, alpha);
             }
             Either4::Third(env) | Either4::Fourth(env) => {
-                let ts = env.data.ts;
+                let ts = env.ts;
                 let dt = last_th_ts
                     .map(|prev| ts.saturating_duration_since(prev).as_micros() as f32 / 1e6)
                     .unwrap_or(FALLBACK_TH_DT_S);
                 last_th_ts = Some(ts);
                 let alpha = dt / (TH_TAU_S + dt);
-                temp_filter.update_with_alpha(env.data.value.temperature_c, alpha);
-                hum_filter.update_with_alpha(env.data.value.humidity_rh, alpha);
+                temp_filter.update_with_alpha(env.temperature_c, alpha);
+                hum_filter.update_with_alpha(env.humidity_rh, alpha);
             }
         }
 
-        let fused = EnvironmentalData {
-            temperature: temp_filter.current_value(),
-            humidity: hum_filter.current_value(),
-            pressure: pressure_filter.current_value(),
+        let fused = Environment {
+            temperature_c: temp_filter.current_value(),
+            humidity_rh: hum_filter.current_value(),
+            pressure_mbar: pressure_filter.current_value(),
         };
-        sender.send(fused.clone());
+        sender.send(fused);
         trace!(
             "env: t={} c rh={} % p={} mbar",
-            fused.temperature, fused.humidity, fused.pressure
+            fused.temperature_c, fused.humidity_rh, fused.pressure_mbar
         );
     }
 }
