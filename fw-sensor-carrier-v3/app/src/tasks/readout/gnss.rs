@@ -82,7 +82,6 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                     self.id,
                     Debug2Format(&fix_type)
                 );
-                GNSS_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
                 return Active {
                     rx: self.rx,
                     parser: self.parser,
@@ -167,7 +166,6 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
 
             if self.errors >= MAX_CONSECUTIVE_ERRORS {
                 error!("{} offline (too many consecutive errors)", self.id);
-                GNSS_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
                 return Inactive {
                     rx: self.rx,
                     parser: self.parser,
@@ -196,7 +194,9 @@ async fn run_inner<'a, RX: embedded_io_async::Read>(
 
     loop {
         let active = inactive.run().await;
+        GNSS_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
         inactive = active.run().await;
+        GNSS_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
     }
 }
 

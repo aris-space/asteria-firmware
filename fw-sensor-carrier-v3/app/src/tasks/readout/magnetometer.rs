@@ -77,8 +77,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
             match initialise(self.i2c, self.id).await {
                 Ok(sensor) => {
                     info!("{} initialized", self.id);
-                    MAGNETOMETER_STATUS[self.id.index()]
-                        .store(SensorStatus::Active, Ordering::Relaxed);
                     return Active {
                         sensor,
                         id: self.id,
@@ -150,7 +148,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         }
 
         error!("{} offline (too many consecutive errors)", self.id);
-        MAGNETOMETER_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             i2c: self.sensor.destroy(),
             id: self.id,
@@ -174,7 +171,9 @@ async fn run_inner<I2C: embedded_hal_async::i2c::I2c>(
 
     loop {
         let active = inactive.run().await;
+        MAGNETOMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
         inactive = active.run().await;
+        MAGNETOMETER_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
     }
 }
 

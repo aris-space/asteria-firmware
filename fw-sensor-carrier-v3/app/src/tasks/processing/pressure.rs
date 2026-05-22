@@ -20,7 +20,6 @@ pub async fn task() -> ! {
 
     let mut filter = MovingAverage::<f32, MOVING_AVERAGE_COUNT>::new();
     let sender = signals::PRESSURE_FUSED_WATCH.sender();
-    let publisher = signals::PRESSURE_FUSED_PUBSUB.immediate_publisher();
 
     loop {
         let sample: PressureSample =
@@ -30,7 +29,6 @@ pub async fn task() -> ! {
 
         let filtered = filter.update(sample.data.value.pressure_mbar);
         sender.send(filtered);
-        publisher.publish_immediate(filtered);
         trace!("pressure: filtered={} mbar", filtered);
     }
 }

@@ -1,13 +1,12 @@
 use defmt::trace;
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant};
-use hermes_can::messages::sensor_data::ImuData as CanImuData;
 use imu_fusion::{Fusion, FusionAhrsSettings, FusionVector};
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
-use crate::measurements::ImuSample;
+use crate::measurements::{ImuSample, InertialFrame, MagFieldNt};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
-use crate::signals::{self, MagFieldNt};
+use crate::signals;
 use crate::tasks::readout::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
 
 // Mean magnetic declination at Gadmen Range, Switzerland (WMMHR-2025, 2026-05-18).
@@ -99,7 +98,7 @@ pub async fn task() -> ! {
         let inertial_gyro = orientation.transform_vector(&body_angular_vel);
         let inertial_accel_comp = inertial_accel + GRAVITY;
 
-        let imu_data = CanImuData {
+        let imu_data = InertialFrame {
             acceleration_x: body_accel.x,
             acceleration_y: body_accel.y,
             acceleration_z: body_accel.z,

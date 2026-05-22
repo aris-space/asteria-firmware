@@ -38,7 +38,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
             match result {
                 Ok(()) => {
                     info!("{} initialized", self.id);
-                    DHT_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
                     return Active {
                         sensor: self.sensor,
                         id: self.id,
@@ -103,7 +102,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         }
 
         error!("{} offline (too many consecutive errors)", self.id);
-        DHT_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             sensor: Sht4xAsync::new(self.sensor.destroy()),
             id: self.id,
@@ -126,7 +124,9 @@ where
 
     loop {
         let active = inactive.run().await;
+        DHT_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
         inactive = active.run().await;
+        DHT_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
     }
 }
 

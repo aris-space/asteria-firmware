@@ -28,8 +28,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
             match self.sensor.init(&mut Delay).await {
                 Ok(sensor) => {
                     info!("{} initialized", self.id);
-                    BAROMETER_STATUS[self.id.index()]
-                        .store(SensorStatus::Active, Ordering::Relaxed);
                     return Active {
                         sensor,
                         id: self.id,
@@ -93,7 +91,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         }
 
         error!("{} offline (too many consecutive errors)", self.id);
-        BAROMETER_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             sensor: Ms5607::new(self.sensor.destroy(), false),
             id: self.id,
@@ -116,7 +113,9 @@ where
 
     loop {
         let active = inactive.run().await;
+        BAROMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
         inactive = active.run().await;
+        BAROMETER_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
     }
 }
 

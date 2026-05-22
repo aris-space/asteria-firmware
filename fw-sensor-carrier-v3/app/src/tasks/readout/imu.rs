@@ -86,7 +86,6 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 Ok(mut sensor) => match configure(&mut sensor).await {
                     Ok(()) => {
                         info!("{} initialized", self.id);
-                        IMU_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
                         return Active {
                             sensor,
                             int1: self.int1,
@@ -213,13 +212,12 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 });
             }
 
-            signals::submit_imu_samples(&samples);
+            signals::submit_imu_sample_batch(&samples);
             errors = 0;
             trace!("{} FIFO {} pairs, dt={} us", self.id, num_pairs, avg_dt_us);
         }
 
         error!("{} offline (too many consecutive errors)", self.id);
-        IMU_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
         Inactive {
             iface: self.sensor.destroy(),
             int1: self.int1,
@@ -243,7 +241,9 @@ where
 
     loop {
         let active = inactive.run().await;
+        IMU_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
         inactive = active.run().await;
+        IMU_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
     }
 }
 

@@ -1,125 +1,66 @@
 //! Inter-task signals.
 //!
-//! Two flavours:
-//! 1. Per-sensor (indexed by sensor id) PubSub + Watch for raw readouts.
-//! 2. Single global Watch + PubSub for derived/fused outputs published by the
-//!    processing tasks.
+//! Per-sensor `PubSubChannel`s carry raw readout samples (one channel per
+//! sensor instance, indexed by the sensor's id). Global `Watch`es carry
+//! fused/derived outputs published by the processing tasks; the CAN task is
+//! the single receiver for each.
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
-use hermes_can::messages::sensor_data::{
-    EnvironmentalData, ImuData as CanImuData, PositionData, VelocityData,
-};
 use nalgebra::UnitQuaternion;
 
-use crate::measurements::{EnvSample, GnssSample, ImuSample, MagSample, PressureSample};
-use crate::sensors::{
-    BAROMETER_COUNT, BarometerId, DHT_COUNT, DhtId, GNSS_COUNT, GnssId, IMU_COUNT, ImuId,
-    MAGNETOMETER_COUNT, MagnetometerId,
+use crate::measurements::{
+    EnvSample, EnvironmentalData, GnssSample, ImuSample, InertialFrame, MagFieldNt, MagSample,
+    PositionData, PressureSample, VelocityData,
 };
+use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
 
-macro_rules! define_signal {
+macro_rules! define_sample_channels {
     (
-        $channels:ident, $watches:ident, $submit:ident, $submit_batch:ident, $watch_getter:ident :
-        $T:ty, $id_ty:ty,
-        cap = $cap:expr, subs = $subs:expr, pubs = $pubs:expr,
-        count = $count:expr, watchers = $watchers:expr
+        $channels:ident, $submit:ident, $submit_batch:ident :
+        $T:ty, cap = $cap:expr, subs = $subs:expr, count = $count:expr
     ) => {
-        pub static $channels: [PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, $pubs>;
-            $count] = [const { PubSubChannel::new() }; $count];
-
-        pub static $watches: [Watch<CriticalSectionRawMutex, $T, $watchers>; $count] =
-            [const { Watch::new() }; $count];
-
-        #[allow(dead_code)]
-        pub fn $watch_getter(id: $id_ty) -> &'static Watch<CriticalSectionRawMutex, $T, $watchers> {
-            &$watches[id.index()]
-        }
+        pub static $channels: [PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, 1>; $count] =
+            [const { PubSubChannel::new() }; $count];
 
         #[allow(dead_code)]
         pub fn $submit(sample: $T) {
-            let idx = sample.sensor_id.index();
-            $channels[idx]
+            $channels[sample.sensor_id.index()]
                 .immediate_publisher()
                 .publish_immediate(sample);
-            $watches[idx].sender().send(sample);
         }
 
         #[allow(dead_code)]
         pub fn $submit_batch(samples: &[$T]) {
             let Some(last) = samples.last() else { return };
-            let idx = last.sensor_id.index();
-            let publisher = $channels[idx].immediate_publisher();
+            let publisher = $channels[last.sensor_id.index()].immediate_publisher();
             for sample in samples {
                 publisher.publish_immediate(*sample);
             }
-            $watches[idx].sender().send(*last);
         }
     };
 }
 
-define_signal!(
-    IMU_CHANNELS, IMU_WATCHES, submit_imu_sample, submit_imu_samples, imu_watch:
-    ImuSample, ImuId,
-    cap = 64, subs = 4, pubs = 2,
-    count = IMU_COUNT, watchers = 4
-);
+define_sample_channels!(IMU_CHANNELS, submit_imu_sample, submit_imu_sample_batch:
+    ImuSample, cap = 64, subs = 1, count = IMU_COUNT);
 
-define_signal!(
-    PRESSURE_CHANNELS, PRESSURE_WATCHES, submit_pressure_sample, submit_pressure_samples, pressure_watch:
-    PressureSample, BarometerId,
-    cap = 16, subs = 4, pubs = 2,
-    count = BAROMETER_COUNT, watchers = 4
-);
+define_sample_channels!(PRESSURE_CHANNELS, submit_pressure_sample, submit_pressure_sample_batch:
+    PressureSample, cap = 16, subs = 2, count = BAROMETER_COUNT);
 
-define_signal!(
-    MAG_CHANNELS, MAG_WATCHES, submit_mag_sample, submit_mag_samples, mag_watch:
-    MagSample, MagnetometerId,
-    cap = 16, subs = 4, pubs = 2,
-    count = MAGNETOMETER_COUNT, watchers = 4
-);
+define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch:
+    MagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
 
-define_signal!(
-    GNSS_CHANNELS, GNSS_WATCHES, submit_gnss_sample, submit_gnss_samples, gnss_watch:
-    GnssSample, GnssId,
-    cap = 8, subs = 4, pubs = 2,
-    count = GNSS_COUNT, watchers = 4
-);
+define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_batch:
+    GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);
 
-define_signal!(
-    ENV_CHANNELS, ENV_WATCHES, submit_env_sample, submit_env_samples, env_watch:
-    EnvSample, DhtId,
-    cap = 8, subs = 4, pubs = 2,
-    count = DHT_COUNT, watchers = 4
-);
+define_sample_channels!(ENV_CHANNELS, submit_env_sample, submit_env_sample_batch:
+    EnvSample, cap = 8, subs = 1, count = DHT_COUNT);
 
-// --- Derived / fused outputs (published by tasks/processing). ----------------
-
-/// Filtered pressure scalar (mbar), from the pressure processing task.
-pub static PRESSURE_FUSED_WATCH: Watch<CriticalSectionRawMutex, f32, 4> = Watch::new();
-pub static PRESSURE_FUSED_PUBSUB: PubSubChannel<CriticalSectionRawMutex, f32, 10, 4, 2> =
-    PubSubChannel::new();
-
-/// Fused environmental data (temperature, humidity, pressure).
-pub static ENVIRONMENTAL_WATCH: Watch<CriticalSectionRawMutex, EnvironmentalData, 4> = Watch::new();
-
-/// Fused orientation quaternion (body -> NED, true north).
-pub static ORIENTATION_WATCH: Watch<CriticalSectionRawMutex, UnitQuaternion<f32>, 4> = Watch::new();
-
-/// Derived inertial CAN frame (body + inertial accel/gyro).
-pub static INERTIAL_WATCH: Watch<CriticalSectionRawMutex, CanImuData, 4> = Watch::new();
-
-/// Calibrated magnetic field in nT.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MagFieldNt {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-pub static MAG_FIELD_WATCH: Watch<CriticalSectionRawMutex, MagFieldNt, 4> = Watch::new();
-
-/// Position + velocity derived from the best GNSS source.
-pub static POSITION_WATCH: Watch<CriticalSectionRawMutex, PositionData, 4> = Watch::new();
-pub static VELOCITY_WATCH: Watch<CriticalSectionRawMutex, VelocityData, 4> = Watch::new();
+pub static PRESSURE_FUSED_WATCH: Watch<CriticalSectionRawMutex, f32, 1> = Watch::new();
+pub static ENVIRONMENTAL_WATCH: Watch<CriticalSectionRawMutex, EnvironmentalData, 1> = Watch::new();
+pub static ORIENTATION_WATCH: Watch<CriticalSectionRawMutex, UnitQuaternion<f32>, 1> = Watch::new();
+pub static INERTIAL_WATCH: Watch<CriticalSectionRawMutex, InertialFrame, 1> = Watch::new();
+pub static MAG_FIELD_WATCH: Watch<CriticalSectionRawMutex, MagFieldNt, 1> = Watch::new();
+pub static POSITION_WATCH: Watch<CriticalSectionRawMutex, PositionData, 1> = Watch::new();
+pub static VELOCITY_WATCH: Watch<CriticalSectionRawMutex, VelocityData, 1> = Watch::new();
