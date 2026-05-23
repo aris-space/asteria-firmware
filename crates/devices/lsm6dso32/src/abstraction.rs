@@ -62,8 +62,9 @@ pub enum InitErrorKind<E> {
     /// Bus error occurred during initialisation.
     BusError(E),
     /// WHOAMI register mismatch. If this error occurs, the device is either
-    /// not an LSM6DSO32 or may not be functioning correctly.
-    WhoamiMismatch,
+    /// not an LSM6DSO32 or may not be functioning correctly. The contained
+    /// value is what was actually read from the WHO_AM_I register.
+    WhoamiMismatch(u8),
 }
 
 impl<I, S> Lsm6dso32<I, S> {
@@ -154,9 +155,10 @@ where
                 });
             }
             Ok(whoami) => {
-                if whoami.ident() != WHOAMI {
+                let ident = whoami.ident();
+                if ident != WHOAMI {
                     return Err(InitError {
-                        kind: InitErrorKind::WhoamiMismatch,
+                        kind: InitErrorKind::WhoamiMismatch(ident),
                         sensor: self,
                     });
                 }
