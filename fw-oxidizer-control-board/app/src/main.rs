@@ -91,6 +91,12 @@ async fn main(spawner: Spawner) -> ! {
     let oxidizer_vent_valve = Output::new(p.PA10, Level::Low, Speed::Medium);
     let oxidizer_dpr_valve = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
 
+    // Solenoid Standby Control
+    let mut sol1_stby = Output::new(p.PB15, Level::High, Speed::Low);
+    let mut sol2_stby = Output::new(p.PB1, Level::High, Speed::Low);
+    sol1_stby.set_high();
+    sol2_stby.set_high();
+
     let buzzer_pwm_pin = PwmPin::new(p.PB7, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
         p.TIM3,
