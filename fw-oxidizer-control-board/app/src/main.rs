@@ -96,7 +96,7 @@ async fn main(spawner: Spawner) -> ! {
     let mut sol2_stby = Output::new(p.PB1, Level::High, Speed::Low);
     sol1_stby.set_high();
     sol2_stby.set_high();
-    
+
     let buzzer_pwm_pin = PwmPin::new(p.PB7, OutputType::PushPull);
     let buzzer_pwm = SimplePwm::new(
         p.TIM3,

@@ -35,11 +35,12 @@ pub(crate) static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|
     let is_release = built::PROFILE == "release";
     let debug_defmt_rtt = built::FEATURES.contains(&"defmt");
     let is_git_dirty = built::GIT_DIRTY.unwrap_or(false);
-    let author_initials = [6, 9];
+    #[allow(clippy::char_lit_as_u8)] // good as long as it is ascii
+    let author_initials = ['C' as u8, 'B' as u8];
     let can_semver = [
-        dp_engine_control_board::VERSION_MAJOR,
-        dp_engine_control_board::VERSION_MINOR,
-        dp_engine_control_board::VERSION_PATCH,
+        dp_recovery_board::VERSION_MAJOR,
+        dp_recovery_board::VERSION_MINOR,
+        dp_recovery_board::VERSION_PATCH,
     ];
 
     BuildInformationCommon {

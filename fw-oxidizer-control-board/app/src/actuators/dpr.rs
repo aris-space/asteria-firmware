@@ -64,6 +64,12 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
             buzzer_error_sender.send(BuzzerState::Error);
         } else {
             buzzer_error_sender.send(BuzzerState::Idle);
+
+            if safety_limit_reached {
+                safety_limit_reached = false;
+                loop_state = Active;
+                dpr_control_loop_sender.send(DPRValve::Enabled { setpoint });
+            }
         }
 
         // PID Control
