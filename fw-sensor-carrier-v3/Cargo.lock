@@ -945,6 +945,7 @@ dependencies = [
  "libm",
  "lsm303agr",
  "lsm6dso32",
+ "magcal",
  "ms5607",
  "nalgebra 0.33.3",
  "num-traits",
@@ -1354,6 +1355,14 @@ dependencies = [
  "device-driver",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+]
+
+[[package]]
+name = "magcal"
+version = "0.1.0"
+source = "git+https://github.com/Rechenmaschine/magcal-rs.git#a3a300902a1e7790c7731f28425fc79b5533f2ba"
+dependencies = [
+ "libm",
 ]
 
 [[package]]

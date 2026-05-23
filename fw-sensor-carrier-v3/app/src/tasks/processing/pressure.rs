@@ -3,7 +3,7 @@ use embassy_futures::select::{Either, select};
 use embassy_time::Instant;
 
 use crate::filters::Ema;
-use crate::sensors::{BAROMETER_0, BAROMETER_1};
+use crate::sensors::{BARO_BUS_1, BARO_BUS_2};
 use crate::signals;
 use crate::tasks::readout::barometer::SAMPLE_HZ as BAROMETER_HZ;
 use crate::types::{BaroSample, Pressure};
@@ -17,10 +17,10 @@ const FALLBACK_DT_S: f32 = 1.0 / BAROMETER_HZ as f32;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
-    let mut sub0 = signals::BARO_CHANNELS[BAROMETER_0.index()]
+    let mut sub0 = signals::BARO_CHANNELS[BARO_BUS_1.index()]
         .subscriber()
         .expect("too many subs on BARO_CHANNELS; increase SUBS");
-    let mut sub1 = signals::BARO_CHANNELS[BAROMETER_1.index()]
+    let mut sub1 = signals::BARO_CHANNELS[BARO_BUS_2.index()]
         .subscriber()
         .expect("too many subs on BARO_CHANNELS; increase SUBS");
 

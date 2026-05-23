@@ -29,13 +29,13 @@ define_sensor_family! {
 define_sensor_family! {
     pub struct BarometerId;
     count: BAROMETER_COUNT;
-    ids: [BAROMETER_0 = 0, BAROMETER_1 = 1];
+    ids: [BARO_BUS_1 = 0, BARO_BUS_2 = 1];
 }
 
 define_sensor_family! {
     pub struct MagnetometerId;
     count: MAGNETOMETER_COUNT;
-    ids: [MAGNETOMETER_0 = 0, MAGNETOMETER_1 = 1];
+    ids: [MAG_BUS_1 = 0, MAG_BUS_2 = 1];
 }
 
 define_sensor_family! {
@@ -47,7 +47,7 @@ define_sensor_family! {
 define_sensor_family! {
     pub struct DhtId;
     count: DHT_COUNT;
-    ids: [DHT_0 = 0, DHT_1 = 1];
+    ids: [DHT_BUS_1 = 0, DHT_BUS_2 = 1];
 }
 
 // --- Health tracking (CAN status frame) -------------------------------------

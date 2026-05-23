@@ -59,6 +59,7 @@ ublox = { version = "0.4.5", default-features = false }
 
 # Sensor fusion
 imu-fusion = { git = "https://github.com/Rechenmaschine/imu-fusion-rs.git", default-features = false }
+magcal = { git = "https://github.com/Rechenmaschine/magcal-rs.git" }
 
 embedded-can = "0.4.1"
 embedded-hal = "1.0.0"

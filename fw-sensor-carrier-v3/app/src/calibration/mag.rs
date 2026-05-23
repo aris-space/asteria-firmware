@@ -6,7 +6,7 @@ use postcard::experimental::max_size::MaxSize;
 use postcard_schema::Schema;
 use serde::{Deserialize, Serialize};
 
-use crate::sensors::{MAGNETOMETER_0, MAGNETOMETER_1, MagnetometerId};
+use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MagnetometerId};
 use crate::types::{MagSample, RawMagSample};
 
 type Mutex = CriticalSectionRawMutex;
@@ -70,8 +70,8 @@ pub static MAG_1_PARAM: Param<Mutex, MagCalWire> = Param::new(make_key("v1/mag/1
 
 fn load(id: MagnetometerId) -> MagCalWire {
     match id {
-        MAGNETOMETER_0 => MAG_0_PARAM.get_or(MAG_0_DEFAULT),
-        MAGNETOMETER_1 => MAG_1_PARAM.get_or(MAG_1_DEFAULT),
+        MAG_BUS_1 => MAG_0_PARAM.get_or(MAG_0_DEFAULT),
+        MAG_BUS_2 => MAG_1_PARAM.get_or(MAG_1_DEFAULT),
         _ => unreachable!(),
     }
 }

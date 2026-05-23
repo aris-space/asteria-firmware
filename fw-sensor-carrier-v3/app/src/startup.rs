@@ -8,8 +8,8 @@ use crate::params;
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
-    BAROMETER_0, BAROMETER_1, DHT_0, DHT_1, GNSS_0, GNSS_1, IMU_0, IMU_1, MAGNETOMETER_0,
-    MAGNETOMETER_1,
+    BARO_BUS_1, BARO_BUS_2, DHT_BUS_1, DHT_BUS_2, GNSS_0, GNSS_1, IMU_0, IMU_1, MAG_BUS_1,
+    MAG_BUS_2,
 };
 
 use crate::{resources, tasks};
@@ -96,20 +96,20 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawne
     );
 
     level_0_spawner.spawn(
-        tasks::readout::barometer::task(board.sensors.bus1, BAROMETER_0)
+        tasks::readout::barometer::task(board.sensors.bus1, BARO_BUS_1)
             .expect("Failed to spawn barometer 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::barometer::task(board.sensors.bus2, BAROMETER_1)
+        tasks::readout::barometer::task(board.sensors.bus2, BARO_BUS_2)
             .expect("Failed to spawn barometer 1 task"),
     );
 
     level_0_spawner.spawn(
-        tasks::readout::magnetometer::task(board.sensors.bus1, MAGNETOMETER_0)
+        tasks::readout::magnetometer::task(board.sensors.bus1, MAG_BUS_1)
             .expect("Failed to spawn magnetometer 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::magnetometer::task(board.sensors.bus2, MAGNETOMETER_1)
+        tasks::readout::magnetometer::task(board.sensors.bus2, MAG_BUS_2)
             .expect("Failed to spawn magnetometer 1 task"),
     );
 
@@ -123,10 +123,12 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawne
     );
 
     level_0_spawner.spawn(
-        tasks::readout::dht::task(board.sensors.bus1, DHT_0).expect("Failed to spawn DHT 0 task"),
+        tasks::readout::dht::task(board.sensors.bus1, DHT_BUS_1)
+            .expect("Failed to spawn DHT 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::dht::task(board.sensors.bus2, DHT_1).expect("Failed to spawn DHT 1 task"),
+        tasks::readout::dht::task(board.sensors.bus2, DHT_BUS_2)
+            .expect("Failed to spawn DHT 1 task"),
     );
 
     // --- Processing ---------------------------------------------------------
@@ -145,6 +147,10 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawne
         tasks::processing::position_velocity::task()
             .expect("Failed to spawn position/velocity proc task"),
     );
+
+    // --- Calibration --------------------------------------------------------
+    thread_spawner
+        .spawn(tasks::calibration::mag::task(board.params).expect("Failed to spawn mag cal task"));
 
     // --- CAN ----------------------------------------------------------------
     let (can_tx, can_rx, _options) = board.can.split();
