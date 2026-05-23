@@ -53,16 +53,20 @@ impl FuelPressureDriver {
             .sender()
             .send(BarG(value.pressurization_pressure));
         STATE
-            .fuel_tank_pressure
+            .fuel_tank_pressure_sensor_1
             .sender()
-            .send(dp_fuel_control_board::FuelTankPressure {
-                fuel_tank_pressure_sensor_1: BarG(value.fuel_tank_pressure_1),
-                fuel_tank_pressure_sensor_2: BarG(value.fuel_tank_pressure_2),
-                fuel_tank_pressure_filtered: BarG(get_filtered_tank_p(
-                    value.fuel_tank_pressure_1,
-                    value.fuel_tank_pressure_2,
-                )),
-            });
+            .send(BarG(value.fuel_tank_pressure_1));
+        STATE
+            .fuel_tank_pressure_sensor_2
+            .sender()
+            .send(BarG(value.fuel_tank_pressure_2));
+        STATE
+            .fuel_tank_pressure_filtered
+            .sender()
+            .send(BarG(get_filtered_tank_p(
+                value.fuel_tank_pressure_1,
+                value.fuel_tank_pressure_2,
+            )));
 
         STATE.pressure_bus_status.sender().send(if has_error {
             SensorStatus::Offline
