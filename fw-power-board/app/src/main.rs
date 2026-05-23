@@ -11,9 +11,16 @@ mod power_indicators;
 mod sensor_readout;
 mod unix_time;
 
-use crate::can::spawn_can_tasks;
+use crate::can::{OUTPUTS, THIS_BOARD_ID, can_board_status_task};
+use crate::can_io::ReceivedMessage;
+use crate::unix_time::init_utc_clock;
 use board::{INA232_I2C_ADDR, Irqs};
+use can_utils::broadcast::Broadcast;
+use can_utils::rxtx::{RxError, TypedCanReceive};
+use can_utils::setup::{make_multiplexable, setup_can};
 use cortex_m::peripheral::SCB;
+use data_core::can::hal::CanDecode;
+use datatypes::units::InstantUs;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::OutputType;
 use embassy_stm32::gpio::{Input, Level, Output, Speed};
@@ -21,7 +28,7 @@ use embassy_stm32::i2c::{self, I2c};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embassy_time::Duration;
+use embassy_time::{Duration, Instant, Timer};
 use ina232::Ina232;
 
 #[allow(unused_imports)]
@@ -106,8 +113,9 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // Initialize the CAN peripheral (FDCAN1 with pins PB8=RX, PB9=TX) and split TX/RX
-    let can = can_impl::setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs);
-    let (can_tx, can_rx, _properties) = can.split();
+    let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
+    let (can_tx, mut can_rx, _properties) = can.split();
+    let can_tx = make_multiplexable(can_tx);
 
     // Spawn activity LED
     spawner.spawn(blink::blink(led_yellow).expect("Failed to spawn blink task"));
@@ -132,13 +140,32 @@ async fn main(spawner: Spawner) -> ! {
             .expect("Failed to spawn 24V sensor task"),
     );
 
-    // Spawn the CAN tasks
-    spawn_can_tasks(&spawner, can_rx, can_tx).await;
+    OUTPUTS
+        .build_info
+        .sender()
+        .send(crate::build_info::BUILD_INFO.get().clone());
+    spawner.spawn(can_board_status_task(can_tx).expect("Failed to spawn board status task"));
+    OUTPUTS
+        .start_broadcasting(spawner, can_tx)
+        .expect("Failed to start CAN broadcasters");
 
-    // Prevent the main task from exiting
-    #[allow(unreachable_code)]
     loop {
-        core::future::pending::<()>().await;
+        match can_rx.recv().await {
+            Ok(ReceivedMessage::ResetSpecific(board)) if board == THIS_BOARD_ID => {
+                reset_now();
+            }
+            Ok(ReceivedMessage::ResetAll(_)) => {
+                reset_now();
+            }
+            Ok(ReceivedMessage::UTCTimeUpdate(InstantUs(micros))) => {
+                init_utc_clock(micros, Instant::now());
+            }
+            Ok(_) => {}
+            Err(RxError::Bus(_)) => {
+                Timer::after_millis(10).await;
+            }
+            Err(_) => {}
+        }
     }
 }
 

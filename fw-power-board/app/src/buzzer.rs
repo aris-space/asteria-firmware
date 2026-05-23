@@ -1,4 +1,4 @@
-use crate::sensor_readout::RAIL_24V_LAST;
+use crate::can::OUTPUTS;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::GeneralInstance4Channel;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
@@ -11,7 +11,8 @@ pub async fn buzzer_task(pwm: SimplePwm<'static, embassy_stm32::peripherals::TIM
     buzzer.set_volume(100.0);
     buzzer.play_sequence(scripts::STARTUP, 1).await;
 
-    let mut rail_24v = RAIL_24V_LAST
+    let mut rail_24v = OUTPUTS
+        .rail_24v
         .receiver()
         .expect("Failed to get 24V rail receiver");
 
@@ -22,14 +23,13 @@ pub async fn buzzer_task(pwm: SimplePwm<'static, embassy_stm32::peripherals::TIM
 
     // wait for initial measurement
     let initial_readout = rail_24v.get().await;
-    let mut prev_voltage = initial_readout.data.voltage;
+    let mut prev_voltage = initial_readout.voltage;
 
     let mut initialisation = true;
     loop {
         let voltage = rail_24v
             .try_get()
             .expect("This should never fail, since we wait on initial readout")
-            .data
             .voltage;
 
         if voltage >= EXTERNAL_POWER_CONNECT_VOLTAGE
