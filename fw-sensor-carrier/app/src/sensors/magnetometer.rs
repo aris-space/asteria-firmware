@@ -58,16 +58,15 @@ impl<'a> InactiveMagSensor<'a> {
     /// Attempt to initialize the sensor, retrying on failure.
     async fn run(mut self) -> ActiveMagSensor<'a> {
         loop {
-            debug!("{:?} Magnetometer initializing", self.sensor_id);
-            match initialise(self.interface).await {
+            debug!("{:?} initializing", self.sensor_id);
+            match initialise(self.interface, self.sensor_id).await {
                 Ok(sensor) => {
-                    info!("{:?} Magnetometer initialized", self.sensor_id);
+                    info!("{:?} initialized", self.sensor_id);
                     return ActiveMagSensor::new(self.driver, sensor, self.config, self.sensor_id);
                 }
                 Err(iface) => {
-                    error!("{:?} Magnetometer initialization failed", self.sensor_id);
-
-                    // Recover the interface so we may retry.
+                    // Recover the interface so we may retry. The specific failure
+                    // was already logged by `initialise`.
                     self.interface = iface;
                     self.attempt_count += 1;
                     let backoff = ExponentialBackoff::new(
@@ -86,13 +85,13 @@ impl<'a> InactiveMagSensor<'a> {
 /// This avoids using a mutable reference by transferring ownership.
 async fn initialise(
     interface: Interface,
+    sensor_id: SensorId,
 ) -> Result<Lsm303agr<I2cInterface<Interface>, MagContinuous>, Interface> {
     // Create a sensor instance by consuming the I2C bus.
     let mut sensor = Lsm303agr::new_with_i2c(interface);
 
-    // Initialize the sensor.
     if let Err(e) = sensor.init().await {
-        error!("Failed to initialize magnetometer: {:?}", Debug2Format(&e));
+        error!("{:?} init failed: {:?}", sensor_id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
@@ -100,33 +99,26 @@ async fn initialise(
     let mut sensor = match sensor.into_mag_continuous().await {
         Ok(s) => s,
         Err(e) => {
-            error!(
-                "Failed to initialize magnetometer: {:?}",
-                Debug2Format(&e.error)
-            );
-            let err = e.dev.destroy();
-            return Err(err);
+            error!("{:?} init failed: {:?}", sensor_id, Debug2Format(&e.error));
+            return Err(e.dev.destroy());
         }
     };
 
-    // Set the magnetometer mode and output data rate.
     if let Err(e) = sensor
         .set_mag_mode_and_odr(&mut Delay, MagMode::HighResolution, MagOutputDataRate::Hz10)
         .await
     {
-        error!("Failed to initialize magnetometer: {:?}", Debug2Format(&e));
+        error!("{:?} init failed: {:?}", sensor_id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
-    // Enable offset cancellation.
     if let Err(e) = sensor.enable_mag_offset_cancellation().await {
-        error!("Failed to initialize magnetometer: {:?}", Debug2Format(&e));
+        error!("{:?} init failed: {:?}", sensor_id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
-    // Enable low pass filtering.
     if let Err(e) = sensor.mag_enable_low_pass_filter().await {
-        error!("Failed to initialize magnetometer: {:?}", Debug2Format(&e));
+        error!("{:?} init failed: {:?}", sensor_id, Debug2Format(&e));
         return Err(sensor.destroy());
     }
 
@@ -206,11 +198,7 @@ impl<'a> ActiveMagSensor<'a> {
                         .await;
                 }
                 Err(err) => {
-                    warn!(
-                        "{:?} Measurement failed with error: {:?}",
-                        self.sensor_id,
-                        Debug2Format(&err)
-                    );
+                    warn!("{:?} read error: {:?}", self.sensor_id, Debug2Format(&err));
                     self.error_count += 1;
                     if self.error_count >= self.config.max_consecutive_errors {
                         break;
@@ -219,15 +207,12 @@ impl<'a> ActiveMagSensor<'a> {
             }
 
             if Instant::now() > next_sample {
-                warn!(
-                    "{:?} cannot keep up with measurement interval.",
-                    self.sensor_id
-                );
+                warn!("{:?} can't keep up with sample interval", self.sensor_id);
             } else {
                 Timer::at(next_sample).await;
             }
         }
-        error!("{:?} Magnetometer offline", self.sensor_id);
+        error!("{:?} offline (too many consecutive errors)", self.sensor_id);
 
         // Get back the I2C interface from the sensor.
         let iface = self.sensor.destroy();
