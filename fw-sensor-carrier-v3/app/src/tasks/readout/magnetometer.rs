@@ -122,6 +122,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                         y: y_nt as f32,
                         z: z_nt as f32,
                     };
+                    signals::submit_raw_mag_sample(raw);
                     signals::submit_mag_sample(calibration::mag::apply_calibration(raw));
                     trace!("{} x={} y={} z={} nT", self.id, raw.x, raw.y, raw.z);
                 }
