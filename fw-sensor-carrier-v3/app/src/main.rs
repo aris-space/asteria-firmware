@@ -10,6 +10,7 @@ mod built;
 mod calibration;
 mod filters;
 mod macros;
+mod params;
 mod resources;
 mod sensors;
 mod signals;
@@ -36,7 +37,7 @@ use panic_reset as _;
 #[embassy_executor::main]
 async fn main(thread_spawner: Spawner) -> ! {
     let p = embassy_stm32::init(clocks::clocks_config());
-    let board = startup::prepare(resources::split(p));
+    let board = startup::prepare(resources::split(p)).await;
     let level_0_spawner = interrupt_executor!(TIM2, P6);
 
     startup::spawn_tasks(board, thread_spawner, level_0_spawner);

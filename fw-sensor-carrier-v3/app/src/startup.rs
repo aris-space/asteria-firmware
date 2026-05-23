@@ -4,6 +4,7 @@ use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
 
+use crate::params;
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
@@ -18,6 +19,7 @@ pub struct PreparedBoard {
     pub services: ServiceResources,
     pub sensors: SensorResources,
     pub can: embassy_stm32::can::Can<'static>,
+    pub params: &'static params::Access,
 }
 
 #[allow(dead_code)]
@@ -36,7 +38,11 @@ pub struct SensorResources {
     pub bus2: SharedI2cBus,
 }
 
-pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
+pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
+    let flash = resources.flash.setup();
+    let params = params::init(flash);
+    params::load_all(params).await;
+
     let gps1_data = resources.gps1_uart.setup();
     let (_gps1_tx, gps1_rx) = gps1_data.split();
 
@@ -57,6 +63,7 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
 
     PreparedBoard {
         can,
+        params,
         services: ServiceResources {
             green_led,
             yellow_led,
