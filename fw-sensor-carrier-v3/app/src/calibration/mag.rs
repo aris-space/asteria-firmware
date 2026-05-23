@@ -67,7 +67,8 @@ fn load(id: MagnetometerId) -> MagCal {
 /// board-frame `MagSample` (nT). `raw.ts` is when the readout finished
 /// the I/O; the cal-owned delay is subtracted to recover the physical
 /// measurement time. Sensor-to-board axis remap on this board is a
-/// negation of all three axes.
+/// negation of all three axes; the soft-iron matrix then carries both
+/// the iron correction and any residual mounting rotation.
 pub fn apply_calibration(raw: RawMagSample) -> MagSample {
     let cal = load(raw.src);
     let board = -Vector3::new(raw.x, raw.y, raw.z);
