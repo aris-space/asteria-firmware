@@ -7,12 +7,12 @@ use datatypes::actuator::DPRValve;
 use datatypes::status::ValveState::{Active, Inactive};
 use embassy_stm32::gpio::Output;
 use embassy_time::{Duration, Ticker};
-use embedded_utils::fmt::warn;
-use embedded_utils::trace;
+use embedded_utils::error;
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
-    let mut p_watcher = STATE.oxidizer_tank_pressure.receiver().unwrap();
+    let mut p1_watcher = STATE.oxidizer_tank_pressure_sensor_1.receiver().unwrap();
+    let mut p2_watcher = STATE.oxidizer_tank_pressure_sensor_2.receiver().unwrap();
     let mut dpr_control_loop_receiver = STATE.dpr_control_loop.receiver().unwrap();
 
     let dpr_control_loop_sender = STATE.dpr_control_loop.sender();
@@ -33,7 +33,6 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
     loop {
         // Check for new DPR configuration
         if let Some(cfg) = dpr_control_loop_receiver.try_changed() {
-            trace!("Received new DPR config: {:?}", cfg);
             match cfg {
                 DPRValve::Enabled { setpoint: stp } => {
                     setpoint = stp;
@@ -46,14 +45,20 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         }
 
         // Update pressure reading with available tank pressure data.
-        pressure = get_control_pressure(p_watcher.get().await);
+        let p1 = p1_watcher.get().await;
+        let p2 = p2_watcher.get().await;
+        let new_pressure = get_control_pressure(p1, p2);
+        if new_pressure != f32::INFINITY {
+            pressure = new_pressure
+        }
 
         // Safety check
+        // ToDo: implement correctly ask lennard he will yap about it
         if pressure >= SAFETY_LIMIT_BARG {
-            warn!("[DPR] Pressure limit exceeded with: {} barg", pressure);
+            error!("[DPR] Pressure limit exceeded with: {} barg", pressure);
             loop_state = Inactive;
-            dpr_control_loop_sender.send(DPRValve::Disabled);
             safety_limit_reached = true;
+            dpr_control_loop_sender.send(DPRValve::Disabled);
 
             // Signal error state
             buzzer_error_sender.send(BuzzerState::Error);
@@ -61,9 +66,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
             buzzer_error_sender.send(BuzzerState::Idle);
 
             if safety_limit_reached {
-                // Reset the flag only when pressure is back to safe levels
                 safety_limit_reached = false;
-                // Allow reactivation of the control loop
                 loop_state = Active;
                 dpr_control_loop_sender.send(DPRValve::Enabled { setpoint });
             }
@@ -94,9 +97,9 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
     }
 }
 
-fn get_control_pressure(pressure: dp_oxidizer_control_board::OxidizerTankPressure) -> f32 {
-    let p1 = pressure.oxidizer_tank_pressure_sensor_1.0;
-    let p2 = pressure.oxidizer_tank_pressure_sensor_2.0;
+fn get_control_pressure(p1: datatypes::units::BarG, p2: datatypes::units::BarG) -> f32 {
+    let p1 = p1.0;
+    let p2 = p2.0;
 
     if p1.is_finite() && p2.is_finite() {
         f32::max(p1, p2)

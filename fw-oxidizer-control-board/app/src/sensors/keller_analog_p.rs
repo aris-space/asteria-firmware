@@ -84,18 +84,18 @@ pub async fn oxidizer_pressure_acquisition(pressure_handles: OxidizerPressureHan
                 .await,
         };
 
-        data_publisher.update(measurement);
+        let filtered = data_publisher.update(measurement);
         info!(
             "Oxidizer tank pressure 1: {}",
-            measurement.oxidizer_tank_pressure_1
+            filtered.oxidizer_tank_pressure_1
         );
         info!(
             "Oxidizer tank pressure 2: {}",
-            measurement.oxidizer_tank_pressure_2
+            filtered.oxidizer_tank_pressure_2
         );
         info!(
             "Oxidizer tank differential pressure: {}",
-            measurement.oxidizer_tank_differential_pressure
+            filtered.oxidizer_tank_differential_pressure
         );
         ticker.next().await;
     }
