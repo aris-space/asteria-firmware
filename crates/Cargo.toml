@@ -8,6 +8,7 @@ members = [
     "wire-types",
     "filters",
     "can-utils",
+    "firmware-params",
     "devices/ads1120-thermocouples",
     "devices/ms5607",
     "devices/lsm6dso32",
