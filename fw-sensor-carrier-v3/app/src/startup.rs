@@ -3,7 +3,6 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
-use embassy_time::Duration;
 
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
@@ -13,13 +12,6 @@ use crate::sensors::{
 };
 
 use crate::{resources, tasks};
-
-// Per-sensor measurement-to-publish latency. The readout subtracts this from
-// `Instant::now()` to estimate when the sample was actually captured.
-const BAROMETER_DELAY: Duration = Duration::from_millis(20); // TODO: calibrate
-const MAGNETOMETER_DELAY: Duration = Duration::from_millis(0); // TODO: calibrate
-const GNSS_DELAY: Duration = Duration::from_millis(100); // TODO: calibrate
-const DHT_DELAY: Duration = Duration::from_millis(0);
 
 #[allow(dead_code)]
 pub struct PreparedBoard {
@@ -97,39 +89,37 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawne
     );
 
     level_0_spawner.spawn(
-        tasks::readout::barometer::task(board.sensors.bus1, BAROMETER_0, BAROMETER_DELAY)
+        tasks::readout::barometer::task(board.sensors.bus1, BAROMETER_0)
             .expect("Failed to spawn barometer 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::barometer::task(board.sensors.bus2, BAROMETER_1, BAROMETER_DELAY)
+        tasks::readout::barometer::task(board.sensors.bus2, BAROMETER_1)
             .expect("Failed to spawn barometer 1 task"),
     );
 
     level_0_spawner.spawn(
-        tasks::readout::magnetometer::task(board.sensors.bus1, MAGNETOMETER_0, MAGNETOMETER_DELAY)
+        tasks::readout::magnetometer::task(board.sensors.bus1, MAGNETOMETER_0)
             .expect("Failed to spawn magnetometer 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::magnetometer::task(board.sensors.bus2, MAGNETOMETER_1, MAGNETOMETER_DELAY)
+        tasks::readout::magnetometer::task(board.sensors.bus2, MAGNETOMETER_1)
             .expect("Failed to spawn magnetometer 1 task"),
     );
 
     level_0_spawner.spawn(
-        tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0, GNSS_DELAY)
+        tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0)
             .expect("Failed to spawn GNSS 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1, GNSS_DELAY)
+        tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1)
             .expect("Failed to spawn GNSS 1 task"),
     );
 
     level_0_spawner.spawn(
-        tasks::readout::dht::task(board.sensors.bus1, DHT_0, DHT_DELAY)
-            .expect("Failed to spawn DHT 0 task"),
+        tasks::readout::dht::task(board.sensors.bus1, DHT_0).expect("Failed to spawn DHT 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::dht::task(board.sensors.bus2, DHT_1, DHT_DELAY)
-            .expect("Failed to spawn DHT 1 task"),
+        tasks::readout::dht::task(board.sensors.bus2, DHT_1).expect("Failed to spawn DHT 1 task"),
     );
 
     // --- Processing ---------------------------------------------------------

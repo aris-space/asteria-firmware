@@ -126,10 +126,10 @@ impl QualitySelector {
     }
 
     fn state(&self, id: GnssId) -> Option<&SourceState> {
-        if id == GNSS_0 {
-            self.gps0.as_ref()
-        } else {
-            self.gps1.as_ref()
+        match id {
+            GNSS_0 => self.gps0.as_ref(),
+            GNSS_1 => self.gps1.as_ref(),
+            _ => unreachable!(),
         }
     }
 
@@ -143,10 +143,10 @@ impl QualitySelector {
             last_update: ts,
             quality,
         };
-        if id == GNSS_0 {
-            self.gps0 = Some(new_state);
-        } else {
-            self.gps1 = Some(new_state);
+        match id {
+            GNSS_0 => self.gps0 = Some(new_state),
+            GNSS_1 => self.gps1 = Some(new_state),
+            _ => unreachable!(),
         }
 
         let previous = self.primary;
@@ -167,10 +167,10 @@ impl QualitySelector {
     }
 
     fn choose_primary(&mut self) {
-        let other = if self.primary == GNSS_0 {
-            GNSS_1
-        } else {
-            GNSS_0
+        let other = match self.primary {
+            GNSS_0 => GNSS_1,
+            GNSS_1 => GNSS_0,
+            _ => unreachable!(),
         };
 
         let Some(p) = self.fresh_state(self.primary) else {

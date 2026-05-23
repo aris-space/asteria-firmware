@@ -7,6 +7,7 @@ use embassy_time::{Delay, Duration, Instant, Timer};
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::calibration;
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{MAGNETOMETER_STATUS, MagnetometerId, SensorStatus};
 use crate::signals;
@@ -73,7 +74,6 @@ async fn initialise<I2C: embedded_hal_async::i2c::I2c>(
 struct Inactive<I2C> {
     i2c: I2C,
     id: MagnetometerId,
-    delay: Duration,
     attempt: u8,
 }
 
@@ -87,7 +87,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
                     return Active {
                         sensor,
                         id: self.id,
-                        delay: self.delay,
                     };
                 }
                 Err(i2c) => {
@@ -103,7 +102,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
 struct Active<I2C> {
     sensor: Lsm303agr<lsm303agr::interface::I2cInterface<I2C>, lsm303agr::mode::MagContinuous>,
     id: MagnetometerId,
-    delay: Duration,
 }
 
 impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
@@ -116,23 +114,16 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
             match self.sensor.magnetic_field().await {
                 Ok(field) => {
                     errors = 0;
-                    // Sensor -> board frame: negate all three axes (saturating so
-                    // an `i16::MIN` raw count doesn't silently wrap).
-                    let sample = RawMagSample {
+                    let (x_nt, y_nt, z_nt) = field.xyz_nt();
+                    let raw = RawMagSample {
                         src: self.id,
-                        ts: Instant::now() - self.delay,
-                        x: (field.x_raw() as i16).saturating_neg(),
-                        y: (field.y_raw() as i16).saturating_neg(),
-                        z: (field.z_raw() as i16).saturating_neg(),
+                        ts: Instant::now(),
+                        x: x_nt as f32,
+                        y: y_nt as f32,
+                        z: z_nt as f32,
                     };
-                    signals::submit_mag_sample(sample);
-                    trace!(
-                        "{} x={} y={} z={}",
-                        self.id,
-                        field.x_raw(),
-                        field.y_raw(),
-                        field.z_raw()
-                    );
+                    signals::submit_mag_sample(calibration::mag::apply_calibration(raw));
+                    trace!("{} x={} y={} z={} nT", self.id, raw.x, raw.y, raw.z);
                 }
                 Err(e) => {
                     warn!("{} read error: {:?}", self.id, Debug2Format(&e));
@@ -154,21 +145,15 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         Inactive {
             i2c: self.sensor.destroy(),
             id: self.id,
-            delay: self.delay,
             attempt: 0,
         }
     }
 }
 
-async fn run_inner<I2C: embedded_hal_async::i2c::I2c>(
-    i2c: I2C,
-    id: MagnetometerId,
-    delay: Duration,
-) -> ! {
+async fn run_inner<I2C: embedded_hal_async::i2c::I2c>(i2c: I2C, id: MagnetometerId) -> ! {
     let mut inactive = Inactive {
         i2c,
         id,
-        delay,
         attempt: 0,
     };
 
@@ -181,7 +166,7 @@ async fn run_inner<I2C: embedded_hal_async::i2c::I2c>(
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(bus: SharedI2cBus, id: MagnetometerId, delay: Duration) -> ! {
+pub async fn task(bus: SharedI2cBus, id: MagnetometerId) -> ! {
     let i2c = I2cDevice::<CriticalSectionRawMutex, SharedI2c>::new(bus);
-    run_inner(i2c, id, delay).await
+    run_inner(i2c, id).await
 }

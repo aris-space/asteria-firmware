@@ -12,7 +12,7 @@ use embassy_sync::watch::Watch;
 use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
 use crate::types::{
     BaroSample, DhtSample, Environment, GnssSample, ImuSample, Inertial, MagSample, Orientation,
-    Position, Pressure, RawMagSample, Velocity,
+    Position, Pressure, Velocity,
 };
 
 macro_rules! define_sample_channels {
@@ -48,7 +48,7 @@ define_sample_channels!(BARO_CHANNELS, submit_baro_sample, submit_baro_sample_ba
     BaroSample, cap = 16, subs = 2, count = BAROMETER_COUNT);
 
 define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch:
-    RawMagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
+    MagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
 
 define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_batch:
     GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);
