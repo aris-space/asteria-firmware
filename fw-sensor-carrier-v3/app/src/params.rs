@@ -12,6 +12,7 @@ use sequential_storage::map::{MapConfig, MapStorage};
 use static_cell::StaticCell;
 
 use crate::calibration::{imu, mag};
+use crate::commands;
 use crate::resources::flash::BoardFlash;
 
 /// Reserve the first 64 KiB of the chip (sixteen 4 KiB sectors) for the
@@ -26,6 +27,9 @@ pub static REGISTRY: Registry = Registry::new(&[
     ParamEntry::persistent(&mag::MAG_1_PARAM),
     ParamEntry::persistent(&imu::IMU_0_PARAM),
     ParamEntry::persistent(&imu::IMU_1_PARAM),
+    ParamEntry::volatile(&commands::RESET),
+    ParamEntry::volatile(&commands::RUN_MAG_CAL),
+    ParamEntry::volatile(&commands::RUN_IMU_CAL),
 ]);
 
 static ACCESS: StaticCell<Access> = StaticCell::new();

@@ -8,6 +8,7 @@ use embassy_executor::Spawner;
 mod build_info;
 mod built;
 mod calibration;
+mod commands;
 mod filters;
 mod macros;
 mod params;
