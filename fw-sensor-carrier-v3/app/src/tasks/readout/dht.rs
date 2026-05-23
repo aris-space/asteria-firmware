@@ -7,10 +7,11 @@ use embassy_time::{Delay, Duration, Instant, Timer};
 use sht4x::{Precision, Sht4xAsync};
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::calibration;
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{DHT_STATUS, DhtId, SensorStatus};
 use crate::signals;
-use crate::types::DhtSample;
+use crate::types::RawDhtSample;
 
 pub const SAMPLE_HZ: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
@@ -18,7 +19,6 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64)
 struct Inactive<I2C> {
     sensor: Sht4xAsync<I2C, Delay>,
     id: DhtId,
-    delay: Duration,
     attempt: u8,
 }
 
@@ -42,7 +42,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
                     return Active {
                         sensor: self.sensor,
                         id: self.id,
-                        delay: self.delay,
                     };
                 }
                 Err(e) => {
@@ -58,7 +57,6 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
 struct Active<I2C> {
     sensor: Sht4xAsync<I2C, Delay>,
     id: DhtId,
-    delay: Duration,
 }
 
 impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
@@ -73,13 +71,13 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
                     errors = 0;
                     let temperature_c: f32 = m.temperature_celsius().to_num();
                     let humidity_rh: f32 = m.humidity_percent().to_num();
-                    let sample = DhtSample {
+                    let raw = RawDhtSample {
                         src: self.id,
-                        ts: Instant::now() - self.delay,
+                        ts: Instant::now(),
                         temperature_c,
                         humidity_rh,
                     };
-                    signals::submit_dht_sample(sample);
+                    signals::submit_dht_sample(calibration::dht::apply_calibration(raw));
                     trace!("{} t={} c rh={} %", self.id, temperature_c, humidity_rh);
                 }
                 Err(e) => {
@@ -102,20 +100,18 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         Inactive {
             sensor: Sht4xAsync::new(self.sensor.destroy()),
             id: self.id,
-            delay: self.delay,
             attempt: 0,
         }
     }
 }
 
-async fn run_inner<I2C>(i2c: I2C, id: DhtId, delay: Duration) -> !
+async fn run_inner<I2C>(i2c: I2C, id: DhtId) -> !
 where
     I2C: embedded_hal_async::i2c::I2c,
 {
     let mut inactive = Inactive {
         sensor: Sht4xAsync::new(i2c),
         id,
-        delay,
         attempt: 0,
     };
 
@@ -128,7 +124,7 @@ where
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(bus: SharedI2cBus, id: DhtId, delay: Duration) -> ! {
+pub async fn task(bus: SharedI2cBus, id: DhtId) -> ! {
     let i2c = I2cDevice::<CriticalSectionRawMutex, SharedI2c>::new(bus);
-    run_inner(i2c, id, delay).await
+    run_inner(i2c, id).await
 }

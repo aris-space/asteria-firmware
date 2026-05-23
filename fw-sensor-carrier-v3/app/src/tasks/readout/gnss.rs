@@ -1,21 +1,21 @@
 use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
-use embassy_time::{Duration, Instant};
+use embassy_time::Instant;
 use ublox::{GpsFix, PacketRef, Parser};
 
 use core::sync::atomic::Ordering;
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::calibration;
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
-use crate::types::{GnssSample, Pvt};
+use crate::types::{Pvt, RawGnssSample};
 
 struct Inactive<'a, RX> {
     rx: RX,
     parser: Parser<ublox::FixedLinearBuffer<'a>>,
     id: GnssId,
-    delay: Duration,
     attempt: u8,
 }
 
@@ -86,7 +86,6 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                     rx: self.rx,
                     parser: self.parser,
                     id: self.id,
-                    delay: self.delay,
                     errors: 0,
                 };
             }
@@ -98,7 +97,6 @@ struct Active<'a, RX> {
     rx: RX,
     parser: Parser<ublox::FixedLinearBuffer<'a>>,
     id: GnssId,
-    delay: Duration,
     errors: u8,
 }
 
@@ -116,9 +114,9 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                 if matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D) =>
                             {
                                 self.errors = 0;
-                                let sample = GnssSample {
+                                let raw = RawGnssSample {
                                     src: self.id,
-                                    ts: Instant::now() - self.delay,
+                                    ts: Instant::now(),
                                     pvt: Pvt {
                                         lon_deg: pvt.lon_degrees(),
                                         lat_deg: pvt.lat_degrees(),
@@ -143,7 +141,9 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                             as f32,
                                     },
                                 };
-                                signals::submit_gnss_sample(sample);
+                                signals::submit_gnss_sample(calibration::gnss::apply_calibration(
+                                    raw,
+                                ));
                             }
                             Ok(_) => {}
                             Err(e) => {
@@ -166,7 +166,6 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                     rx: self.rx,
                     parser: self.parser,
                     id: self.id,
-                    delay: self.delay,
                     attempt: 0,
                 };
             }
@@ -178,13 +177,11 @@ async fn run_inner<'a, RX: embedded_io_async::Read>(
     rx: RX,
     parser: Parser<ublox::FixedLinearBuffer<'a>>,
     id: GnssId,
-    delay: Duration,
 ) -> ! {
     let mut inactive = Inactive {
         rx,
         parser,
         id,
-        delay,
         attempt: 0,
     };
 
@@ -197,7 +194,7 @@ async fn run_inner<'a, RX: embedded_io_async::Read>(
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(rx: UartRx<'static, Async>, id: GnssId, delay: Duration) -> ! {
+pub async fn task(rx: UartRx<'static, Async>, id: GnssId) -> ! {
     let mut uart_ring_buf = [0u8; 4096];
     let rx = rx.into_ring_buffered(&mut uart_ring_buf);
 
@@ -205,5 +202,5 @@ pub async fn task(rx: UartRx<'static, Async>, id: GnssId, delay: Duration) -> ! 
     let linear_buf = ublox::FixedLinearBuffer::new(&mut parse_buf);
     let parser = Parser::new(linear_buf);
 
-    run_inner(rx, parser, id, delay).await
+    run_inner(rx, parser, id).await
 }

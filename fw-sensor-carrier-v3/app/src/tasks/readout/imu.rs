@@ -37,10 +37,11 @@ use lsm6dso32::{
 };
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::calibration;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
-use crate::types::ImuSample;
+use crate::types::{ImuSample, RawImuSample};
 
 /// Accelerometer output data rate. Should match [`IMU_ODR_HZ`]
 const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
@@ -230,31 +231,31 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                     }
                 };
 
-                // Convert Sensor -> board frame: flip X and Z
                 let accel = Acceleration::from_raw(
                     AccelerationRaw {
-                        x: acc.x().saturating_neg(),
+                        x: acc.x(),
                         y: acc.y(),
-                        z: acc.z().saturating_neg(),
+                        z: acc.z(),
                     },
                     self.sensor.accel_full_scale(),
                 );
                 let gyro = AngularRate::from_raw(
                     AngularRateRaw {
-                        x: gyr.x().saturating_neg(),
+                        x: gyr.x(),
                         y: gyr.y(),
-                        z: gyr.z().saturating_neg(),
+                        z: gyr.z(),
                     },
                     self.sensor.gyro_full_scale(),
                 );
 
                 let ts = this_data_start + Duration::from_micros(avg_dt_us * i as u64);
-                let _ = samples.push(ImuSample {
+                let raw = RawImuSample {
                     src: self.id,
                     ts,
                     accel,
                     gyro,
-                });
+                };
+                let _ = samples.push(calibration::imu::apply_calibration(raw));
             }
 
             signals::submit_imu_sample_batch(&samples);

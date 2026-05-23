@@ -18,8 +18,28 @@ pub struct ImuSample {
     pub gyro: AngularRate,
 }
 
+/// Raw IMU sample, sensor frame. Built by the readout, consumed by
+/// `crate::calibration::imu::apply_calibration`, never crosses a channel.
+#[derive(Clone, Copy, Debug)]
+pub struct RawImuSample {
+    pub src: ImuId,
+    pub ts: Instant,
+    pub accel: Acceleration,
+    pub gyro: AngularRate,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct BaroSample {
+    pub src: BarometerId,
+    pub ts: Instant,
+    pub pressure_mbar: f32,
+    pub temperature_c: f32,
+}
+
+/// Raw barometer sample. Built by the readout with `ts = Instant::now()`
+/// (read-completion time); calibration subtracts the per-sensor delay.
+#[derive(Clone, Copy, Debug)]
+pub struct RawBaroSample {
     pub src: BarometerId,
     pub ts: Instant,
     pub pressure_mbar: f32,
@@ -34,6 +54,16 @@ pub struct DhtSample {
     pub humidity_rh: f32,
 }
 
+/// Raw DHT sample. Built by the readout with `ts = Instant::now()`
+/// (read-completion time); calibration subtracts the per-sensor delay.
+#[derive(Clone, Copy, Debug)]
+pub struct RawDhtSample {
+    pub src: DhtId,
+    pub ts: Instant,
+    pub temperature_c: f32,
+    pub humidity_rh: f32,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct GnssSample {
     pub src: GnssId,
@@ -41,16 +71,25 @@ pub struct GnssSample {
     pub pvt: Pvt,
 }
 
-/// Raw magnetometer sample, sensor frame, raw counts.
-/// Only crosses the readout-task boundary; calibration in the processing
-/// task converts this to `MagSample`.
+/// Raw GNSS sample. Built by the readout with `ts = Instant::now()`
+/// (read-completion time); calibration subtracts the per-sensor delay.
+#[derive(Clone, Copy, Debug)]
+pub struct RawGnssSample {
+    pub src: GnssId,
+    pub ts: Instant,
+    pub pvt: Pvt,
+}
+
+/// Raw magnetometer sample, sensor frame, nT. The driver applies the
+/// counts -> nT scale; we apply axis remap and iron correction in
+/// `crate::calibration::mag::apply_calibration`.
 #[derive(Clone, Copy, Debug)]
 pub struct RawMagSample {
     pub src: MagnetometerId,
     pub ts: Instant,
-    pub x: i16,
-    pub y: i16,
-    pub z: i16,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 /// Calibrated magnetometer sample, board frame, nT.
