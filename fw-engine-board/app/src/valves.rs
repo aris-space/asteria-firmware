@@ -10,13 +10,6 @@ use embassy_time::{Duration, Timer};
 
 pub const MAIN_ARMING_UPDATE_RATE: Duration = Duration::from_millis(1000);
 
-#[derive(Copy, Clone)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum OnboardValve {
-    FuelMain(NormallyClosedValve),
-    OxidizerMain(NormallyClosedValve),
-}
-
 #[embassy_executor::task]
 pub(crate) async fn valve_task(oss_ml_vlv: Output<'static>, fss_ml_vlv: Output<'static>) {
     let oss_ml_vlv_watcher = STATE.oxidizer_main_control.receiver().unwrap();

@@ -1,9 +1,7 @@
 use crate::globals::STATE;
-use crate::k23_temperature_control::HEATING_CONTROL_ACTIVE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
-use core::sync::atomic::Ordering;
 use data_core::can::hal::CanDecode as _;
 use datatypes::status::{ArmingState, BoardId, SensorStatus, StatusCommonMessage};
 use embassy_futures::yield_now;
@@ -79,18 +77,17 @@ pub async fn board_status_update_task() -> ! {
             armed = state;
         }
 
-        let _ =
-            STATE
-                .board_status
-                .sender()
-                .send(dp_engine_control_board::EngineControlBoardStatus {
-                    common: StatusCommonMessage {
-                        errors: 0,
-                        micros_since_restart: start.elapsed().as_micros(),
-                    },
-                    thermocouple_status,
-                    armed,
-                });
+        STATE
+            .board_status
+            .sender()
+            .send(dp_engine_control_board::EngineControlBoardStatus {
+                common: StatusCommonMessage {
+                    errors: 0,
+                    micros_since_restart: start.elapsed().as_micros(),
+                },
+                thermocouple_status,
+                armed,
+            });
         status_ticker.next().await;
     }
 }

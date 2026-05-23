@@ -179,7 +179,7 @@ async fn main(spawner: Spawner) -> ! {
     let mut sol2_stby = Output::new(p.PB1, Level::High, Speed::Low);
     sol1_stby.set_high();
     sol2_stby.set_high();
-    
+
     let heating_pad_switching = Output::new(p.PB2, Level::Low, Speed::Medium);
 
     let main_arming_pin = Input::new(p.PC12, Pull::Down);

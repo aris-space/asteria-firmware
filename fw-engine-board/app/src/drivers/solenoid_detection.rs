@@ -2,7 +2,7 @@
 use crate::globals::STATE;
 use embassy_stm32::Peri;
 use embassy_stm32::gpio::{Input, Pull};
-use embassy_stm32::peripherals::{PA1, PB6, PC2, PC3};
+use embassy_stm32::peripherals::{PA1, PB6, PC2};
 use embassy_time::{Duration, Ticker};
 use embedded_utils::info;
 
