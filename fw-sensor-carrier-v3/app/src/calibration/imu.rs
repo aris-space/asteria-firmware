@@ -212,6 +212,98 @@ impl ImuCalReport {
     }
 }
 
+impl fmt::Display for ImuCalReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // \x1b[..m are ANSI colours for the console: failures red, warnings yellow.
+        let status = if self.stored {
+            "stored"
+        } else {
+            "\x1b[31mFLASH WRITE FAILED\x1b[0m"
+        };
+        let fit = &self.fit;
+        writeln!(f, "imu cal -> {status}   {} gravity pairs\n", fit.pairs)?;
+
+        if fit.pairs == 0 {
+            writeln!(
+                f,
+                "  {:<21}\x1b[33mno gravity captured (hold stiller at each pose)\x1b[0m\n",
+                "rotation"
+            )?;
+        } else {
+            let rot = &fit.rotation;
+            match rot.axis {
+                Some(a) => writeln!(
+                    f,
+                    "  {:<21}{:.2} deg about [{:7.3}{:7.3}{:7.3} ]",
+                    "rotation IMU1->IMU0", rot.misalign_deg, a.x, a.y, a.z
+                )?,
+                None => writeln!(
+                    f,
+                    "  {:<21}{:.2} deg (near-aligned)",
+                    "rotation IMU1->IMU0", rot.misalign_deg
+                )?,
+            }
+            writeln!(
+                f,
+                "  {:<21}residual {:.2} deg   coverage {:.2}",
+                "", rot.residual_deg, rot.coverage
+            )?;
+            if rot.coverage < GOOD_COVERAGE {
+                writeln!(
+                    f,
+                    "  {:<21}\x1b[33m(!) low coverage - add poses tilted on edge/corner (gravity sideways)\x1b[0m",
+                    ""
+                )?;
+            }
+            if rot.residual_deg > GOOD_RESIDUAL_DEG {
+                writeln!(
+                    f,
+                    "  {:<21}\x1b[33m(!) high scatter - rest on a firm surface and hold stiller\x1b[0m",
+                    ""
+                )?;
+            }
+            let m = &rot.rotation;
+            write_row(f, "", m[(0, 0)], m[(0, 1)], m[(0, 2)])?;
+            write_row(f, "", m[(1, 0)], m[(1, 1)], m[(1, 2)])?;
+            write_row(f, "", m[(2, 0)], m[(2, 1)], m[(2, 2)])?;
+            writeln!(f)?;
+        }
+
+        let (b0, b1) = (fit.gyro_bias[0], fit.gyro_bias[1]);
+        if self.still_ok {
+            bias_row(f, "gyro bias dps", "IMU0", b0, true)?;
+            bias_row(f, "", "IMU1", b1, true)?;
+            bias_row(f, "", "diff", b1 - b0, false)?;
+            writeln!(f)?;
+        } else {
+            writeln!(
+                f,
+                "  {:<21}\x1b[31mboard moved (peak {:.1} dps); not stored\x1b[0m\n",
+                "gyro bias", fit.peak_dps
+            )?;
+        }
+
+        let (a0, a1) = (fit.accel_g[0], fit.accel_g[1]);
+        let ratio = if a0 != 0.0 { a1 / a0 } else { f32::NAN };
+        writeln!(
+            f,
+            "  {:<21}IMU0 {a0:.3} ({:+.1}%)   IMU1 {a1:.3} ({:+.1}%)   ratio {ratio:.3}",
+            "accel mag g",
+            (a0 - 1.0) * 100.0,
+            (a1 - 1.0) * 100.0
+        )?;
+        write!(
+            f,
+            "  {:<21}gravity {} / {}   still {}   peak {:.1} dps",
+            "samples",
+            fit.gravity_n[0],
+            fit.gravity_n[1],
+            fit.gyro_n[0] + fit.gyro_n[1],
+            fit.peak_dps
+        )
+    }
+}
+
 /// Cross-IMU calibration: the caller drives the pose loop (`capture_pose` per
 /// pose, then `finish`). IMU 0 is the reference; IMU 1 rotates into its frame.
 #[derive(Default)]
@@ -318,96 +410,4 @@ fn bias_row(
         write!(f, "  |{:.2}|", v.norm())?;
     }
     writeln!(f)
-}
-
-impl fmt::Display for ImuCalReport {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // \x1b[..m are ANSI colours for the console: failures red, warnings yellow.
-        let status = if self.stored {
-            "stored"
-        } else {
-            "\x1b[31mFLASH WRITE FAILED\x1b[0m"
-        };
-        let fit = &self.fit;
-        writeln!(f, "imu cal -> {status}   {} gravity pairs\n", fit.pairs)?;
-
-        if fit.pairs == 0 {
-            writeln!(
-                f,
-                "  {:<21}\x1b[33mno gravity captured (hold stiller at each pose)\x1b[0m\n",
-                "rotation"
-            )?;
-        } else {
-            let rot = &fit.rotation;
-            match rot.axis {
-                Some(a) => writeln!(
-                    f,
-                    "  {:<21}{:.2} deg about [{:7.3}{:7.3}{:7.3} ]",
-                    "rotation IMU1->IMU0", rot.misalign_deg, a.x, a.y, a.z
-                )?,
-                None => writeln!(
-                    f,
-                    "  {:<21}{:.2} deg (near-aligned)",
-                    "rotation IMU1->IMU0", rot.misalign_deg
-                )?,
-            }
-            writeln!(
-                f,
-                "  {:<21}residual {:.2} deg   coverage {:.2}",
-                "", rot.residual_deg, rot.coverage
-            )?;
-            if rot.coverage < GOOD_COVERAGE {
-                writeln!(
-                    f,
-                    "  {:<21}\x1b[33m(!) low coverage - add poses tilted on edge/corner (gravity sideways)\x1b[0m",
-                    ""
-                )?;
-            }
-            if rot.residual_deg > GOOD_RESIDUAL_DEG {
-                writeln!(
-                    f,
-                    "  {:<21}\x1b[33m(!) high scatter - rest on a firm surface and hold stiller\x1b[0m",
-                    ""
-                )?;
-            }
-            let m = &rot.rotation;
-            write_row(f, "", m[(0, 0)], m[(0, 1)], m[(0, 2)])?;
-            write_row(f, "", m[(1, 0)], m[(1, 1)], m[(1, 2)])?;
-            write_row(f, "", m[(2, 0)], m[(2, 1)], m[(2, 2)])?;
-            writeln!(f)?;
-        }
-
-        let (b0, b1) = (fit.gyro_bias[0], fit.gyro_bias[1]);
-        if self.still_ok {
-            bias_row(f, "gyro bias dps", "IMU0", b0, true)?;
-            bias_row(f, "", "IMU1", b1, true)?;
-            bias_row(f, "", "diff", b1 - b0, false)?;
-            writeln!(f)?;
-        } else {
-            writeln!(
-                f,
-                "  {:<21}\x1b[31mboard moved (peak {:.1} dps); not stored\x1b[0m\n",
-                "gyro bias", fit.peak_dps
-            )?;
-        }
-
-        let (a0, a1) = (fit.accel_g[0], fit.accel_g[1]);
-        let ratio = if a0 != 0.0 { a1 / a0 } else { f32::NAN };
-        writeln!(
-            f,
-            "  {:<21}IMU0 {a0:.3} ({:+.1}%)   IMU1 {a1:.3} ({:+.1}%)   ratio {ratio:.3}",
-            "accel mag g",
-            (a0 - 1.0) * 100.0,
-            (a1 - 1.0) * 100.0
-        )?;
-        write!(
-            f,
-            "  {:<21}gravity {} / {}   still {}   peak {:.1} dps",
-            "samples",
-            fit.gravity_n[0],
-            fit.gravity_n[1],
-            fit.gyro_n[0] + fit.gyro_n[1],
-            fit.peak_dps
-        )
-    }
 }
