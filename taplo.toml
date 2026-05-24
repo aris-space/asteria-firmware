@@ -1,4 +1,8 @@
-exclude = ["hermes-can/**/*.toml", "asteria-data-definitions/**/*.toml"]
+exclude = [
+    "hermes-can/**/*.toml",
+    "asteria-data-definitions/**/*.toml",
+    "data-definitions/**/*.toml",
+]
 
 [formatting]
 column_width = 100

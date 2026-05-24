@@ -47,7 +47,8 @@ impl FuelPressureDriver {
             || !value.fuel_tank_pressure_1.is_finite()
             || !value.fuel_tank_pressure_2.is_finite();
 
-        let fuel_tank_pressure_pid = get_filtered_tank_p(value.fuel_tank_pressure_1, value.fuel_tank_pressure_2);
+        let fuel_tank_pressure_pid =
+            get_filtered_tank_p(value.fuel_tank_pressure_1, value.fuel_tank_pressure_2);
 
         /*let fuel_tank_pressure_pid = update_if_finite(
             &mut self.fuel_tank_pressure_pid_avg,

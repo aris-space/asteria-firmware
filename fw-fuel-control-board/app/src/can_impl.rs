@@ -5,12 +5,12 @@ use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
 use datatypes::actuator::DPRValve;
 use datatypes::status::{BoardId, DprGainInfo, DprLoopInfo, SensorStatus, StatusCommonMessage};
+use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
 use embassy_futures::yield_now;
 use embassy_stm32::can::CanRx;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker};
-use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
 use embedded_utils::fmt::*;
 
 const THIS_BOARD_ID: BoardId = BoardId::FuelControlBoard;

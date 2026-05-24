@@ -133,7 +133,10 @@ impl<'a> DPR<'a> {
             }
         }
 
-        info!("[DPR] State: {}, Pressure {}", self.loop_state, self.pressure);
+        info!(
+            "[DPR] State: {}, Pressure {}",
+            self.loop_state, self.pressure
+        );
         Timer::after(RELAXED_TICK_DURATION).await;
     }
 
@@ -147,8 +150,7 @@ impl<'a> DPR<'a> {
         let _ = with_timeout(Duration::from_millis(time_ms), async {
             loop {
                 self.update_pressure();
-                if self.pressure > SAFETY_LIMIT_BARG ||
-                    self.pressure > self.pid.setpoint {
+                if self.pressure > SAFETY_LIMIT_BARG || self.pressure > self.pid.setpoint {
                     return;
                 }
                 Timer::after(CRITICAL_TICK_DURATION).await;
