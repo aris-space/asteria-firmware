@@ -198,7 +198,7 @@ async fn main(spawner: Spawner) -> ! {
     // Can Bus
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (tx, rx, _) = can.split();
-    let tx = make_multiplexable(tx).await;
+    let tx = make_multiplexable(tx);
     STATE
         .start_broadcasting(spawner, tx)
         .expect("failed to start CAN broadcasting");
