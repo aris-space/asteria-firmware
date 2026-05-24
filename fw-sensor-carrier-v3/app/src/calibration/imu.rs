@@ -14,8 +14,6 @@ use crate::signals::RAW_IMU_CHANNELS;
 use crate::storage::{self, Storage};
 use crate::types::{ImuSample, RawImuSample};
 
-// --- Calibration API ---------------------------------------------------------
-
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
     let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].correction;
     let accel = cal.apply_accel(Vector3::new(raw.accel.x, raw.accel.y, raw.accel.z));
@@ -55,8 +53,6 @@ pub async fn stored(storage: &Storage) -> [Option<StoredCal>; IMU_COUNT] {
     ]
 }
 
-// --- Live calibration state --------------------------------------------------
-
 /// Live per-IMU cal, written once at startup; a reset reloads and applies it.
 static CAL: OnceLock<[StoredCal; IMU_COUNT]> = OnceLock::new();
 
@@ -79,8 +75,6 @@ async fn load_one(storage: &Storage, id: ImuId) -> StoredCal {
         }
     }
 }
-
-// --- Stored + applied data ---------------------------------------------------
 
 /// Persisted per IMU: the applied correction plus the shared cross-IMU fit
 /// metadata (one fit covers both IMUs); only `correction` differs between them.
@@ -199,8 +193,6 @@ impl fmt::Display for Correction {
         )
     }
 }
-
-// --- Calibration routine -----------------------------------------------------
 
 pub const POSES: usize = 6;
 const POSE_CAPTURE: Duration = Duration::from_secs(2);
@@ -387,8 +379,6 @@ impl fmt::Display for ImuCalReport {
         )
     }
 }
-
-// --- Helpers -----------------------------------------------------------------
 
 /// Sensor-to-board axis remap for the LSM6DSO32 on this board: negate x and z.
 fn sensor_to_board(v: Vector3<f32>) -> Vector3<f32> {

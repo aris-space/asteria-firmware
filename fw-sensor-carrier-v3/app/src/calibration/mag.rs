@@ -14,8 +14,6 @@ use crate::signals::RAW_MAG_CHANNELS;
 use crate::storage::{self, Storage};
 use crate::types::{MagSample, RawMagSample};
 
-// --- Calibration API ---------------------------------------------------------
-
 pub fn apply_calibration(raw: RawMagSample) -> MagSample {
     let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].correction;
     // Sensor-to-board on this board negates all three axes.
@@ -49,8 +47,6 @@ pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT
     ]
 }
 
-// --- Live calibration state --------------------------------------------------
-
 /// Live per-sensor cal, written once at startup; a reset reloads and applies it.
 static CAL: OnceLock<[StoredCal; MAGNETOMETER_COUNT]> = OnceLock::new();
 
@@ -80,8 +76,6 @@ async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
         }
     }
 }
-
-// --- Stored + applied data ---------------------------------------------------
 
 // deci-uT keeps the ~50 uT field well inside i16; results scale back to nT.
 const NT_TO_DECI_UT: f32 = 1e-2;
@@ -209,8 +203,6 @@ impl fmt::Display for Correction {
         )
     }
 }
-
-// --- Calibration routine -----------------------------------------------------
 
 const TICK: Duration = Duration::from_secs(3);
 pub const PROGRESS_TICKS: usize = 10;
@@ -384,8 +376,6 @@ impl fmt::Display for CalReport {
         }
     }
 }
-
-// --- Helpers -----------------------------------------------------------------
 
 /// Raw sample to the solver's board-frame deci-uT counts: negate all axes
 /// (sensor-to-board) and scale nT to deci-uT to keep the field inside `i16`.
