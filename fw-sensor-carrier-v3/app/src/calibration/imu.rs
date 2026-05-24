@@ -115,24 +115,15 @@ pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
     }
 }
 
-/// Guided rotation cal: capture gravity at several still poses. Six (the board's
-/// faces) puts gravity along +-X/+-Y/+-Z for full coverage; any distinct
-/// orientations work.
 const POSES: usize = 6;
-/// How long to average each pose once the board is resting still.
 const POSE_CAPTURE: Duration = Duration::from_secs(2);
-/// Accept an accel reading as gravity only if its magnitude is within this band
-/// of 1 g; combined with the stillness gate this isolates clean gravity.
+// Accept a sample as gravity only when |a| is near 1 g and the gyro shows the
+// board is still: while moving, the two IMUs (at different spots on the board)
+// read different acceleration, which no single rotation can reconcile.
 const GRAVITY_LO_G: f32 = 0.95;
 const GRAVITY_HI_G: f32 = 1.05;
-/// Accept a sample only when the gyro magnitude is below this (board resting
-/// still). While moving, the two IMUs (at different spots on the board) pick up
-/// different linear acceleration, which no single rotation can reconcile.
 const QUASI_STATIC_DPS: f32 = 4.0;
-/// If the peak gyro across the pose captures exceeds this, the board was being
-/// moved, so the gyro bias is untrustworthy and stored as zero.
 const STILL_MOTION_DPS: f32 = 30.0;
-/// A fit at or under these is trustworthy; worse prints a warning.
 const GOOD_RESIDUAL_DEG: f32 = 2.0;
 const GOOD_COVERAGE: f32 = 0.7;
 
@@ -175,6 +166,18 @@ impl ImuCalReport {
     }
 }
 
+#[derive(Default)]
+struct Accum {
+    // Gravity cross-covariance `sum(a1 * a0^T)` for the Kabsch rotation fit.
+    h: Matrix3<f32>,
+    pairs: usize,
+    accel_mag_sum: [f32; IMU_COUNT],
+    gravity_n: [usize; IMU_COUNT],
+    gyro_sum: [Vector3<f32>; IMU_COUNT],
+    gyro_n: [usize; IMU_COUNT],
+    peak_dps: f32,
+}
+
 /// Run the cross-IMU calibration as a sequence of still poses. At each pose the
 /// board rests in a new orientation; gravity gives the relative rotation and the
 /// (still) gyro readings give each IMU's zero-rate bias. IMU 0 is the reference
@@ -182,31 +185,14 @@ impl ImuCalReport {
 /// each pose (and should block until the user is ready) and reports each capture.
 pub async fn run(storage: &Storage, mut progress: impl AsyncFnMut(Phase)) -> ImuCalReport {
     info!("imu cal: {=usize} guided poses", POSES);
-
-    let mut h = Matrix3::zeros();
-    let mut pairs = 0usize;
-    let mut mag_sum = [0.0f32; IMU_COUNT];
-    let mut mag_n = [0usize; IMU_COUNT];
-    let mut gsum = [Vector3::zeros(); IMU_COUNT];
-    let mut gn = [0usize; IMU_COUNT];
-    let mut peak_dps = 0.0f32;
-
+    let mut acc = Accum::default();
     for index in 0..POSES {
         progress(Phase::Pose {
             index,
             total: POSES,
         })
         .await;
-        let (n0, n1) = capture_pose(
-            &mut h,
-            &mut pairs,
-            &mut mag_sum,
-            &mut mag_n,
-            &mut gsum,
-            &mut gn,
-            &mut peak_dps,
-        )
-        .await;
+        let (n0, n1) = capture_pose(&mut acc).await;
         progress(Phase::Captured {
             index,
             total: POSES,
@@ -215,19 +201,74 @@ pub async fn run(storage: &Storage, mut progress: impl AsyncFnMut(Phase)) -> Imu
         })
         .await;
     }
+    finalize(storage, acc).await
+}
 
-    let (rotation, misalign_deg, residual_deg, coverage) = solve_rotation(h, pairs);
-    let still_ok = peak_dps < STILL_MOTION_DPS && gn[0] > 0 && gn[1] > 0;
+async fn capture_pose(acc: &mut Accum) -> (usize, usize) {
+    let mut sub_0 = RAW_IMU_CHANNELS[0]
+        .subscriber()
+        .expect("imu cal: raw imu 0 subscribe failed");
+    let mut sub_1 = RAW_IMU_CHANNELS[1]
+        .subscriber()
+        .expect("imu cal: raw imu 1 subscribe failed");
+    let mut g = [None::<Vector3<f32>>; IMU_COUNT];
+    let mut got = [0usize; IMU_COUNT];
+
+    let deadline = Instant::now() + POSE_CAPTURE;
+    while Instant::now() < deadline {
+        let remaining = deadline - Instant::now();
+        let next = select(sub_0.next_message_pure(), sub_1.next_message_pure());
+        let (idx, s) = match with_timeout(remaining, next).await {
+            Ok(Either::First(s)) => (0, s),
+            Ok(Either::Second(s)) => (1, s),
+            Err(_) => break,
+        };
+        let gyro = sensor_to_board(Vector3::new(s.gyro.x, s.gyro.y, s.gyro.z));
+        acc.peak_dps = acc.peak_dps.max(gyro.norm());
+        if gyro.norm() > QUASI_STATIC_DPS {
+            continue;
+        }
+        acc.gyro_sum[idx] += gyro;
+        acc.gyro_n[idx] += 1;
+        let a = sensor_to_board(Vector3::new(s.accel.x, s.accel.y, s.accel.z));
+        let n = a.norm();
+        if !(GRAVITY_LO_G..=GRAVITY_HI_G).contains(&n) {
+            continue;
+        }
+        let u = a / n;
+        acc.accel_mag_sum[idx] += n;
+        acc.gravity_n[idx] += 1;
+        got[idx] += 1;
+        g[idx] = Some(u);
+        if let Some(other) = g[idx ^ 1] {
+            // H = sum(a1 * a0^T): order the outer product by which IMU is which.
+            acc.h += if idx == 0 {
+                other * u.transpose()
+            } else {
+                u * other.transpose()
+            };
+            acc.pairs += 1;
+        }
+    }
+    (got[0], got[1])
+}
+
+async fn finalize(storage: &Storage, acc: Accum) -> ImuCalReport {
+    let (rotation, misalign_deg, residual_deg, coverage) = solve_rotation(acc.h, acc.pairs);
+    let still_ok = acc.peak_dps < STILL_MOTION_DPS && acc.gyro_n[0] > 0 && acc.gyro_n[1] > 0;
     if !still_ok {
         warn!(
             "imu cal: poses not still enough (peak {=f32} dps), gyro bias not stored",
-            peak_dps
+            acc.peak_dps
         );
     }
     let gyro_bias_dps = if still_ok {
-        [mean(gsum[0], gn[0]), mean(gsum[1], gn[1])]
+        [
+            mean(acc.gyro_sum[0], acc.gyro_n[0]),
+            mean(acc.gyro_sum[1], acc.gyro_n[1]),
+        ]
     } else {
-        [Vector3::zeros(), Vector3::zeros()]
+        [Vector3::zeros(); IMU_COUNT]
     };
 
     let wire = [
@@ -243,95 +284,29 @@ pub async fn run(storage: &Storage, mut progress: impl AsyncFnMut(Phase)) -> Imu
     let stored = storage.store(&KEYS[0], &wire[0]).await && storage.store(&KEYS[1], &wire[1]).await;
     info!(
         "imu cal done: misalign {=f32} deg, {=usize} pairs, stored {=bool}",
-        misalign_deg, pairs, stored
+        misalign_deg, acc.pairs, stored
     );
 
     ImuCalReport {
-        pairs,
+        pairs: acc.pairs,
         rotation,
         misalign_deg,
         residual_deg,
         coverage,
         gyro_bias_dps,
         accel_g: [
-            mean_mag(mag_sum[0], mag_n[0]),
-            mean_mag(mag_sum[1], mag_n[1]),
+            mean_mag(acc.accel_mag_sum[0], acc.gravity_n[0]),
+            mean_mag(acc.accel_mag_sum[1], acc.gravity_n[1]),
         ],
-        gravity_n: mag_n,
-        still_n: gn[0] + gn[1],
-        peak_dps,
+        gravity_n: acc.gravity_n,
+        still_n: acc.gyro_n[0] + acc.gyro_n[1],
+        peak_dps: acc.peak_dps,
         still_ok,
         stored,
     }
 }
 
-/// Capture one still pose for `POSE_CAPTURE`: average gyro readings (zero-rate
-/// bias) and accumulate the gravity cross-covariance `H = sum(a1 * a0^T)` for the
-/// rotation, taking only quasi-static samples. Returns the per-IMU count of
-/// accepted gravity samples so the caller can show how clean the pose was.
-async fn capture_pose(
-    h: &mut Matrix3<f32>,
-    pairs: &mut usize,
-    mag_sum: &mut [f32; IMU_COUNT],
-    mag_n: &mut [usize; IMU_COUNT],
-    gsum: &mut [Vector3<f32>; IMU_COUNT],
-    gn: &mut [usize; IMU_COUNT],
-    peak_dps: &mut f32,
-) -> (usize, usize) {
-    let mut sub_0 = RAW_IMU_CHANNELS[0]
-        .subscriber()
-        .expect("imu cal: raw imu 0 subscribe failed");
-    let mut sub_1 = RAW_IMU_CHANNELS[1]
-        .subscriber()
-        .expect("imu cal: raw imu 1 subscribe failed");
-    // Latest accepted gravity unit vector from each IMU, for pairing.
-    let mut g = [None::<Vector3<f32>>; IMU_COUNT];
-    let mut got = [0usize; IMU_COUNT];
-
-    let deadline = Instant::now() + POSE_CAPTURE;
-    while Instant::now() < deadline {
-        let remaining = deadline - Instant::now();
-        let next = select(sub_0.next_message_pure(), sub_1.next_message_pure());
-        let (idx, s) = match with_timeout(remaining, next).await {
-            Ok(Either::First(s)) => (0, s),
-            Ok(Either::Second(s)) => (1, s),
-            Err(_) => break,
-        };
-        let gyro = sensor_to_board(Vector3::new(s.gyro.x, s.gyro.y, s.gyro.z));
-        *peak_dps = peak_dps.max(gyro.norm());
-        if gyro.norm() > QUASI_STATIC_DPS {
-            continue;
-        }
-        // Quasi-static: the gyro reading is essentially the zero-rate bias.
-        gsum[idx] += gyro;
-        gn[idx] += 1;
-        // ...and the accel is gravity, if its magnitude checks out.
-        let a = sensor_to_board(Vector3::new(s.accel.x, s.accel.y, s.accel.z));
-        let n = a.norm();
-        if !(GRAVITY_LO_G..=GRAVITY_HI_G).contains(&n) {
-            continue;
-        }
-        let u = a / n;
-        mag_sum[idx] += n;
-        mag_n[idx] += 1;
-        got[idx] += 1;
-        g[idx] = Some(u);
-        if let Some(other) = g[idx ^ 1] {
-            // H = sum(a1 * a0^T): order the outer product by which IMU is which.
-            *h += if idx == 0 {
-                other * u.transpose()
-            } else {
-                u * other.transpose()
-            };
-            *pairs += 1;
-        }
-    }
-    (got[0], got[1])
-}
-
-/// Kabsch: solve for `R` minimizing `sum |a0 - R a1|^2`, so `a0 ~= R a1`.
-/// Returns the rotation, its angle (misalignment magnitude), and the mean
-/// residual angle between measured and aligned gravity vectors.
+/// Kabsch fit (`a0 ~= R a1`); returns rotation, misalignment angle, residual, coverage.
 fn solve_rotation(h: Matrix3<f32>, pairs: usize) -> (Matrix3<f32>, f32, f32, f32) {
     if pairs == 0 {
         return (Matrix3::identity(), 0.0, f32::NAN, 0.0);
@@ -347,7 +322,7 @@ fn solve_rotation(h: Matrix3<f32>, pairs: usize) -> (Matrix3<f32>, f32, f32, f32
     // sum(a0 . R a1) = trace(R H); divide by count for the mean cosine.
     let mean_cos = ((r * h).trace() / pairs as f32).clamp(-1.0, 1.0);
     // Singular values reflect how the gravity vectors spread over the sphere:
-    // smallest/largest near 1 means the tumble covered all three axes.
+    // smallest/largest near 1 means the poses covered all three axes.
     let sv = svd.singular_values;
     let coverage = if sv[0] > 0.0 { sv[2] / sv[0] } else { 0.0 };
     (r, misalign, libm::acosf(mean_cos).to_degrees(), coverage)
@@ -381,6 +356,24 @@ fn row_major(m: &Matrix3<f32>) -> [f32; 9] {
         m[(2, 1)],
         m[(2, 2)],
     ]
+}
+
+fn write_row(f: &mut fmt::Formatter<'_>, label: &str, x: f32, y: f32, z: f32) -> fmt::Result {
+    writeln!(f, "  {label:<21}[{x:8.3}{y:8.3}{z:8.3} ]")
+}
+
+fn bias_row(
+    f: &mut fmt::Formatter<'_>,
+    label: &str,
+    tag: &str,
+    v: Vector3<f32>,
+    norm: bool,
+) -> fmt::Result {
+    write!(f, "  {label:<21}{tag} [{:7.2}{:7.2}{:7.2} ]", v.x, v.y, v.z)?;
+    if norm {
+        write!(f, "  |{:.2}|", v.norm())?;
+    }
+    writeln!(f)
 }
 
 impl fmt::Display for ImuCalReport {
@@ -432,60 +425,18 @@ impl fmt::Display for ImuCalReport {
                     ""
                 )?;
             }
-            writeln!(
-                f,
-                "  {:<21}[{:8.3}{:8.3}{:8.3} ]",
-                "",
-                r[(0, 0)],
-                r[(0, 1)],
-                r[(0, 2)]
-            )?;
-            writeln!(
-                f,
-                "  {:<21}[{:8.3}{:8.3}{:8.3} ]",
-                "",
-                r[(1, 0)],
-                r[(1, 1)],
-                r[(1, 2)]
-            )?;
-            writeln!(
-                f,
-                "  {:<21}[{:8.3}{:8.3}{:8.3} ]\n",
-                "",
-                r[(2, 0)],
-                r[(2, 1)],
-                r[(2, 2)]
-            )?;
+            write_row(f, "", r[(0, 0)], r[(0, 1)], r[(0, 2)])?;
+            write_row(f, "", r[(1, 0)], r[(1, 1)], r[(1, 2)])?;
+            write_row(f, "", r[(2, 0)], r[(2, 1)], r[(2, 2)])?;
+            writeln!(f)?;
         }
 
         let (b0, b1) = (self.gyro_bias_dps[0], self.gyro_bias_dps[1]);
         if self.still_ok {
-            writeln!(
-                f,
-                "  {:<21}IMU0 [{:7.2}{:7.2}{:7.2} ]  |{:.2}|",
-                "gyro bias dps",
-                b0.x,
-                b0.y,
-                b0.z,
-                b0.norm()
-            )?;
-            writeln!(
-                f,
-                "  {:<21}IMU1 [{:7.2}{:7.2}{:7.2} ]  |{:.2}|",
-                "",
-                b1.x,
-                b1.y,
-                b1.z,
-                b1.norm()
-            )?;
-            writeln!(
-                f,
-                "  {:<21}diff [{:7.2}{:7.2}{:7.2} ]\n",
-                "",
-                b1.x - b0.x,
-                b1.y - b0.y,
-                b1.z - b0.z
-            )?;
+            bias_row(f, "gyro bias dps", "IMU0", b0, true)?;
+            bias_row(f, "", "IMU1", b1, true)?;
+            bias_row(f, "", "diff", b1 - b0, false)?;
+            writeln!(f)?;
         } else {
             writeln!(
                 f,

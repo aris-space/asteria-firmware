@@ -116,6 +116,9 @@ const HELP: &str = r"commands:
 /// The keys the firmware reads/writes, shown by `flash list`.
 const KEYS: &str = "mag0\nmag1\nimu0\nimu1\n";
 
+/// Max length of a stored name/key (flash `Key` and a cal name are 16 bytes).
+const NAME_MAX: usize = 16;
+
 /// Build the USB device + CDC class from static buffers and spawn the device
 /// and console tasks.
 pub fn start(driver: UsbDriver, storage: &'static Storage, spawner: Spawner) {
@@ -198,89 +201,97 @@ async fn cmd_cal(
     storage: &Storage,
 ) {
     match args.next() {
-        Some("mag") => {
-            let Some(name) = args.next() else {
-                say(class, paint!(red, "usage: cal mag <name>\n")).await;
-                return;
-            };
-            if name.len() > 16 {
-                say(class, paint!(red, "name too long (max 16 chars)\n")).await;
-                return;
-            }
-            say(
-                class,
-                "mag cal: tumble the board slowly through all orientations (~30s)\n",
-            )
-            .await;
-            let reports = mag::run(storage, name, async |n0, n1| {
-                let mut s: String<48> = String::new();
-                let _ = writeln!(s, "  collecting... mag0={n0} mag1={n1}");
-                say(class, &s).await;
-            })
-            .await;
-            say(class, "results:\n").await;
-            let mut stored = false;
-            for r in &reports {
-                let mut s: String<384> = String::new();
-                let _ = writeln!(s, "{r}\n");
-                say(class, &s).await;
-                stored |= r.stored();
-            }
-            if stored {
-                say(class, paint!(green, "written to flash; reset to apply.\n")).await;
-            } else {
-                say(class, paint!(red, "NOT stored (see results above).\n")).await;
-            }
-        }
-        Some("imu") => {
-            say(
-                class,
-                "imu cal: rest the board still in several distinct orientations\n(its 6 faces work well); each capture takes the gyro bias too.\n",
-            )
-            .await;
-            let report = imu::run(storage, async |phase| match phase {
-                imu::Phase::Pose { index, total } => {
-                    let mut s: String<96> = String::new();
-                    let _ = write!(
-                        s,
-                        "\npose {}/{}: rest it on a new face/edge, then press any key...\n",
-                        index + 1,
-                        total
-                    );
-                    say(class, &s).await;
-                    // Block until a byte arrives from the terminal (any key).
-                    let mut key = [0u8; 1];
-                    let _ = class.read(&mut key).await;
-                    say(class, "  capturing...\n").await;
-                }
-                imu::Phase::Captured {
-                    index,
-                    total,
-                    n0,
-                    n1,
-                } => {
-                    let mut s: String<96> = String::new();
-                    let _ = writeln!(
-                        s,
-                        "  pose {}/{} captured (imu0={n0} imu1={n1} still samples)",
-                        index + 1,
-                        total
-                    );
-                    say(class, &s).await;
-                }
-            })
-            .await;
-            let mut s: String<1024> = String::new();
-            let _ = writeln!(s, "{report}");
-            say(class, &s).await;
-            if report.stored() {
-                say(class, paint!(green, "written to flash; reset to apply.\n")).await;
-            } else {
-                say(class, paint!(red, "NOT stored (see results above).\n")).await;
-            }
-        }
+        Some("mag") => cmd_cal_mag(class, args, storage).await,
+        Some("imu") => cmd_cal_imu(class, storage).await,
         Some("show") => cal_show(class, storage).await,
         _ => say(class, paint!(red, "usage: cal <mag <name>|imu|show>\n")).await,
+    }
+}
+
+async fn cmd_cal_mag(
+    class: &mut ConsoleIo<'_>,
+    args: &mut SplitAsciiWhitespace<'_>,
+    storage: &Storage,
+) {
+    let Some(name) = args.next() else {
+        say(class, paint!(red, "usage: cal mag <name>\n")).await;
+        return;
+    };
+    if name.len() > NAME_MAX {
+        say(class, paint!(red, "name too long (max 16 chars)\n")).await;
+        return;
+    }
+    say(
+        class,
+        "mag cal: tumble the board slowly through all orientations (~30s)\n",
+    )
+    .await;
+    let reports = mag::run(storage, name, async |n0, n1| {
+        let mut s: String<48> = String::new();
+        let _ = writeln!(s, "  collecting... mag0={n0} mag1={n1}");
+        say(class, &s).await;
+    })
+    .await;
+    say(class, "results:\n").await;
+    let mut stored = false;
+    for r in &reports {
+        let mut s: String<384> = String::new();
+        let _ = writeln!(s, "{r}\n");
+        say(class, &s).await;
+        stored |= r.stored();
+    }
+    report_outcome(class, stored).await;
+}
+
+async fn cmd_cal_imu(class: &mut ConsoleIo<'_>, storage: &Storage) {
+    say(
+        class,
+        "imu cal: rest the board still in several distinct orientations\n(its 6 faces work well); each capture takes the gyro bias too.\n",
+    )
+    .await;
+    let report = imu::run(storage, async |phase| match phase {
+        imu::Phase::Pose { index, total } => {
+            let mut s: String<96> = String::new();
+            let _ = write!(
+                s,
+                "\npose {}/{}: rest it on a new face/edge, then press any key...\n",
+                index + 1,
+                total
+            );
+            say(class, &s).await;
+            // Block until a byte arrives from the terminal (any key).
+            let mut key = [0u8; 1];
+            let _ = class.read(&mut key).await;
+            say(class, "  capturing...\n").await;
+        }
+        imu::Phase::Captured {
+            index,
+            total,
+            n0,
+            n1,
+        } => {
+            let mut s: String<96> = String::new();
+            let _ = writeln!(
+                s,
+                "  pose {}/{} captured (imu0={n0} imu1={n1} still samples)",
+                index + 1,
+                total
+            );
+            say(class, &s).await;
+        }
+    })
+    .await;
+    let mut s: String<1024> = String::new();
+    let _ = writeln!(s, "{report}");
+    say(class, &s).await;
+    report_outcome(class, report.stored()).await;
+}
+
+async fn report_outcome(class: &mut ConsoleIo<'_>, stored: bool) {
+    if stored {
+        say(class, paint!(green, "written to flash; reset to apply.\n")).await;
+    } else {
+        say(class, paint!(red, "NOT stored (see results above).\n")).await;
     }
 }
 
@@ -409,7 +420,7 @@ async fn flash_test(class: &mut ConsoleIo<'_>, storage: &Storage) {
 }
 
 async fn flash_clear(class: &mut ConsoleIo<'_>, storage: &Storage, name: &str) {
-    if name.len() > 16 {
+    if name.len() > NAME_MAX {
         say(class, paint!(red, "key name too long (max 16)\n")).await;
         return;
     }
