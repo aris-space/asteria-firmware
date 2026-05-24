@@ -102,7 +102,7 @@ impl Write for ConsoleIo<'_> {
 const PROMPT: &str = "asteria> ";
 const HELP: &str = r"commands:
   cal mag <name>     run magnetometer calibration (label required)
-  cal imu            estimate the two IMUs' difference (rotation + gyro bias)
+  cal imu <name>     estimate the two IMUs' difference (rotation + gyro bias)
   cal show           show stored calibrations
   flash info         show chip id and status register
   flash test         erase/write/read-back a scratch sector
@@ -202,9 +202,15 @@ async fn cmd_cal(
 ) {
     match args.next() {
         Some("mag") => cmd_cal_mag(class, args, storage).await,
-        Some("imu") => cmd_cal_imu(class, storage).await,
+        Some("imu") => cmd_cal_imu(class, args, storage).await,
         Some("show") => cal_show(class, storage).await,
-        _ => say(class, paint!(red, "usage: cal <mag <name>|imu|show>\n")).await,
+        _ => {
+            say(
+                class,
+                paint!(red, "usage: cal <mag <name>|imu <name>|show>\n"),
+            )
+            .await
+        }
     }
 }
 
@@ -226,13 +232,16 @@ async fn cmd_cal_mag(
         "mag cal: tumble the board slowly through all orientations (~30s)\n",
     )
     .await;
-    let reports = mag::run(storage, name, async |n0, n1| {
+    let mut cal = mag::MagCal::default();
+    for _ in 0..mag::PROGRESS_TICKS {
+        cal.collect_tick().await;
+        let n = cal.counts();
         let mut s: String<48> = String::new();
-        let _ = writeln!(s, "  collecting... mag0={n0} mag1={n1}");
+        let _ = writeln!(s, "  collecting... mag0={} mag1={}", n[0], n[1]);
         say(class, &s).await;
-    })
-    .await;
+    }
     say(class, "results:\n").await;
+    let reports = cal.finish(name, storage).await;
     let mut stored = false;
     for r in &reports {
         let mut s: String<384> = String::new();
@@ -243,44 +252,52 @@ async fn cmd_cal_mag(
     report_outcome(class, stored).await;
 }
 
-async fn cmd_cal_imu(class: &mut ConsoleIo<'_>, storage: &Storage) {
+async fn cmd_cal_imu(
+    class: &mut ConsoleIo<'_>,
+    args: &mut SplitAsciiWhitespace<'_>,
+    storage: &Storage,
+) {
+    let Some(name) = args.next() else {
+        say(class, paint!(red, "usage: cal imu <name>\n")).await;
+        return;
+    };
+    if name.len() > NAME_MAX {
+        say(class, paint!(red, "name too long (max 16 chars)\n")).await;
+        return;
+    }
     say(
         class,
         "imu cal: rest the board still in several distinct orientations\n(its 6 faces work well); each capture takes the gyro bias too.\n",
     )
     .await;
-    let report = imu::run(storage, async |phase| match phase {
-        imu::Phase::Pose { index, total } => {
-            let mut s: String<96> = String::new();
-            let _ = write!(
-                s,
-                "\npose {}/{}: rest it on a new face/edge, then press any key...\n",
-                index + 1,
-                total
-            );
-            say(class, &s).await;
-            // Block until a byte arrives from the terminal (any key).
-            let mut key = [0u8; 1];
-            let _ = class.read(&mut key).await;
-            say(class, "  capturing...\n").await;
-        }
-        imu::Phase::Captured {
-            index,
-            total,
-            n0,
-            n1,
-        } => {
-            let mut s: String<96> = String::new();
-            let _ = writeln!(
-                s,
-                "  pose {}/{} captured (imu0={n0} imu1={n1} still samples)",
-                index + 1,
-                total
-            );
-            say(class, &s).await;
-        }
-    })
-    .await;
+    let mut cal = imu::ImuCal::default();
+    for i in 0..imu::POSES {
+        let mut s: String<96> = String::new();
+        let _ = write!(
+            s,
+            "\npose {}/{}: rest it on a new face/edge, then press any key...\n",
+            i + 1,
+            imu::POSES
+        );
+        say(class, &s).await;
+        // Block until a byte arrives from the terminal (any key).
+        let mut key = [0u8; 1];
+        let _ = class.read(&mut key).await;
+        say(class, "  capturing...\n").await;
+
+        let n = cal.capture_pose().await;
+        let mut s: String<96> = String::new();
+        let _ = writeln!(
+            s,
+            "  pose {}/{} captured (imu0={} imu1={} still samples)",
+            i + 1,
+            imu::POSES,
+            n[0],
+            n[1]
+        );
+        say(class, &s).await;
+    }
+    let report = cal.finish(name, storage).await;
     let mut s: String<1024> = String::new();
     let _ = writeln!(s, "{report}");
     say(class, &s).await;
@@ -326,11 +343,12 @@ async fn cal_show(class: &mut ConsoleIo<'_>, storage: &Storage) {
             imu_applied[i]
         );
         if let Some(st) = &imu_stored[i]
-            && (st.fine_rot != imu_applied[i].fine_rot || st.gyro_bias != imu_applied[i].gyro_bias)
+            && (st.name != imu_applied[i].name || st.wire.fine_rot != imu_applied[i].wire.fine_rot)
         {
             let _ = writeln!(
                 s,
-                paint!(yellow, "  flash has a cal pending; reset to apply")
+                paint!(yellow, "  flash has \"{}\" pending; reset to apply"),
+                st.name_str()
             );
         }
         say(class, &s).await;

@@ -187,7 +187,6 @@ pub fn apply_calibration(raw: RawMagSample) -> MagSample {
     }
 }
 
-const COLLECT_WINDOW: Duration = Duration::from_secs(30);
 // deci-uT keeps the ~50 uT field well inside i16; results scale back to nT.
 const NT_TO_DECI_UT: f32 = 1e-2;
 const DECI_UT_TO_NT: f32 = 100.0;
@@ -267,58 +266,65 @@ impl fmt::Display for CalReport {
     }
 }
 
-/// How often [`run`] reports collection progress to its caller.
-const PROGRESS_INTERVAL: Duration = Duration::from_secs(3);
+/// One collection runs as `PROGRESS_TICKS` windows of `TICK` (~30 s of tumbling);
+/// the caller reports the per-sensor counts between ticks.
+const TICK: Duration = Duration::from_secs(3);
+pub const PROGRESS_TICKS: usize = 10;
 
-/// Collect a tumble window from both magnetometers and fit each. `progress` is
-/// called every few seconds with the per-sensor sample counts so the caller
-/// can show liveness; the returned reports describe each sensor.
-pub async fn run(
-    storage: &Storage,
-    name: &str,
-    mut progress: impl AsyncFnMut(usize, usize),
-) -> [CalReport; MAGNETOMETER_COUNT] {
-    info!(
-        "mag cal: collecting ({} s tumble window)",
-        COLLECT_WINDOW.as_secs()
-    );
-    let mut solver_0 = Solver::new();
-    let mut solver_1 = Solver::new();
-    collect_window(COLLECT_WINDOW, &mut solver_0, &mut solver_1, &mut progress).await;
-
-    [
-        fit_store(&mut solver_0, MAG_BUS_1, &KEYS[0], name, storage).await,
-        fit_store(&mut solver_1, MAG_BUS_2, &KEYS[1], name, storage).await,
-    ]
+/// Magnetometer calibration: tumble while [`collect_tick`](MagCal::collect_tick)
+/// feeds raw samples into a [`magcal`] solver per sensor, then
+/// [`finish`](MagCal::finish) fits, validates, and stores each. The caller drives
+/// the collection loop.
+pub struct MagCal {
+    solvers: [Solver; MAGNETOMETER_COUNT],
 }
 
-async fn collect_window(
-    window: Duration,
-    solver_0: &mut Solver,
-    solver_1: &mut Solver,
-    progress: &mut impl AsyncFnMut(usize, usize),
-) {
-    let mut sub_0 = RAW_MAG_CHANNELS[MAG_BUS_1.index()]
-        .subscriber()
-        .expect("mag cal: raw mag 0 subscribe failed");
-    let mut sub_1 = RAW_MAG_CHANNELS[MAG_BUS_2.index()]
-        .subscriber()
-        .expect("mag cal: raw mag 1 subscribe failed");
+impl Default for MagCal {
+    fn default() -> Self {
+        Self {
+            solvers: [Solver::new(), Solver::new()],
+        }
+    }
+}
 
-    let deadline = Instant::now() + window;
-    let mut next_tick = Instant::now() + PROGRESS_INTERVAL;
-    while Instant::now() < deadline {
-        let remaining = deadline - Instant::now();
-        let next = select(sub_0.next_message_pure(), sub_1.next_message_pure());
-        match with_timeout(remaining, next).await {
-            Ok(Either::First(s)) => solver_0.push_sample(to_board_counts(s.x, s.y, s.z)),
-            Ok(Either::Second(s)) => solver_1.push_sample(to_board_counts(s.x, s.y, s.z)),
-            Err(_) => break,
+impl MagCal {
+    /// Collect raw mag samples for one `TICK` window into the solvers.
+    pub async fn collect_tick(&mut self) {
+        let mut sub_0 = RAW_MAG_CHANNELS[MAG_BUS_1.index()]
+            .subscriber()
+            .expect("mag cal: raw mag 0 subscribe failed");
+        let mut sub_1 = RAW_MAG_CHANNELS[MAG_BUS_2.index()]
+            .subscriber()
+            .expect("mag cal: raw mag 1 subscribe failed");
+        let deadline = Instant::now() + TICK;
+        while Instant::now() < deadline {
+            let remaining = deadline - Instant::now();
+            let next = select(sub_0.next_message_pure(), sub_1.next_message_pure());
+            match with_timeout(remaining, next).await {
+                Ok(Either::First(s)) => self.solvers[0].push_sample(to_board_counts(s.x, s.y, s.z)),
+                Ok(Either::Second(s)) => {
+                    self.solvers[1].push_sample(to_board_counts(s.x, s.y, s.z))
+                }
+                Err(_) => break,
+            }
         }
-        if Instant::now() >= next_tick {
-            progress(solver_0.sample_count(), solver_1.sample_count()).await;
-            next_tick += PROGRESS_INTERVAL;
-        }
+    }
+
+    /// Sample count collected so far, per sensor.
+    pub fn counts(&self) -> [usize; MAGNETOMETER_COUNT] {
+        [
+            self.solvers[0].sample_count(),
+            self.solvers[1].sample_count(),
+        ]
+    }
+
+    /// Fit, validate, and store each sensor; returns the per-sensor reports.
+    pub async fn finish(self, name: &str, storage: &Storage) -> [CalReport; MAGNETOMETER_COUNT] {
+        let [mut s0, mut s1] = self.solvers;
+        [
+            fit_store(&mut s0, MAG_BUS_1, &KEYS[0], name, storage).await,
+            fit_store(&mut s1, MAG_BUS_2, &KEYS[1], name, storage).await,
+        ]
     }
 }
 

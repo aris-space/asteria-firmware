@@ -8,4 +8,5 @@ pub mod baro;
 pub mod dht;
 pub mod gnss;
 pub mod imu;
+mod imu_fit;
 pub mod mag;
