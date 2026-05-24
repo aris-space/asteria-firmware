@@ -1,8 +1,10 @@
+use crate::actuators::{KD, KI, KP};
 use crate::globals::STATE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
+use datatypes::actuator::DPRValve;
 use datatypes::status::{BoardId, DprGainInfo, DprLoopInfo, SensorStatus, StatusCommonMessage};
 use embassy_futures::yield_now;
 use embassy_stm32::can::CanRx;
@@ -65,11 +67,19 @@ pub async fn board_status_update_task() -> ! {
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
     let mut pressure_bus_status = STATE.pressure_bus_status.receiver().unwrap();
+    let mut dpr_control_loop = STATE.dpr_control_loop.receiver().unwrap();
     let mut pressure_status = SensorStatus::Online;
+    let mut dpr_loop_info = DprLoopInfo::Passive;
 
     loop {
         if let Some(status) = pressure_bus_status.try_changed() {
             pressure_status = status;
+        }
+        if let Some(status) = dpr_control_loop.try_changed() {
+            dpr_loop_info = match status {
+                DPRValve::Enabled { .. } => DprLoopInfo::ActiveNominal,
+                DPRValve::Disabled => DprLoopInfo::Passive,
+            };
         }
 
         STATE
@@ -82,8 +92,14 @@ pub async fn board_status_update_task() -> ! {
                 },
                 thermocouple_status: SensorStatus::Online,
                 pressure_bus: pressure_status,
-                dpr_loop_info: DprLoopInfo::default(),
-                dpr_gain_info: DprGainInfo::default(),
+                dpr_loop_info,
+                dpr_gain_info: DprGainInfo {
+                    p: KP,
+                    i: KI,
+                    d: KD,
+                    min_ms: 0.0,
+                    max_ms: 0.0,
+                },
             });
 
         status_ticker.next().await;
