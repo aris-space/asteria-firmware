@@ -4,11 +4,12 @@ use crate::sensors::{
     ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES, OXIDIZER_TANK_DIFFERENTIAL_PRESSURE_RANGE,
     OXIDIZER_TANK_PRESSURE_1_RANGE, OXIDIZER_TANK_PRESSURE_2_RANGE,
 };
+use embassy_futures::join::join3;
 use embassy_stm32::Peri;
 use embassy_stm32::adc::AdcChannel;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH3, DMA1_CH4, DMA2_CH3, PB13, PC0, PC1};
 use embassy_time::{Duration, Ticker};
-use embedded_utils::info;
+use embedded_utils::fmt::info;
 use trafag_pressure::ADCPressure;
 use trafag_pressure::pressures::TrafagPSens;
 
@@ -72,31 +73,35 @@ pub async fn oxidizer_pressure_acquisition(pressure_handles: OxidizerPressureHan
     oxidizer_tank_differential_pressure_handle.vref_calib =
         oxidizer_tank_pressure_1_handle.vref_calib;
 
-    let mut ticker = Ticker::every(Duration::from_millis(
-        (1000.0 / ACQ_PRESSURE_FREQ_HZ) as u64,
+    let mut ticker = Ticker::every(Duration::from_micros(
+        (1_000_000.0 / ACQ_PRESSURE_FREQ_HZ + 0.5) as u64,
     ));
     loop {
+        let (
+            oxidizer_tank_pressure_1,
+            oxidizer_tank_pressure_2,
+            oxidizer_tank_differential_pressure,
+        ) = join3(
+            oxidizer_tank_pressure_1_handle.read_pressure(Irqs),
+            oxidizer_tank_pressure_2_handle.read_pressure(Irqs),
+            oxidizer_tank_differential_pressure_handle.read_pressure(Irqs),
+        )
+        .await;
+
         let measurement = OxidizerPressureMeasurementRaw {
-            oxidizer_tank_pressure_1: oxidizer_tank_pressure_1_handle.read_pressure(Irqs).await,
-            oxidizer_tank_pressure_2: oxidizer_tank_pressure_2_handle.read_pressure(Irqs).await,
-            oxidizer_tank_differential_pressure: oxidizer_tank_differential_pressure_handle
-                .read_pressure(Irqs)
-                .await,
+            oxidizer_tank_pressure_1,
+            oxidizer_tank_pressure_2,
+            oxidizer_tank_differential_pressure,
         };
 
-        let filtered = data_publisher.update(measurement);
         info!(
-            "Oxidizer tank pressure 1: {}",
-            filtered.oxidizer_tank_pressure_1
+            "Oxidizer tank pressure 1: {}, Oxidizer tank pressure 2: {}, Oxidizer tank differential pressure: {}",
+            measurement.oxidizer_tank_pressure_1,
+            measurement.oxidizer_tank_pressure_2,
+            measurement.oxidizer_tank_differential_pressure
         );
-        info!(
-            "Oxidizer tank pressure 2: {}",
-            filtered.oxidizer_tank_pressure_2
-        );
-        info!(
-            "Oxidizer tank differential pressure: {}",
-            filtered.oxidizer_tank_differential_pressure
-        );
+
+        data_publisher.update(measurement);
         ticker.next().await;
     }
 }

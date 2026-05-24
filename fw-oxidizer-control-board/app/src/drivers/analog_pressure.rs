@@ -1,11 +1,6 @@
 use crate::globals::STATE;
 use datatypes::status::SensorStatus;
 use datatypes::units::BarG;
-use filters::GaussianMovingAverage;
-
-const FILTER_WINDOW: usize = 10;
-const FILTER_MEAN: f32 = 3.0;
-const FILTER_SIGMA: f32 = 9.0;
 
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -15,44 +10,20 @@ pub struct OxidizerPressureMeasurementRaw {
     pub oxidizer_tank_differential_pressure: f32,
 }
 
-pub struct OxidizerPressureDriver {
-    oxidizer_tank_pressure_1_avg: GaussianMovingAverage<FILTER_WINDOW>,
-    oxidizer_tank_pressure_2_avg: GaussianMovingAverage<FILTER_WINDOW>,
-    oxidizer_tank_differential_pressure_avg: GaussianMovingAverage<FILTER_WINDOW>,
-}
+pub struct OxidizerPressureDriver;
 
 impl OxidizerPressureDriver {
     pub fn new() -> Self {
-        Self {
-            oxidizer_tank_pressure_1_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
-            oxidizer_tank_pressure_2_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
-            oxidizer_tank_differential_pressure_avg: GaussianMovingAverage::new(
-                FILTER_SIGMA,
-                FILTER_MEAN,
-            ),
-        }
+        Self
     }
 
     pub fn update(
         &mut self,
-        mut value: OxidizerPressureMeasurementRaw,
+        value: OxidizerPressureMeasurementRaw,
     ) -> OxidizerPressureMeasurementRaw {
         let has_error = !value.oxidizer_tank_pressure_1.is_finite()
             || !value.oxidizer_tank_pressure_2.is_finite()
             || !value.oxidizer_tank_differential_pressure.is_finite();
-
-        value.oxidizer_tank_pressure_1 = update_if_finite(
-            &mut self.oxidizer_tank_pressure_1_avg,
-            value.oxidizer_tank_pressure_1,
-        );
-        value.oxidizer_tank_pressure_2 = update_if_finite(
-            &mut self.oxidizer_tank_pressure_2_avg,
-            value.oxidizer_tank_pressure_2,
-        );
-        value.oxidizer_tank_differential_pressure = update_if_finite(
-            &mut self.oxidizer_tank_differential_pressure_avg,
-            value.oxidizer_tank_differential_pressure,
-        );
 
         STATE
             .oxidizer_tank_pressure_sensor_1
@@ -73,14 +44,6 @@ impl OxidizerPressureDriver {
             SensorStatus::Online
         });
 
-        value
-    }
-}
-
-fn update_if_finite(avg: &mut GaussianMovingAverage<FILTER_WINDOW>, value: f32) -> f32 {
-    if value.is_finite() {
-        avg.update(value)
-    } else {
         value
     }
 }
