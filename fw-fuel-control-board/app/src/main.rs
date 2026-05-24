@@ -47,7 +47,6 @@ use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode as _;
 
 use crate::buzzer::buzzer_task;
-use datatypes::actuator::DPRValve;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
