@@ -12,7 +12,7 @@ use embassy_sync::watch::Watch;
 use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
 use crate::types::{
     BaroSample, DhtSample, Environment, GnssSample, ImuSample, Inertial, MagSample, Orientation,
-    Position, Pressure, RawMagSample, Velocity,
+    Position, Pressure, RawImuSample, RawMagSample, Velocity,
 };
 
 macro_rules! define_sample_channels {
@@ -43,6 +43,11 @@ macro_rules! define_sample_channels {
 
 define_sample_channels!(IMU_CHANNELS, submit_imu_sample, submit_imu_sample_batch:
     ImuSample, cap = 64, subs = 1, count = IMU_COUNT);
+
+// Raw, pre-calibration IMU samples for the calibration routine to consume
+// while the board is tumbled/held still. Drained only during `cal imu`.
+define_sample_channels!(RAW_IMU_CHANNELS, submit_raw_imu_sample, submit_raw_imu_sample_batch:
+    RawImuSample, cap = 32, subs = 1, count = IMU_COUNT);
 
 define_sample_channels!(BARO_CHANNELS, submit_baro_sample, submit_baro_sample_batch:
     BaroSample, cap = 16, subs = 2, count = BAROMETER_COUNT);
