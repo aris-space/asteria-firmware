@@ -45,39 +45,30 @@ where
 
     async fn run(mut self) -> ActiveDhtSensor<'a, I2C> {
         loop {
-            debug!("{:?} DHT initializing", self.sensor_id);
+            debug!("{:?} initializing", self.sensor_id);
 
-            let reset_ok = match self.sensor.soft_reset(&mut Delay).await {
-                Ok(()) => true,
-                Err(err) => {
-                    error!(
-                        "{:?} Soft reset failed: {:?}",
-                        self.sensor_id,
-                        Debug2Format(&err)
-                    );
-                    false
-                }
+            let result = match self.sensor.soft_reset(&mut Delay).await {
+                Ok(()) => self
+                    .sensor
+                    .measure(Precision::Low, &mut Delay)
+                    .await
+                    .map(|_| ()),
+                Err(err) => Err(err),
             };
 
-            if reset_ok {
-                match self.sensor.measure(Precision::Low, &mut Delay).await {
-                    Ok(_) => {
-                        self.attempt_count = 0;
-                        info!("{:?} DHT initialized", self.sensor_id);
-                        return ActiveDhtSensor::new(
-                            self.driver,
-                            self.sensor,
-                            self.config,
-                            self.sensor_id,
-                        );
-                    }
-                    Err(err) => {
-                        error!(
-                            "{:?} First measurement failed: {:?}",
-                            self.sensor_id,
-                            Debug2Format(&err)
-                        );
-                    }
+            match result {
+                Ok(()) => {
+                    self.attempt_count = 0;
+                    info!("{:?} initialized", self.sensor_id);
+                    return ActiveDhtSensor::new(
+                        self.driver,
+                        self.sensor,
+                        self.config,
+                        self.sensor_id,
+                    );
+                }
+                Err(err) => {
+                    error!("{:?} init failed: {:?}", self.sensor_id, Debug2Format(&err));
                 }
             }
 
@@ -133,16 +124,10 @@ where
                         .await;
                 }
                 Err(err) => {
-                    error!(
-                        "{:?} Measurement failed: {:?}",
-                        self.sensor_id,
-                        Debug2Format(&err)
-                    );
-
+                    warn!("{:?} read error: {:?}", self.sensor_id, Debug2Format(&err));
                     self.error_count += 1;
-                    warn!("{:?} Measurement failed", self.sensor_id);
                     if self.error_count >= self.config.max_consecutive_errors {
-                        error!("{:?} DHT offline", self.sensor_id);
+                        error!("{:?} offline (too many consecutive errors)", self.sensor_id);
                         let i2c = self.sensor.destroy();
                         let sensor = Sht4xAsync::new(i2c);
                         return InactiveDhtSensor::new(
@@ -156,10 +141,7 @@ where
             }
 
             if Instant::now() > next_sample {
-                warn!(
-                    "{:?} cannot keep up with measurement interval.",
-                    self.sensor_id
-                );
+                warn!("{:?} can't keep up with sample interval", self.sensor_id);
             } else {
                 Timer::at(next_sample).await;
             }
