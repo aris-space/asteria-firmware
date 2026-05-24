@@ -10,6 +10,7 @@ use embassy_stm32::can::CanRx;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker};
+use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
 use embedded_utils::fmt::*;
 
 const THIS_BOARD_ID: BoardId = BoardId::FuelControlBoard;
@@ -108,6 +109,11 @@ pub async fn board_status_update_task() -> ! {
 
     let mut dpr_gain_receiver = STATE.dpr_gain.receiver().unwrap();
     let mut dpr_gain = DprGainInfo::default();
+    dpr_gain.p = GAINS.p;
+    dpr_gain.i = GAINS.i;
+    dpr_gain.d = GAINS.d;
+    dpr_gain.min_ms = MIN_TIME_MS;
+    dpr_gain.max_ms = MAX_TIME_MS;
 
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
