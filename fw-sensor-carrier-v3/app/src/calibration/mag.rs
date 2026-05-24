@@ -16,8 +16,7 @@ use crate::types::{MagSample, RawMagSample};
 
 pub fn apply_calibration(raw: RawMagSample) -> MagSample {
     let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].correction;
-    // Sensor-to-board on this board negates all three axes.
-    let board = -Vector3::new(raw.x, raw.y, raw.z);
+    let board = sensor_to_board(Vector3::new(raw.x, raw.y, raw.z));
     let corrected = cal.correct_board_field(board);
     MagSample {
         src: raw.src,
@@ -376,6 +375,11 @@ impl fmt::Display for CalReport {
             CalOutcome::TooFewSamples => write!(f, "{name}: too few samples ({})", self.samples),
         }
     }
+}
+
+/// Sensor-to-board axis remap on this board: negate all three axes.
+fn sensor_to_board(v: Vector3<f32>) -> Vector3<f32> {
+    -v
 }
 
 /// Raw sample to the solver's board-frame deci-uT counts: negate all axes
