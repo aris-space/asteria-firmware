@@ -126,6 +126,7 @@ impl<'a> DPR<'a> {
                 self.loop_state = Passive;
                 self.status_sender.send(self.loop_state);
                 Timer::after_millis(500).await;
+                let _ = self.control_receiver.try_changed();
             }
             _ => {
                 self.valve_pin.set_low();
