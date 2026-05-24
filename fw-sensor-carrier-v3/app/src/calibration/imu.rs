@@ -70,7 +70,7 @@ async fn load_one(storage: &Storage, id: ImuId) -> StoredCal {
             cal
         }
         None => {
-            info!("{}: no cal in flash, using identity (no correction)", id);
+            info!("{}: no cal in flash, using identity (default)", id);
             StoredCal::DEFAULT
         }
     }
@@ -78,13 +78,13 @@ async fn load_one(storage: &Storage, id: ImuId) -> StoredCal {
 
 /// Persisted per IMU: the applied correction plus the shared cross-IMU fit
 /// metadata (one fit covers both IMUs); only `correction` differs between them.
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StoredCal {
     pub name: Name,
-    pub residual_deg: f32,
-    pub coverage: f32,
-    pub pairs: u32,
-    pub correction: Correction,
+    residual_deg: f32,
+    coverage: f32,
+    pairs: u32,
+    correction: Correction,
 }
 
 impl StoredCal {
@@ -107,7 +107,7 @@ impl StoredCal {
     }
 
     fn is_default(&self) -> bool {
-        self.pairs == 0
+        *self == Self::DEFAULT
     }
 
     /// Whether applying this stored cal would change the live one: only the
@@ -120,7 +120,11 @@ impl StoredCal {
 impl fmt::Display for StoredCal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_default() {
-            writeln!(f, "\"{}\" (built-in default, not calibrated)", self.name)?;
+            writeln!(
+                f,
+                "\"{}\" \x1b[31m(built-in default, not calibrated)\x1b[0m",
+                self.name
+            )?;
         } else {
             writeln!(
                 f,
@@ -136,9 +140,9 @@ impl fmt::Display for StoredCal {
 /// IMU 1's rotation brings it into IMU 0's frame.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Correction {
-    pub fine_rot: [f32; 9],
+    fine_rot: [f32; 9],
     /// Zero-rate offset in board frame, dps.
-    pub gyro_bias: [f32; 3],
+    gyro_bias: [f32; 3],
 }
 
 impl Correction {
@@ -277,9 +281,9 @@ impl ImuCal {
 }
 
 pub struct ImuCalReport {
-    pub fit: Fit,
-    pub still_ok: bool,
-    pub stored: bool,
+    fit: Fit,
+    still_ok: bool,
+    stored: bool,
 }
 
 impl ImuCalReport {
@@ -311,12 +315,12 @@ impl fmt::Display for ImuCalReport {
                 Some(a) => writeln!(
                     f,
                     "  {:<21}{:.2} deg about [{:7.3}{:7.3}{:7.3} ]",
-                    "rotation IMU1->IMU0", rot.misalign_deg, a.x, a.y, a.z
+                    "rotation IMU_1->IMU_0", rot.misalign_deg, a.x, a.y, a.z
                 )?,
                 None => writeln!(
                     f,
                     "  {:<21}{:.2} deg (near-aligned)",
-                    "rotation IMU1->IMU0", rot.misalign_deg
+                    "rotation IMU_1->IMU_0", rot.misalign_deg
                 )?,
             }
             writeln!(
@@ -347,8 +351,8 @@ impl fmt::Display for ImuCalReport {
 
         let (b0, b1) = (fit.gyro_bias[0], fit.gyro_bias[1]);
         if self.still_ok {
-            bias_row(f, "gyro bias dps", "IMU0", b0, true)?;
-            bias_row(f, "", "IMU1", b1, true)?;
+            bias_row(f, "gyro bias dps", IMU_0.name(), b0, true)?;
+            bias_row(f, "", IMU_1.name(), b1, true)?;
             bias_row(f, "", "diff", b1 - b0, false)?;
             writeln!(f)?;
         } else {
@@ -363,9 +367,11 @@ impl fmt::Display for ImuCalReport {
         let ratio = if a0 != 0.0 { a1 / a0 } else { f32::NAN };
         writeln!(
             f,
-            "  {:<21}IMU0 {a0:.3} ({:+.1}%)   IMU1 {a1:.3} ({:+.1}%)   ratio {ratio:.3}",
+            "  {:<21}{} {a0:.3} ({:+.1}%)   {} {a1:.3} ({:+.1}%)   ratio {ratio:.3}",
             "accel mag g",
+            IMU_0.name(),
             (a0 - 1.0) * 100.0,
+            IMU_1.name(),
             (a1 - 1.0) * 100.0
         )?;
         write!(

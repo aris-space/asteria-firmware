@@ -1,6 +1,6 @@
 use core::fmt;
 
-use defmt::{Debug2Format, Display2Format, info, warn};
+use defmt::{Debug2Format, info, warn};
 use embassy_futures::select::{Either, select};
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Duration, Instant, with_timeout};
@@ -63,15 +63,11 @@ const DELAY: Duration = Duration::from_millis(0);
 async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
     match storage.load::<StoredCal>(&KEYS[id.index()]).await {
         Some(cal) => {
-            info!("{}: cal loaded from flash: {}", id, Display2Format(&cal));
+            info!("{}: cal \"{}\" loaded from flash", id, cal.name.as_str());
             cal
         }
         None => {
-            info!(
-                "{}: no cal in flash, using {}",
-                id,
-                Display2Format(&StoredCal::DEFAULT)
-            );
+            info!("{}: no cal in flash, using identity (default)", id);
             StoredCal::DEFAULT
         }
     }
@@ -80,18 +76,16 @@ async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
 // deci-uT keeps the ~50 uT field well inside i16; results scale back to nT.
 const NT_TO_DECI_UT: f32 = 1e-2;
 const DECI_UT_TO_NT: f32 = 100.0;
-const MIN_VALID_NT: f32 = 22_000.0;
-const MAX_VALID_NT: f32 = 67_000.0;
 
 /// What's persisted per sensor: the applied correction plus metadata about the
 /// fit that produced it, so a stored cal can be inspected later (`cal show`).
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StoredCal {
     pub name: Name,
-    pub field_nt: f32,
-    pub fit_error_pc: f32,
-    pub samples: u16,
-    pub correction: Correction,
+    field_nt: f32,
+    fit_error_pc: f32,
+    samples: u16,
+    correction: Correction,
 }
 
 impl StoredCal {
@@ -114,7 +108,7 @@ impl StoredCal {
     }
 
     fn is_default(&self) -> bool {
-        self.samples == 0
+        *self == Self::DEFAULT
     }
 
     /// Whether applying this stored cal would change the live one: only the
@@ -127,7 +121,11 @@ impl StoredCal {
 impl fmt::Display for StoredCal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_default() {
-            write!(f, "\"{}\" (built-in default, not calibrated)", self.name)?;
+            write!(
+                f,
+                "\"{}\" \x1b[31m(built-in default, not calibrated)\x1b[0m",
+                self.name
+            )?;
         } else {
             write!(
                 f,
@@ -146,8 +144,8 @@ impl fmt::Display for StoredCal {
 /// in nT. The soft-iron matrix also absorbs any residual mounting rotation.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Correction {
-    pub hard_iron: [f32; 3],
-    pub soft_iron: [f32; 9],
+    hard_iron: [f32; 3],
+    soft_iron: [f32; 9],
 }
 
 impl Correction {
@@ -206,6 +204,9 @@ impl fmt::Display for Correction {
 
 const TICK: Duration = Duration::from_secs(3);
 pub const PROGRESS_TICKS: usize = 10;
+// Plausible Earth-field magnitude band; fits outside it are discarded.
+const MIN_VALID_NT: f32 = 22_000.0;
+const MAX_VALID_NT: f32 = 67_000.0;
 
 /// Magnetometer calibration: the caller drives the collection loop (`collect_tick`
 /// per window, then `finish`). One `magcal` solver per sensor.
@@ -317,20 +318,20 @@ impl MagCal {
     }
 }
 
-pub struct Fit {
-    pub tier: SolverTier,
-    pub field_nt: f32,
-    pub fit_error_pc: f32,
-    pub correction: Correction,
+struct Fit {
+    tier: SolverTier,
+    field_nt: f32,
+    fit_error_pc: f32,
+    correction: Correction,
 }
 
 pub struct CalReport {
-    pub id: MagnetometerId,
-    pub samples: usize,
-    pub outcome: CalOutcome,
+    id: MagnetometerId,
+    samples: usize,
+    outcome: CalOutcome,
 }
 
-pub enum CalOutcome {
+enum CalOutcome {
     Stored(Fit),
     StoreFailed(Fit),
     /// Field strength outside the plausible band.
