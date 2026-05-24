@@ -2,7 +2,7 @@ use defmt::trace;
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant};
 
-use crate::sensors::{MAGNETOMETER_0, MAGNETOMETER_1, MagnetometerId};
+use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MagnetometerId};
 use crate::signals;
 use crate::types::MagSample;
 
@@ -11,10 +11,10 @@ const MAG_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
-    let mut sub0 = signals::MAG_CHANNELS[MAGNETOMETER_0.index()]
+    let mut sub0 = signals::MAG_CHANNELS[MAG_BUS_1.index()]
         .subscriber()
         .expect("too many subs on MAG_CHANNELS; increase SUBS");
-    let mut sub1 = signals::MAG_CHANNELS[MAGNETOMETER_1.index()]
+    let mut sub1 = signals::MAG_CHANNELS[MAG_BUS_2.index()]
         .subscriber()
         .expect("too many subs on MAG_CHANNELS; increase SUBS");
 
@@ -45,7 +45,7 @@ struct TimeoutSelector {
 impl TimeoutSelector {
     fn new(timeout: Duration) -> Self {
         Self {
-            primary: MAGNETOMETER_0,
+            primary: MAG_BUS_1,
             last_update: Instant::now(),
             timeout,
         }

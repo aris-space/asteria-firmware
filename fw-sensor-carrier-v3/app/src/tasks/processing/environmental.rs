@@ -3,7 +3,7 @@ use embassy_futures::select::{Either4, select4};
 use embassy_time::Instant;
 
 use crate::filters::Ema;
-use crate::sensors::{BAROMETER_0, BAROMETER_1, DHT_0, DHT_1};
+use crate::sensors::{BARO_BUS_1, BARO_BUS_2, DHT_BUS_1, DHT_BUS_2};
 use crate::signals;
 use crate::types::Environment;
 
@@ -15,16 +15,16 @@ const FALLBACK_TH_DT_S: f32 = 1.0;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
-    let mut p0 = signals::BARO_CHANNELS[BAROMETER_0.index()]
+    let mut p0 = signals::BARO_CHANNELS[BARO_BUS_1.index()]
         .subscriber()
         .expect("too many subs on BARO_CHANNELS; increase SUBS");
-    let mut p1 = signals::BARO_CHANNELS[BAROMETER_1.index()]
+    let mut p1 = signals::BARO_CHANNELS[BARO_BUS_2.index()]
         .subscriber()
         .expect("too many subs on BARO_CHANNELS; increase SUBS");
-    let mut e0 = signals::DHT_CHANNELS[DHT_0.index()]
+    let mut e0 = signals::DHT_CHANNELS[DHT_BUS_1.index()]
         .subscriber()
         .expect("too many subs on DHT_CHANNELS; increase SUBS");
-    let mut e1 = signals::DHT_CHANNELS[DHT_1.index()]
+    let mut e1 = signals::DHT_CHANNELS[DHT_BUS_2.index()]
         .subscriber()
         .expect("too many subs on DHT_CHANNELS; increase SUBS");
 

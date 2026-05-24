@@ -12,7 +12,7 @@ use embassy_sync::watch::Watch;
 use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
 use crate::types::{
     BaroSample, DhtSample, Environment, GnssSample, ImuSample, Inertial, MagSample, Orientation,
-    Position, Pressure, Velocity,
+    Position, Pressure, RawMagSample, Velocity,
 };
 
 macro_rules! define_sample_channels {
@@ -49,6 +49,11 @@ define_sample_channels!(BARO_CHANNELS, submit_baro_sample, submit_baro_sample_ba
 
 define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch:
     MagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
+
+// Raw, pre-calibration mag samples for the calibration task to consume
+// while the device is being tumbled. Off the hot path otherwise.
+define_sample_channels!(RAW_MAG_CHANNELS, submit_raw_mag_sample, submit_raw_mag_sample_batch:
+    RawMagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
 
 define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_batch:
     GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);
