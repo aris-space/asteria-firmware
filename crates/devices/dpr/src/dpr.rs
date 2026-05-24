@@ -125,7 +125,7 @@ impl<'a> DPR<'a> {
                 self.actuate_valve(self.pid.min_ms as u64).await;
                 self.loop_state = Passive;
                 self.status_sender.send(self.loop_state);
-                Timer::after(RELAXED_TICK_DURATION).await;
+                Timer::after_millis(500).await;
             }
             _ => {
                 self.valve_pin.set_low();
