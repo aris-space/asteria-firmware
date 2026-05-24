@@ -3,8 +3,11 @@ use datatypes::actuator::DPRValve;
 use datatypes::status::DprGainInfo;
 use datatypes::status::DprLoopInfo::{self, *};
 use embassy_stm32::gpio::Output;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::watch::{Receiver, Sender, Watch};
+#[cfg(any(doc, docsrs))]
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as DprRawMutex;
+#[cfg(not(any(doc, docsrs)))]
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex as DprRawMutex;
+use embassy_sync::watch::{Receiver, Sender};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_utils::info;
 
@@ -28,19 +31,19 @@ pub struct DPR<'a> {
     pub pressure: f32,
     pub last_time: Instant,
 
-    control_receiver: Receiver<'a, ThreadModeRawMutex, DPRValve, 5>,
-    pressure_receiver: Receiver<'a, ThreadModeRawMutex, f32, 5>,
-    pid_receiver: Receiver<'a, ThreadModeRawMutex, DprGainInfo, 5>,
-    status_sender: Sender<'a, ThreadModeRawMutex, DprLoopInfo, 5>,
+    control_receiver: Receiver<'a, DprRawMutex, DPRValve, 5>,
+    pressure_receiver: Receiver<'a, DprRawMutex, f32, 5>,
+    pid_receiver: Receiver<'a, DprRawMutex, DprGainInfo, 5>,
+    status_sender: Sender<'a, DprRawMutex, DprLoopInfo, 5>,
 }
 
 impl<'a> DPR<'a> {
     pub fn new(
         valve_pin: Output<'a>,
-        control_receiver: Receiver<'a, ThreadModeRawMutex, DPRValve, 5>,
-        pressure_receiver: Receiver<'a, ThreadModeRawMutex, f32, 5>,
-        pid_receiver: Receiver<'a, ThreadModeRawMutex, DprGainInfo, 5>,
-        status_sender: Sender<'a, ThreadModeRawMutex, DprLoopInfo, 5>,
+        control_receiver: Receiver<'a, DprRawMutex, DPRValve, 5>,
+        pressure_receiver: Receiver<'a, DprRawMutex, f32, 5>,
+        pid_receiver: Receiver<'a, DprRawMutex, DprGainInfo, 5>,
+        status_sender: Sender<'a, DprRawMutex, DprLoopInfo, 5>,
     ) -> DPR<'a> {
         let pid = PID::new(GAINS, MIN_TIME_MS, MAX_TIME_MS);
         let loop_state = Passive;
@@ -72,7 +75,7 @@ impl<'a> DPR<'a> {
                     self.disable();
                 }
             }
-            let _ = self.status_sender.send(self.loop_state);
+            self.status_sender.send(self.loop_state);
         }
     }
 

@@ -4,11 +4,10 @@ use embassy_stm32::peripherals::TIM3;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel::Ch4;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
-use embassy_time::{Duration, Instant, Timer};
-
-const STATUS_BEEP_INTERVAL: Duration = Duration::from_secs(10);
+use embassy_time::{Duration, Timer};
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub enum BuzzerState {
     Idle,
     Error,
@@ -25,12 +24,13 @@ pub async fn buzzer_task(mut pwm: SimplePwm<'static, TIM3>) {
 
     pwm.set_frequency(Hertz(440));
 
-    let mut status_beep_time = Instant::now();
     loop {
         let state = watcher.get().await;
 
         match state {
-            BuzzerState::Error => {}
+            BuzzerState::Error => {
+                pwm.set_duty(Ch4, on);
+            }
             BuzzerState::Idle => {
                 pwm.set_duty(Ch4, off);
             }

@@ -35,7 +35,7 @@ impl PID {
             error,
             setpoint,
             min_ms,
-            max_ms: 100000.0,
+            max_ms,
         }
     }
 

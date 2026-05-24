@@ -5,20 +5,21 @@ pub mod pid;
 use crate::dpr::DPR;
 use datatypes::actuator::DPRValve;
 use datatypes::status::DprGainInfo;
-use datatypes::status::DprLoopInfo::{self, *};
+use datatypes::status::DprLoopInfo;
 use embassy_stm32::gpio::Output;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::watch::{Receiver, Sender, Watch};
-use embassy_time::Timer;
-use embedded_utils::info;
+#[cfg(any(doc, docsrs))]
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as DprRawMutex;
+#[cfg(not(any(doc, docsrs)))]
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex as DprRawMutex;
+use embassy_sync::watch::{Receiver, Sender};
 
 #[embassy_executor::task]
 pub async fn pid_controller(
     valve_pin: Output<'static>,
-    control_receiver: Receiver<'static, ThreadModeRawMutex, DPRValve, 5>,
-    pressure_receiver: Receiver<'static, ThreadModeRawMutex, f32, 5>,
-    pid_receiver: Receiver<'static, ThreadModeRawMutex, DprGainInfo, 5>,
-    status_sender: Sender<'static, ThreadModeRawMutex, DprLoopInfo, 5>,
+    control_receiver: Receiver<'static, DprRawMutex, DPRValve, 5>,
+    pressure_receiver: Receiver<'static, DprRawMutex, f32, 5>,
+    pid_receiver: Receiver<'static, DprRawMutex, DprGainInfo, 5>,
+    status_sender: Sender<'static, DprRawMutex, DprLoopInfo, 5>,
 ) {
     let mut dpr = DPR::new(
         valve_pin,

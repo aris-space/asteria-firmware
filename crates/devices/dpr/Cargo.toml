@@ -17,3 +17,8 @@ embedded-utils = { path = "../../embedded-utils" }
 
 [features]
 defmt = ["dep:defmt"]
+
+[lib]
+test = false
+doctest = false
+bench = false

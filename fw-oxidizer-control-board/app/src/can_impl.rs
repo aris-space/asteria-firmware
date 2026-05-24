@@ -3,7 +3,7 @@ use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
-use datatypes::status::{BoardId, SensorStatus, StatusCommonMessage};
+use datatypes::status::{BoardId, DprGainInfo, DprLoopInfo, SensorStatus, StatusCommonMessage};
 use embassy_futures::yield_now;
 use embassy_stm32::can::CanRx;
 use embassy_time::{Duration, Instant, Ticker};
@@ -82,6 +82,8 @@ pub async fn board_status_update_task() -> ! {
                 },
                 thermocouple_status: SensorStatus::Online,
                 pressure_bus: pressure_status,
+                dpr_loop_info: DprLoopInfo::default(),
+                dpr_gain_info: DprGainInfo::default(),
             });
 
         status_ticker.next().await;

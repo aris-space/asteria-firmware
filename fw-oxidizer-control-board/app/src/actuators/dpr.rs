@@ -25,8 +25,6 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
     let mut prev_error_p = 0.0;
 
     let mut loop_state = Inactive;
-    let mut safety_limit_reached = false;
-
     let mut pressure = 0.0;
     let mut ticker = Ticker::every(Duration::from_millis(CYCLE_TIME_MS as u64));
 
@@ -57,7 +55,6 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         if pressure >= SAFETY_LIMIT_BARG {
             error!("[DPR] Pressure limit exceeded with: {} barg", pressure);
             loop_state = Inactive;
-            safety_limit_reached = true;
             dpr_control_loop_sender.send(DPRValve::Disabled);
 
             // Signal error state

@@ -3,13 +3,10 @@ use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
-use datatypes::actuator::DPRValve;
 use datatypes::status::{BoardId, DprGainInfo, DprLoopInfo, SensorStatus, StatusCommonMessage};
 use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
 use embassy_futures::yield_now;
 use embassy_stm32::can::CanRx;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker};
 use embedded_utils::fmt::*;
 
@@ -42,9 +39,8 @@ const __ASSERT_LEN_OK: () = {
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
-    let mut dpr_gain_sender = STATE.dpr_gain.sender();
+    let dpr_gain_sender = STATE.dpr_gain.sender();
 
-    use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
     let mut dpr_gain = DprGainInfo {
         p: GAINS.p,
         i: GAINS.i,
@@ -68,23 +64,23 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
             Ok(msg) => match msg {
                 ReceivedMessage::FuelDprGainP(p) => {
                     dpr_gain.p = p;
-                    let _ = dpr_gain_sender.send(dpr_gain);
+                    dpr_gain_sender.send(dpr_gain);
                 }
                 ReceivedMessage::FuelDprGainI(i) => {
                     dpr_gain.i = i;
-                    let _ = dpr_gain_sender.send(dpr_gain);
+                    dpr_gain_sender.send(dpr_gain);
                 }
                 ReceivedMessage::FuelDprGainD(d) => {
                     dpr_gain.d = d;
-                    let _ = dpr_gain_sender.send(dpr_gain);
+                    dpr_gain_sender.send(dpr_gain);
                 }
                 ReceivedMessage::FuelDprMinOpeningTime(min_ms) => {
                     dpr_gain.min_ms = min_ms;
-                    let _ = dpr_gain_sender.send(dpr_gain);
+                    dpr_gain_sender.send(dpr_gain);
                 }
                 ReceivedMessage::FuelDprMaxOpeningTime(max_ms) => {
                     dpr_gain.max_ms = max_ms;
-                    let _ = dpr_gain_sender.send(dpr_gain);
+                    dpr_gain_sender.send(dpr_gain);
                 }
                 _ => {
                     let _ = STATE.update_from(msg);
@@ -108,12 +104,13 @@ pub async fn board_status_update_task() -> ! {
     let mut dpr_status = DprLoopInfo::default();
 
     let mut dpr_gain_receiver = STATE.dpr_gain.receiver().unwrap();
-    let mut dpr_gain = DprGainInfo::default();
-    dpr_gain.p = GAINS.p;
-    dpr_gain.i = GAINS.i;
-    dpr_gain.d = GAINS.d;
-    dpr_gain.min_ms = MIN_TIME_MS;
-    dpr_gain.max_ms = MAX_TIME_MS;
+    let mut dpr_gain = DprGainInfo {
+        p: GAINS.p,
+        i: GAINS.i,
+        d: GAINS.d,
+        min_ms: MIN_TIME_MS,
+        max_ms: MAX_TIME_MS,
+    };
 
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
@@ -131,7 +128,7 @@ pub async fn board_status_update_task() -> ! {
             dpr_gain = gain;
         }
 
-        let _ = STATE
+        STATE
             .board_status
             .sender()
             .send(dp_fuel_control_board::FuelControlBoardStatus {

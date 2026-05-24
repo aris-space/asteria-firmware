@@ -36,7 +36,6 @@ mod built_info {
 #[cfg(feature = "defmt")]
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
