@@ -136,10 +136,12 @@ impl<'a> DPR<'a> {
             }
         }
 
-        info!(
-            "[DPR] State: {}, Pressure {}",
-            self.loop_state, self.pressure
-        );
+        let loop_state = match self.loop_state {
+            ActiveNominal => "ActiveNominal",
+            ActiveOverPressure => "ActiveOverPressure",
+            Passive => "Passive",
+        };
+        info!("[DPR] State: {}, Pressure {}", loop_state, self.pressure);
         Timer::after(RELAXED_TICK_DURATION).await;
     }
 
