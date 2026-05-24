@@ -5,4 +5,4 @@ rustflags = ["-C", "linker=flip-link", "-C", "link-arg=-Tlink.x", "-C", "link-ar
 target = "thumbv7em-none-eabihf" # Cortex-M4F (with FPU)
 
 [env]
-DEFMT_LOG = "trace"
+DEFMT_LOG = "info"

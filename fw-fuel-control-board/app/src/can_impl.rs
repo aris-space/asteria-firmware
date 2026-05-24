@@ -1,295 +1,95 @@
-use crate::actuators::dpr::{DPR_CONTROL_LOOP_WATCH, DPR_PRESSURIZATION_WATCH};
-use crate::actuators::dpr::{
-    PRESSURIZATION_ABORT_WATCH, PRESSURIZATION_INFO_WATCH, PRESSURIZATION_KP,
-};
-use crate::actuators::valves::{FSS_VENT_CONTROL, PRZ_VENT_CONTROL};
-use crate::drivers::digital_pressure::{
-    DIGITAL_PRESSURE_WATCH, DPR_PRESSURE_WATCH, KELLER_BUS_ERROR_WATCH,
-};
-use crate::sensors::{CAN_BOARD_STATUS_FREQ_HZ, CAN_PRESSURE_FREQ_HZ, CAN_VALVE_STATES_FREQ_HZ};
-use core::future::pending;
-use core::panic;
-use embassy_futures::join::join5;
+use crate::globals::STATE;
+use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
+use can_utils::collector::Collector;
+use can_utils::rxtx::TypedCanReceive as _;
+use data_core::can::hal::CanDecode as _;
+use datatypes::actuator::DPRValve;
+use datatypes::status::{BoardId, DprGainInfo, DprLoopInfo, SensorStatus, StatusCommonMessage};
 use embassy_futures::yield_now;
-use embassy_stm32::can::enums::BusError;
-use embassy_stm32::can::filter::{Action, FilterType, StandardFilter};
-use embassy_stm32::can::frame::{self, FdFrame, Header};
-use embassy_stm32::can::{Can, CanConfigurator, CanRx, CanTx, OperatingMode, RxPin, TxPin};
-use embassy_stm32::interrupt::typelevel::Binding;
-use embassy_stm32::{Peri, can};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Instant, Ticker, TimeoutError, Timer, with_timeout};
-use embedded_can::Id;
+use embassy_stm32::can::CanRx;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::watch::Watch;
+use embassy_time::{Duration, Instant, Ticker};
+use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
 use embedded_utils::fmt::*;
-use hermes_can::messages::board_status::SensorStatus::Online;
-use hermes_can::messages::board_status::{FuelControlBoardStatus, FuelControlBoardValveStates};
-use hermes_can::messages::sensor_data::{FuelTankPressure, PressurizationLinePressure};
-use hermes_can::{
-    CanDecodeError, CanEncodeError, CanMessage, messages::Message, next_valid_length,
-};
 
-/// Error type for CAN operations.
-#[allow(unused)]
-#[derive(Debug, thiserror::Error)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum CanError {
-    #[error("CAN bus error")]
-    Bus(BusError),
+const THIS_BOARD_ID: BoardId = BoardId::FuelControlBoard;
 
-    #[error("CAN timeout")]
-    Timeout(TimeoutError),
-
-    #[error("Encoding CAN message failed: {0}")]
-    Encode(#[from] CanEncodeError),
-
-    #[error("Decoding CAN message failed: {0}")]
-    Decode(#[from] CanDecodeError),
-
-    #[error("Invalid frame or Id sent/received")]
-    Other,
-}
-
-/// Trait for types that can transmit CAN messages asynchronously.
-pub trait CanTransmitter {
-    /// Transmit a CAN message.
-    ///
-    /// Returns `Err(CanError)` if encoding or bus transmission fails.
-    async fn transmit<M: CanMessage>(&mut self, msg: M) -> Result<(), CanError>;
-}
-
-/// Trait for types that can receive CAN messages asynchronously.
-pub trait CanReceiver {
-    /// Receive the next CAN message and its timestamp.
-    ///
-    /// Returns `Err(CanError)` if the frame is invalid or bus read fails.
-    async fn recv(&mut self) -> Result<(Message, frame::Timestamp), CanError>;
-}
-
-macro_rules! impl_can_transmitter {
-    ($ty:ty) => {
-        impl CanTransmitter for $ty {
-            async fn transmit<M: CanMessage>(&mut self, msg: M) -> Result<(), CanError> {
-                let mut buf = [0u8; 64];
-                let (id, len) = msg.try_write_into(&mut buf)?;
-
-                // `next_valid_length` should never return `None`, since payload length is already checked
-                // to be less than 64. This also means that the cast to `u8` is safe.
-                let dlc = next_valid_length(len).ok_or(CanError::Other)?;
-
-                // zero-pad the payload to the next valid length.
-                let payload = &buf[..dlc];
-
-                // Barring embassy changes their implementation, this will never fail.
-                // since we've already ensured that the payload length is valid.
-                let frame = FdFrame::new(Header::new(id.into(), dlc as u8, false), payload)
-                    .map_err(|_| CanError::Other)?;
-
-                // todo: (should we?) come up with a better way to handle dropped frames
-                if let Some(pushed) = self.write_fd(&frame).await {
-                    warn!("CAN dropped frame: {:?}", pushed);
-                    // goodbye frame :(
-                }
-
-                Ok(())
-            }
-        }
-    };
-}
-
-macro_rules! impl_can_receiver {
-    ($ty:ty) => {
-        impl CanReceiver for $ty {
-            async fn recv(&mut self) -> Result<(Message, frame::Timestamp), CanError> {
-                let envelope = self.read_fd().await.map_err(CanError::Bus)?;
-                let frame = envelope.frame;
-
-                let id = match frame.id() {
-                    Id::Standard(id) => id,
-                    Id::Extended(_id) => {
-                        // should really be unreachable, since we only use standard ids,
-                        // but let's stay on the safe side
-                        return Err(CanError::Other);
-                    }
-                };
-
-                let x = Message::try_from_parts(*id, frame.data())?;
-                Ok((x, envelope.ts))
-            }
-        }
-    };
-}
-impl_can_receiver!(Can<'_>);
-impl_can_transmitter!(Can<'_>);
-impl_can_receiver!(CanRx<'_>);
-impl_can_transmitter!(CanTx<'_>);
-
-pub fn setup_can<'a, T: can::Instance>(
-    peri: Peri<'a, T>,
-    rx: Peri<'a, impl RxPin<T>>,
-    tx: Peri<'a, impl TxPin<T>>,
-    _irqs: impl Binding<T::IT0Interrupt, can::IT0InterruptHandler<T>>
-    + Binding<T::IT1Interrupt, can::IT1InterruptHandler<T>>
-    + 'a,
-) -> Can<'a> {
-    let mut can = CanConfigurator::new(peri, rx, tx, _irqs);
-    can.set_bitrate(1_000_000);
-    can.set_fd_data_bitrate(1_000_000, false);
-
-    const FILTER_COUNT: usize = 28;
-    let mut filters: [StandardFilter; FILTER_COUNT] = [StandardFilter {
-        filter: FilterType::Disabled,
-        action: Action::Disable,
-    }; FILTER_COUNT];
-
-    // This will fail to compile if the number of enabled ids exceeds the number of filters
-    const __ASSERT_LEN_OK: () = {
-        if Message::NUM_ENABLED_IDS >= FILTER_COUNT - 1 {
-            panic!("Too many receiving can ids");
-        }
-    };
-    filters[Message::NUM_ENABLED_IDS] = StandardFilter::reject_all();
-
-    // Configure the IDs based on the enabled messages in the `hermes-can` crate.
-    for (filter_idx, id) in Message::ENABLED_IDS.iter().enumerate() {
-        trace!("Setting up filter for id: {:#X}", id.as_raw());
-        filters[filter_idx] = StandardFilter {
-            filter: FilterType::DedicatedSingle(*id),
-            action: Action::StoreInFifo1,
-        };
+data_core::can::sparse_decodable_can_message! {
+    enum ReceivedMessage {
+        ResetAll(dp_system_management::Message::ResetAll),
+        ResetSpecific(dp_system_management::Message::ResetSpecific),
+        FuelDprValveControlFC(dp_fuel_control_board::Message::FuelDprValveControlFC),
+        FuelDprValveControlRFS(dp_fuel_control_board::Message::FuelDprValveControlRFS),
+        PressurizationVentValveControlFC(dp_fuel_control_board::Message::PressurizationVentValveControlFC),
+        PressurizationVentValveControlRFS(dp_fuel_control_board::Message::PressurizationVentValveControlRFS),
+        FuelVentValveControlFC(dp_fuel_control_board::Message::FuelVentValveControlFC),
+        FuelVentValveControlRFS(dp_fuel_control_board::Message::FuelVentValveControlRFS),
+        FuelDprGainP(dp_fuel_control_board::Message::FuelDprGainP),
+        FuelDprGainI(dp_fuel_control_board::Message::FuelDprGainI),
+        FuelDprGainD(dp_fuel_control_board::Message::FuelDprGainD),
+        FuelDprMinOpeningTime(dp_fuel_control_board::Message::FuelDprMinOpeningTime),
+        FuelDprMaxOpeningTime(dp_fuel_control_board::Message::FuelDprMaxOpeningTime),
     }
-    can.properties().set_standard_filters(&filters);
-    can.start(OperatingMode::NormalOperationMode)
 }
 
-const THIS_BOARD_ID: hermes_can::messages::BoardId =
-    hermes_can::messages::BoardId::FuelControlBoard;
+const __ASSERT_LEN_OK: () = {
+    const FILTER_COUNT: usize = 28;
+    if ReceivedMessage::SUPPORTED_IDS.len() >= FILTER_COUNT - 1 {
+        core::panic!("Too many receiving can ids");
+    }
+};
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
-    let dpr_ctrl_sender = DPR_CONTROL_LOOP_WATCH.sender();
-    let prz_vnt_sender = PRZ_VENT_CONTROL.sender();
-    let fuel_vnt_sender = FSS_VENT_CONTROL.sender();
-    let pressurization_sender = DPR_PRESSURIZATION_WATCH.sender();
-    let pressurization_abort_sender = PRESSURIZATION_ABORT_WATCH.sender();
+    let mut dpr_gain_sender = STATE.dpr_gain.sender();
+
+    use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
+    let mut dpr_gain = DprGainInfo {
+        p: GAINS.p,
+        i: GAINS.i,
+        d: GAINS.d,
+        min_ms: MIN_TIME_MS,
+        max_ms: MAX_TIME_MS,
+    };
 
     loop {
         match can_rx.recv().await {
-            Ok((msg, ts)) => {
-                trace!("[CAN Task] Received message {:?} on bus at {:?}", msg, ts);
-
-                match msg {
-                    Message::ResetAll(_) => {
-                        warn!("[CAN Task] Received ResetAll message, resetting FuelControlBoard");
-                        reset_now();
-                    }
-                    Message::ResetSpecific(x) => {
-                        if x.board_id == THIS_BOARD_ID {
-                            warn!(
-                                "[CAN Task] Received ResetSpecific message, resetting FuelControlBoard"
-                            );
-                            reset_now();
-                        }
-                    }
-                    Message::FuelDprConfigFC(dpr_cmd) => {
-                        // Handle FuelDprConfig message
-                        trace!(
-                            "[CAN Task] Received FuelPressureControl message from FC: {}",
-                            dpr_cmd
-                        );
-                        dpr_ctrl_sender.send(dpr_cmd.fss_dpr);
-                    }
-                    Message::FuelDprConfigECU(dpr_cmd) => {
-                        // Handle FuelDprConfig message
-                        trace!(
-                            "[CAN Task] Received FuelPressureControl message from ECU: {}",
-                            dpr_cmd
-                        );
-                        dpr_ctrl_sender.send(dpr_cmd.fss_dpr);
-                    }
-                    Message::FuelDprConfigRFS(dpr_cmd) => {
-                        // Handle FuelDprConfig message
-                        trace!(
-                            "[CAN Task] Received FuelPressureControl message from RFS: {}",
-                            dpr_cmd
-                        );
-                        dpr_ctrl_sender.send(dpr_cmd.fss_dpr);
-                    }
-                    Message::PressurizationVentControlFC(prz_cmd) => {
-                        trace!(
-                            "[CAN Task] Received PressureVentControl message from FC: {}",
-                            prz_cmd
-                        );
-                        // Handle PressureVentControl message
-                        prz_vnt_sender.send(prz_cmd.prz_vnt_vlv);
-                    }
-                    Message::PressurizationVentControlECU(prz_cmd) => {
-                        trace!(
-                            "[CAN Task] Received PressureVentControl message from ECU: {}",
-                            prz_cmd
-                        );
-                        // Handle PressureVentControl message
-                        prz_vnt_sender.send(prz_cmd.prz_vnt_vlv);
-                    }
-                    Message::PressurizationVentControlRFS(prz_cmd) => {
-                        trace!(
-                            "[CAN Task] Received PressureVentControl message from RFS: {}",
-                            prz_cmd
-                        );
-                        // Handle PressureVentControl message
-                        prz_vnt_sender.send(prz_cmd.prz_vnt_vlv);
-                    }
-                    Message::FuelVentControlFC(fuel_cmd) => {
-                        trace!(
-                            "[CAN Task] Received FuelVentControl message from FC: {}",
-                            fuel_cmd
-                        );
-                        // Handle FuelVentControl message
-                        fuel_vnt_sender.send(fuel_cmd.fss_vnt_vlv);
-                    }
-                    Message::FuelVentControlECU(fuel_cmd) => {
-                        trace!(
-                            "[CAN Task] Received FuelVentControl message from ECU: {}",
-                            fuel_cmd
-                        );
-                        // Handle FuelVentControl message
-                        fuel_vnt_sender.send(fuel_cmd.fss_vnt_vlv);
-                    }
-                    Message::FuelVentControlRFS(fuel_cmd) => {
-                        trace!(
-                            "[CAN Task] Received FuelVentControl message from RFS: {}",
-                            fuel_cmd
-                        );
-                        // Handle FuelVentControl message
-                        fuel_vnt_sender.send(fuel_cmd.fss_vnt_vlv);
-                    }
-                    Message::FuelPressurization(prz_cmd) => {
-                        trace!(
-                            "[CAN Task] Received FuelPressurization message: {}",
-                            prz_cmd
-                        );
-                        pressurization_sender.send(prz_cmd);
-                    }
-                    Message::FuelPressurizationAbort(abort) => {
-                        trace!(
-                            "[CAN Task] Received FuelPressurizationAbort message: {}",
-                            abort
-                        );
-                        pressurization_abort_sender.send(abort);
-                    }
-                    Message::FuelPressurizationGain(gain) => {
-                        trace!(
-                            "[CAN Task] Received FuelPressurizationGain message: {}",
-                            gain
-                        );
-
-                        *PRESSURIZATION_KP.lock().await = gain.kp;
-                    }
-                    _ => {
-                        warn!("[CAN Task] Received unknown CAN message: {}", msg);
-                    }
-                };
+            Ok(ReceivedMessage::ResetAll(_)) => {
+                warn!("[CAN Task] Received ResetAll message, resetting FuelControlBoard");
+                reset_now();
             }
+            Ok(ReceivedMessage::ResetSpecific(board)) => {
+                if board == THIS_BOARD_ID {
+                    warn!("[CAN Task] Received ResetSpecific message, resetting FuelControlBoard");
+                    reset_now();
+                }
+            }
+            Ok(msg) => match msg {
+                ReceivedMessage::FuelDprGainP(p) => {
+                    dpr_gain.p = p;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::FuelDprGainI(i) => {
+                    dpr_gain.i = i;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::FuelDprGainD(d) => {
+                    dpr_gain.d = d;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::FuelDprMinOpeningTime(min_ms) => {
+                    dpr_gain.min_ms = min_ms;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::FuelDprMaxOpeningTime(max_ms) => {
+                    dpr_gain.max_ms = max_ms;
+                    let _ = dpr_gain_sender.send(dpr_gain);
+                }
+                _ => {
+                    let _ = STATE.update_from(msg);
+                }
+            },
             Err(err) => {
                 error!("CAN RX error: {:?}", err);
             }
@@ -299,278 +99,56 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn can_tx_task(can_tx: CanTx<'static>) -> ! {
-    let mut pressure_watch = DIGITAL_PRESSURE_WATCH
-        .receiver()
-        .expect("[CAN Task] failed to get pressure watch");
+pub async fn board_status_update_task() -> ! {
+    let start = Instant::now();
+    let mut status_ticker = Ticker::every(Duration::from_millis(
+        1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,
+    ));
+    let mut dpr_info_receiver = STATE.dpr_info.receiver().unwrap();
+    let mut dpr_status = DprLoopInfo::default();
 
-    let mut dpr_pressure_watch = DPR_PRESSURE_WATCH
-        .receiver()
-        .expect("[CAN Task] failed to get dpr pressure watch");
+    let mut dpr_gain_receiver = STATE.dpr_gain.receiver().unwrap();
+    let mut dpr_gain = DprGainInfo::default();
+    dpr_gain.p = GAINS.p;
+    dpr_gain.i = GAINS.i;
+    dpr_gain.d = GAINS.d;
+    dpr_gain.min_ms = MIN_TIME_MS;
+    dpr_gain.max_ms = MAX_TIME_MS;
 
-    // Our transmission policy is as follows:
-    // Send new data when available, but only if a minimum period has elapsed since the last
-    // transmission. Otherwise, discard and wait for the next data.
+    let build_info = crate::build_info::BUILD_INFO.get();
+    STATE.build_info.sender().send(build_info.clone());
+    let mut pressure_bus_status = STATE.pressure_bus_status.receiver().unwrap();
+    let mut pressure_status = SensorStatus::Online;
 
-    // we need to wrap CanTx in a something to allow multiple tasks to access it
-    let can_tx: Mutex<NoopRawMutex, _> = Mutex::new(can_tx);
-
-    // common transmit timeout
-    const TX_TIMEOUT_MS: u64 = 100;
-    const WATCH_TIMEOUT_MS: u64 = 5000;
-
-    // DigitalPressure (≈20 Hz)
-    let pressure_task = async {
-        let mut ticker = Ticker::every(Duration::from_millis(1000 / CAN_PRESSURE_FREQ_HZ as u64));
-        loop {
-            let p = loop {
-                if let Ok(p) = with_timeout(
-                    Duration::from_millis(WATCH_TIMEOUT_MS),
-                    pressure_watch.changed(),
-                )
-                .await
-                {
-                    break p;
-                }
-                error!("[CAN Task] Timeout waiting for pressure data");
-            };
-
-            let fss_tnk_p_filtered = loop {
-                if let Ok(p) = with_timeout(
-                    Duration::from_millis(WATCH_TIMEOUT_MS),
-                    dpr_pressure_watch.changed(),
-                )
-                .await
-                {
-                    break p;
-                }
-                error!("[CAN Task] Timeout waiting for dpr pressure data");
-            };
-
-            let fuel_tank_pressure = FuelTankPressure {
-                fss_tnk_p1: p.fss_tnk_p1,
-                fss_tnk_p2: p.fss_tnk_p2,
-                fss_tnk_p_filtered,
-            };
-            let pressurization_line_pressure = PressurizationLinePressure {
-                prz_mnl_p: p.prz_mnl_p,
-            };
-
-            {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    Duration::from_millis(TX_TIMEOUT_MS),
-                    tx.transmit(fuel_tank_pressure.clone()),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("[CAN Task] Sent pressure data: {:?}", fuel_tank_pressure);
-                    }
-                    Ok(Err(err)) => {
-                        error!("[CAN Task] CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("[CAN Task] CAN TX timed out after {} ms", TX_TIMEOUT_MS);
-                    }
-                }
-
-                match with_timeout(
-                    Duration::from_millis(TX_TIMEOUT_MS),
-                    tx.transmit(pressurization_line_pressure.clone()),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!(
-                            "[CAN Task] Sent pressure data: {:?}",
-                            pressurization_line_pressure
-                        );
-                    }
-                    Ok(Err(err)) => {
-                        error!("[CAN Task] CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("[CAN Task] CAN TX timed out after {} ms", TX_TIMEOUT_MS);
-                    }
-                }
-            }
-            ticker.next().await;
-        }
-    };
-
-    // Valve States Task (≈5 Hz)
-    let valve_states_task = async {
-        let mut dpr_ctrl_watcher = DPR_CONTROL_LOOP_WATCH.receiver().unwrap();
-        let mut prz_vnt_watcher = PRZ_VENT_CONTROL.receiver().unwrap();
-        let mut fss_vnt_watcher = FSS_VENT_CONTROL.receiver().unwrap();
-
-        let mut data = FuelControlBoardValveStates {
-            fss_dpr: Default::default(),
-            prz_vnt_vlv: Default::default(),
-            fss_vnt_vlv: Default::default(),
-        };
-
-        let mut ticker = Ticker::every(Duration::from_millis(
-            1000 / CAN_VALVE_STATES_FREQ_HZ as u64,
-        ));
-        let mut changed = false;
-        loop {
-            if let Some(state) = dpr_ctrl_watcher.try_changed() {
-                data.fss_dpr = state;
-                changed = true;
-            }
-            if let Some(state) = prz_vnt_watcher.try_changed() {
-                data.prz_vnt_vlv = state;
-                changed = true;
-            }
-            if let Some(state) = fss_vnt_watcher.try_changed() {
-                data.fss_vnt_vlv = state;
-                changed = true;
-            }
-            if !changed {
-                ticker.next().await;
-            }
-            {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    Duration::from_millis(TX_TIMEOUT_MS),
-                    tx.transmit(data.clone()),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("[CAN Task] sent Valve States: {:?}", data);
-                        changed = false;
-                    }
-                    Ok(Err(err)) => {
-                        error!("CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("CAN TX timed out after {} ms", TX_TIMEOUT_MS);
-                    }
-                }
-            }
-        }
-    };
-
-    // Board Status Task (≈1 Hz)
-    let board_status_task = async {
-        let mut keller_watcher = KELLER_BUS_ERROR_WATCH.receiver().unwrap();
-
-        let mut data = FuelControlBoardStatus {
-            common: Default::default(),
-            thermocouple_status: Online,
-            pressure_bus: Default::default(),
-        };
-
-        let start = Instant::now();
-        let mut ticker = Ticker::every(Duration::from_millis(
-            1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,
-        ));
-        loop {
-            if let Some(status) = keller_watcher.try_changed() {
-                data.pressure_bus = status;
-            }
-
-            data.common.micros_since_restart = (Instant::now() - start).as_micros();
-
-            {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    Duration::from_millis(TX_TIMEOUT_MS),
-                    tx.transmit(data.clone()),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("[CAN Task] sent Board Status: {:?}", data);
-                    }
-                    Ok(Err(err)) => {
-                        error!("CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("CAN TX timed out after {} ms", TX_TIMEOUT_MS);
-                    }
-                }
-            }
-            ticker.next().await;
-        }
-    };
-
-    let build_information_task = async {
-        let build_info = crate::build_info::BUILD_INFO.get();
-        let build_info_msg = hermes_can::messages::debug_info::FuelControlBoardBuildInfo {
-            data: build_info.clone(),
-        };
-
-        let mut ticker = Ticker::every(Duration::from_secs(5));
-        loop {
-            // this scope is necessary to ensure the lock is released – do not remove it!
-            {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    Duration::from_millis(TX_TIMEOUT_MS),
-                    tx.transmit(build_info_msg.clone()),
-                )
-                .await
-                {
-                    Ok(Ok(())) => trace!("Sent FuelControlBoardBuildInfo: {:?}", build_info_msg),
-                    Ok(Err(err)) => error!("Error sending FuelControlBoardBuildInfo: {:?}", err),
-                    Err(_) => error!(
-                        "Timeout sending FuelControlBoardBuildInfo after {} ms",
-                        TX_TIMEOUT_MS
-                    ),
-                }
-            }
-
-            ticker.next().await;
-        }
-    };
-
-    let pressurization_info_task = async {
-        let mut pressurization_info_watcher = PRESSURIZATION_INFO_WATCH.receiver().unwrap();
-
-        loop {
-            let info = pressurization_info_watcher.changed().await;
-
-            {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    Duration::from_millis(TX_TIMEOUT_MS),
-                    tx.transmit(info.clone()),
-                )
-                .await
-                {
-                    Ok(Ok(())) => trace!("Sent PressurizationInfo, {:?}", info),
-                    Ok(Err(err)) => error!("Error sending PressurizationInfo: {:?}", err),
-                    Err(_) => error!(
-                        "Timeout sending PressurizationInfo after {} ms",
-                        TX_TIMEOUT_MS
-                    ),
-                }
-            }
-            Timer::after_millis(500).await;
-        }
-    };
-
-    // Run all tasks concurrently
-    join5(
-        pressure_task,
-        valve_states_task,
-        board_status_task,
-        build_information_task,
-        pressurization_info_task,
-    )
-    .await;
-
-    #[allow(unreachable_code)]
     loop {
-        pending::<()>().await;
+        if let Some(status) = pressure_bus_status.try_changed() {
+            pressure_status = status;
+        }
+        if let Some(status) = dpr_info_receiver.try_changed() {
+            dpr_status = status;
+        }
+        if let Some(gain) = dpr_gain_receiver.try_changed() {
+            dpr_gain = gain;
+        }
+
+        let _ = STATE
+            .board_status
+            .sender()
+            .send(dp_fuel_control_board::FuelControlBoardStatus {
+                common: StatusCommonMessage {
+                    errors: 0,
+                    micros_since_restart: start.elapsed().as_micros(),
+                },
+                thermocouple_status: SensorStatus::Online,
+                pressure_bus: pressure_status,
+                dpr_loop_info: dpr_status,
+                dpr_gain_info: dpr_gain,
+            });
+
+        status_ticker.next().await;
     }
 }
 
-/// Resets the system instantly and restarts the firmware.
 fn reset_now() {
     cortex_m::peripheral::SCB::sys_reset();
 }
