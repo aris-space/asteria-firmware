@@ -4,7 +4,6 @@ use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
 
-use crate::params;
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
@@ -12,14 +11,15 @@ use crate::sensors::{
     MAG_BUS_2,
 };
 
-use crate::{resources, tasks};
+use crate::{calibration, resources, storage, tasks};
 
 #[allow(dead_code)]
 pub struct PreparedBoard {
     pub services: ServiceResources,
     pub sensors: SensorResources,
     pub can: embassy_stm32::can::Can<'static>,
-    pub params: &'static params::Access,
+    pub storage: &'static storage::Storage,
+    pub usb: resources::usb::UsbDriver,
 }
 
 #[allow(dead_code)]
@@ -40,8 +40,9 @@ pub struct SensorResources {
 
 pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let flash = resources.flash.setup();
-    let params = params::init(flash);
-    params::load_all(params).await;
+    let storage = storage::Storage::init(flash);
+    calibration::mag::load(storage).await;
+    calibration::imu::load(storage).await;
 
     let gps1_data = resources.gps1_uart.setup();
     let (_gps1_tx, gps1_rx) = gps1_data.split();
@@ -61,9 +62,12 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
 
     let can = resources.can_bus.setup();
 
+    let usb = resources.usb.setup();
+
     PreparedBoard {
         can,
-        params,
+        storage,
+        usb,
         services: ServiceResources {
             green_led,
             yellow_led,
@@ -148,12 +152,11 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawne
             .expect("Failed to spawn position/velocity proc task"),
     );
 
-    // --- Calibration --------------------------------------------------------
-    thread_spawner
-        .spawn(tasks::calibration::mag::task(board.params).expect("Failed to spawn mag cal task"));
-
     // --- CAN ----------------------------------------------------------------
     let (can_tx, can_rx, _options) = board.can.split();
     thread_spawner.spawn(tasks::can::rx_task(can_rx).expect("Failed to spawn CAN RX task"));
     tasks::can::spawn_tx_tasks(can_tx, thread_spawner);
+
+    // --- USB console --------------------------------------------------------
+    tasks::console::start(board.usb, board.storage, thread_spawner);
 }

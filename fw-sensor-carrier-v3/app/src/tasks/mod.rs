@@ -6,7 +6,7 @@
 //! bus and listens for control frames.
 
 pub mod blinky;
-pub mod calibration;
 pub mod can;
+pub mod console;
 pub mod processing;
 pub mod readout;
