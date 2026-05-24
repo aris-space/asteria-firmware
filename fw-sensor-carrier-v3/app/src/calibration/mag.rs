@@ -27,7 +27,6 @@ const NAME_LEN: usize = 16;
 /// fit that produced it, so a stored cal can be inspected later (`cal show`).
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct StoredCal {
-    /// Short user label given at `cal mag <name>`, zero-padded.
     pub name: [u8; NAME_LEN],
     pub field_nt: f32,
     pub fit_error_pc: f32,
@@ -102,15 +101,11 @@ impl fmt::Display for StoredCal {
 /// measurement actually happened.
 const DELAY: Duration = Duration::from_millis(0);
 
-/// Zero hard-iron, identity soft-iron: live samples pass through uncorrected
-/// (bar the sensor-to-board negation in apply_calibration) until a real cal is
-/// stored.
 const IDENTITY: MagCalWire = MagCalWire {
     hard_iron: [0.0, 0.0, 0.0],
     soft_iron: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
 };
 
-/// Built-in fallback cal, labelled "default", used until a real cal is stored.
 const fn default_cal(wire: MagCalWire) -> StoredCal {
     StoredCal {
         name: name_bytes("default"),
@@ -123,12 +118,9 @@ const fn default_cal(wire: MagCalWire) -> StoredCal {
 const DEFAULTS: [StoredCal; MAGNETOMETER_COUNT] = [default_cal(IDENTITY), default_cal(IDENTITY)];
 const KEYS: [storage::Key; MAGNETOMETER_COUNT] = [storage::key("mag0"), storage::key("mag1")];
 
-/// Live per-sensor cal, written once at startup. A fresh `run` persists to
-/// flash but does not touch this; a reset reloads and applies it.
+/// Live per-sensor cal, written once at startup; a reset reloads and applies it.
 static CAL: OnceLock<[StoredCal; MAGNETOMETER_COUNT]> = OnceLock::new();
 
-/// Read each sensor's stored cal (or default) and publish it for the readout
-/// to apply. Call once at startup, before the readout tasks run.
 pub async fn load(storage: &Storage) {
     let cal = [
         load_one(storage, &KEYS[0], MAG_BUS_1).await,
@@ -137,8 +129,6 @@ pub async fn load(storage: &Storage) {
     let _ = CAL.init(cal);
 }
 
-/// Load one sensor's cal, logging whether it came from flash or fell back to
-/// the built-in default.
 async fn load_one(storage: &Storage, key: &storage::Key, id: MagnetometerId) -> StoredCal {
     match storage.load::<StoredCal>(key).await {
         Some(cal) => {
@@ -153,14 +143,10 @@ async fn load_one(storage: &Storage, key: &storage::Key, id: MagnetometerId) -> 
     }
 }
 
-/// The cal applied to live samples (the one loaded at boot), per sensor.
 pub fn applied() -> [StoredCal; MAGNETOMETER_COUNT] {
     *CAL.try_get().unwrap_or(&DEFAULTS)
 }
 
-/// Read the stored cal for each sensor straight from flash, for inspection.
-/// This reflects what's persisted now (including a just-run cal not yet
-/// applied), independent of the live values loaded at boot.
 pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT] {
     [
         storage.load::<StoredCal>(&KEYS[0]).await,
@@ -168,10 +154,7 @@ pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT
     ]
 }
 
-/// Turn a raw mag sample (nT, sensor frame) into a calibrated, board-frame
-/// `MagSample` (nT). The sensor-to-board remap on this board is a negation
-/// of all three axes; the soft-iron matrix carries the iron correction and
-/// any residual mounting rotation.
+/// Sensor-to-board remap on this board is a negation of all three axes.
 pub fn apply_calibration(raw: RawMagSample) -> MagSample {
     let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].wire;
     let hard_iron = Vector3::from(cal.hard_iron);
@@ -207,13 +190,13 @@ pub struct CalReport {
 }
 
 pub enum CalOutcome {
-    /// Fit accepted and written to flash.
     Stored(Fit),
-    /// Fit accepted but the flash write failed.
     StoreFailed(Fit),
-    /// Field strength outside the plausible band; not stored.
-    ImplausibleField { tier: SolverTier, field_nt: f32 },
-    /// Solver couldn't fit (too few samples).
+    /// Field strength outside the plausible band.
+    ImplausibleField {
+        tier: SolverTier,
+        field_nt: f32,
+    },
     TooFewSamples,
 }
 
@@ -266,15 +249,11 @@ impl fmt::Display for CalReport {
     }
 }
 
-/// One collection runs as `PROGRESS_TICKS` windows of `TICK` (~30 s of tumbling);
-/// the caller reports the per-sensor counts between ticks.
 const TICK: Duration = Duration::from_secs(3);
 pub const PROGRESS_TICKS: usize = 10;
 
-/// Magnetometer calibration: tumble while [`collect_tick`](MagCal::collect_tick)
-/// feeds raw samples into a [`magcal`] solver per sensor, then
-/// [`finish`](MagCal::finish) fits, validates, and stores each. The caller drives
-/// the collection loop.
+/// Magnetometer calibration: the caller drives the collection loop (`collect_tick`
+/// per window, then `finish`). One `magcal` solver per sensor.
 pub struct MagCal {
     solvers: [Solver; MAGNETOMETER_COUNT],
 }
@@ -288,7 +267,6 @@ impl Default for MagCal {
 }
 
 impl MagCal {
-    /// Collect raw mag samples for one `TICK` window into the solvers.
     pub async fn collect_tick(&mut self) {
         let mut sub_0 = RAW_MAG_CHANNELS[MAG_BUS_1.index()]
             .subscriber()
@@ -310,7 +288,6 @@ impl MagCal {
         }
     }
 
-    /// Sample count collected so far, per sensor.
     pub fn counts(&self) -> [usize; MAGNETOMETER_COUNT] {
         [
             self.solvers[0].sample_count(),
@@ -318,7 +295,6 @@ impl MagCal {
         ]
     }
 
-    /// Fit, validate, and store each sensor; returns the per-sensor reports.
     pub async fn finish(self, name: &str, storage: &Storage) -> [CalReport; MAGNETOMETER_COUNT] {
         let [mut s0, mut s1] = self.solvers;
         [

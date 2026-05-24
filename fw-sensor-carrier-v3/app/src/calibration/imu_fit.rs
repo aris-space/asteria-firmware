@@ -1,14 +1,10 @@
-//! Two-IMU alignment estimator: pure math, no I/O.
-//!
-//! Feed board-frame accelerometer and gyro samples for IMU 0 and IMU 1 across
-//! several still poses. [`Estimator`] gates quasi-static gravity readings,
-//! accumulates a Kabsch cross-covariance, and [`solve`](Estimator::solve)s the
-//! relative rotation (IMU 1 -> IMU 0) plus each gyro's zero-rate bias. Depends
-//! only on `nalgebra` and `libm`, so it could be lifted into its own crate.
+//! Two-IMU alignment estimator: pure math, no I/O. Feed board-frame accel/gyro
+//! samples per IMU across several still poses; it gates quasi-static gravity,
+//! accumulates a Kabsch cross-covariance, and solves the relative rotation
+//! (IMU 1 -> IMU 0) plus each gyro's zero-rate bias. nalgebra + libm only.
 
 use nalgebra::{Matrix3, Rotation3, Vector3};
 
-/// Number of IMUs the cross-calibration relates.
 pub const IMUS: usize = 2;
 
 // Accept a sample as gravity only when |accel| is near 1 g and the gyro shows
@@ -18,26 +14,23 @@ const GRAVITY_LO_G: f32 = 0.95;
 const GRAVITY_HI_G: f32 = 1.05;
 const QUASI_STATIC_DPS: f32 = 4.0;
 
-/// The relative rotation between the two IMUs and how well it is determined.
 pub struct RotationFit {
     /// IMU 1 -> IMU 0 alignment: `accel0 ~= rotation * accel1`.
     pub rotation: Matrix3<f32>,
-    /// Rotation axis (unit), or `None` when the angle is ~0 and undefined.
+    /// Rotation axis, or `None` when the angle is ~0 and undefined.
     pub axis: Option<Vector3<f32>>,
     pub misalign_deg: f32,
     pub residual_deg: f32,
-    /// Smallest/largest gravity-spread singular value: 1.0 = poses covered all
-    /// axes, near 0 = they stayed in roughly one plane.
+    /// Smallest/largest gravity-spread singular value: 1.0 = all axes covered.
     pub coverage: f32,
 }
 
-/// Everything the estimator produces from the captured poses.
 pub struct Fit {
     pub rotation: RotationFit,
     pub pairs: usize,
-    /// Per-IMU gyro zero-rate bias (board frame, dps): the mean still reading.
+    /// Gyro zero-rate bias per IMU, board frame, dps.
     pub gyro_bias: [Vector3<f32>; IMUS],
-    /// Per-IMU mean |accel| over the still samples, in g.
+    /// Mean |accel| per IMU over the still samples, in g.
     pub accel_g: [f32; IMUS],
     pub gravity_n: [usize; IMUS],
     pub gyro_n: [usize; IMUS],
@@ -54,20 +47,16 @@ pub struct Estimator {
     gyro_sum: [Vector3<f32>; IMUS],
     gyro_n: [usize; IMUS],
     peak_dps: f32,
-    // Latest accepted gravity unit vector from each IMU in the current pose.
+    // Latest accepted gravity from each IMU in the current pose, for pairing.
     latch: [Option<Vector3<f32>>; IMUS],
 }
 
 impl Estimator {
-    /// Start a new still pose, clearing the within-pose pairing latch so the
-    /// first reading of a pose isn't paired against the previous orientation.
     pub fn begin_pose(&mut self) {
         self.latch = [None; IMUS];
     }
 
-    /// Feed one board-frame sample for IMU `idx`. Accepted as gravity only when
-    /// the board is still (gyro near zero) and |accel| ~ 1 g; returns whether it
-    /// was accepted.
+    /// Returns true if the sample was accepted as still gravity.
     pub fn observe(&mut self, idx: usize, accel: Vector3<f32>, gyro: Vector3<f32>) -> bool {
         self.peak_dps = self.peak_dps.max(gyro.norm());
         if gyro.norm() > QUASI_STATIC_DPS {

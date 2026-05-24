@@ -13,10 +13,8 @@ use crate::signals::RAW_IMU_CHANNELS;
 use crate::storage::{self, Storage};
 use crate::types::{ImuSample, RawImuSample};
 
-/// Per-IMU correction applied at readout: a residual rotation (sensor-to-board
-/// fine alignment) and a gyro zero-rate bias subtracted before rotating. IMU 0
-/// is the reference, so its rotation stays identity; IMU 1's rotation brings it
-/// into IMU 0's frame.
+/// Per-IMU readout correction. IMU 0 is the reference (identity rotation);
+/// IMU 1's rotation brings it into IMU 0's frame.
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct ImuCalWire {
     pub fine_rot: [f32; 9],
@@ -43,12 +41,10 @@ impl ImuCalWire {
 
 const NAME_LEN: usize = 16;
 
-/// What's persisted per IMU: the applied correction plus metadata about the
-/// cross-IMU fit that produced it, so a stored cal can be inspected (`cal show`).
-/// One fit covers both IMUs, so the metadata is shared; only `wire` differs.
+/// Persisted per IMU: the applied correction plus the shared cross-IMU fit
+/// metadata (one fit covers both IMUs); only `wire` differs between them.
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct StoredCal {
-    /// Short user label given at `cal imu <name>`, zero-padded.
     pub name: [u8; NAME_LEN],
     pub residual_deg: f32,
     pub coverage: f32,
@@ -110,7 +106,6 @@ const IDENTITY: ImuCalWire = ImuCalWire {
     gyro_bias: [0.0, 0.0, 0.0],
 };
 
-/// Built-in fallback cal, labelled "default", used until a real cal is stored.
 const fn default_cal(wire: ImuCalWire) -> StoredCal {
     StoredCal {
         name: name_bytes("default"),
@@ -124,12 +119,9 @@ const fn default_cal(wire: ImuCalWire) -> StoredCal {
 const DEFAULTS: [StoredCal; IMU_COUNT] = [default_cal(IDENTITY), default_cal(IDENTITY)];
 const KEYS: [storage::Key; IMU_COUNT] = [storage::key("imu0"), storage::key("imu1")];
 
-/// Live per-IMU cal, written once at startup. A fresh cal persists to flash
-/// but does not touch this; a reset reloads and applies it.
+/// Live per-IMU cal, written once at startup; a reset reloads and applies it.
 static CAL: OnceLock<[StoredCal; IMU_COUNT]> = OnceLock::new();
 
-/// Read each IMU's stored cal (or identity) and publish it for the readout to
-/// apply. Call once at startup, before the readout tasks run.
 pub async fn load(storage: &Storage) {
     let cal = [
         load_one(storage, &KEYS[0], 0).await,
@@ -138,8 +130,6 @@ pub async fn load(storage: &Storage) {
     let _ = CAL.init(cal);
 }
 
-/// Load one IMU's cal, logging whether it came from flash or fell back to the
-/// identity (no-correction) default.
 async fn load_one(storage: &Storage, key: &storage::Key, idx: usize) -> StoredCal {
     match storage.load::<StoredCal>(key).await {
         Some(cal) => {
@@ -156,13 +146,10 @@ async fn load_one(storage: &Storage, key: &storage::Key, idx: usize) -> StoredCa
     }
 }
 
-/// The cal applied to live samples (the one loaded at boot), per IMU.
 pub fn applied() -> [StoredCal; IMU_COUNT] {
     *CAL.try_get().unwrap_or(&DEFAULTS)
 }
 
-/// Read the stored cal for each IMU straight from flash, for inspection
-/// (reflects a just-run cal not yet applied), independent of the live values.
 pub async fn stored(storage: &Storage) -> [Option<StoredCal>; IMU_COUNT] {
     [
         storage.load::<StoredCal>(&KEYS[0]).await,
@@ -170,8 +157,7 @@ pub async fn stored(storage: &Storage) -> [Option<StoredCal>; IMU_COUNT] {
     ]
 }
 
-/// Sensor-to-board coarse axis remap for the LSM6DSO32 on this board:
-/// negate x and z, keep y.
+/// Sensor-to-board axis remap for the LSM6DSO32 on this board: negate x and z.
 fn sensor_to_board(v: Vector3<f32>) -> Vector3<f32> {
     Vector3::new(-v.x, v.y, -v.z)
 }
@@ -200,9 +186,7 @@ pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
 
 pub const POSES: usize = 6;
 const POSE_CAPTURE: Duration = Duration::from_secs(2);
-/// Reject the gyro bias if any pose wasn't actually held still.
 const STILL_MOTION_DPS: f32 = 30.0;
-/// A fit at or under these is trustworthy; worse prints a warning.
 const GOOD_RESIDUAL_DEG: f32 = 2.0;
 const GOOD_COVERAGE: f32 = 0.7;
 
@@ -218,18 +202,14 @@ impl ImuCalReport {
     }
 }
 
-/// Cross-IMU calibration over a sequence of still poses: gathers board-frame
-/// samples from the readout channels and feeds the pure [`Estimator`]. The caller
-/// prompts for and gates each pose, calls [`capture_pose`](Self::capture_pose),
-/// then [`finish`](Self::finish). IMU 0 is the reference; IMU 1 rotates into its frame.
+/// Cross-IMU calibration: the caller drives the pose loop (`capture_pose` per
+/// pose, then `finish`). IMU 0 is the reference; IMU 1 rotates into its frame.
 #[derive(Default)]
 pub struct ImuCal {
     est: Estimator,
 }
 
 impl ImuCal {
-    /// Capture one still pose for `POSE_CAPTURE`, feeding board-frame samples to
-    /// the estimator. Returns the per-IMU count of accepted gravity samples.
     pub async fn capture_pose(&mut self) -> [usize; IMU_COUNT] {
         let mut sub_0 = RAW_IMU_CHANNELS[0]
             .subscriber()
@@ -257,8 +237,6 @@ impl ImuCal {
         got
     }
 
-    /// Solve via the estimator, apply the still/store policy, persist both wires,
-    /// and build the report.
     pub async fn finish(self, name: &str, storage: &Storage) -> ImuCalReport {
         let fit = self.est.solve();
         let still_ok = fit.peak_dps < STILL_MOTION_DPS && fit.gyro_n[0] > 0 && fit.gyro_n[1] > 0;
