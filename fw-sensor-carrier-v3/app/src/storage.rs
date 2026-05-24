@@ -1,7 +1,7 @@
 //! Persistent key/value storage on the on-board W25Q256JV (SPI2) via
 //! `sequential-storage`'s map. Keys are short ASCII names ([`key`]); values
-//! are postcard-encoded. The first 64 KiB of the chip backs the map; the rest
-//! stays free for future data logging.
+//! are postcard-encoded. The config region backs the map; the rest stays free
+//! for future data logging.
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -14,17 +14,17 @@ use embedded_storage_async::nor_flash::{NorFlash, ReadNorFlash};
 
 use crate::resources::flash::{BoardFlash, SECTOR_SIZE};
 
-const FLASH_OFFSET: u32 = 0;
-const FLASH_LEN: u32 = 64 * 1024;
-/// Scratch size for a serialized key+value. Fits a 16-byte key plus the
+pub const CONFIG_OFFSET: u32 = 0;
+pub const CONFIG_LEN: u32 = 64 * 1024;
+/// Scratch size for a serialized key+value. Fits a [`KEY_LEN`]-byte key plus the
 /// largest cal value with headroom.
 const MAX_BYTES: usize = 128;
-const KEY_LEN: usize = 16;
+pub const KEY_LEN: usize = 16;
 
 /// Fixed-size storage key: a short ASCII name, zero-padded.
 pub type Key = [u8; KEY_LEN];
 
-/// Build a [`Key`] from a short name. Panics at const-eval if it exceeds 16 bytes.
+/// Build a [`Key`] from a short name. Panics at const-eval if it exceeds [`KEY_LEN`].
 pub const fn key(name: &str) -> Key {
     let bytes = name.as_bytes();
     assert!(bytes.len() <= KEY_LEN, "storage key name exceeds 16 bytes");
@@ -49,7 +49,7 @@ impl Storage {
     pub fn init(flash: BoardFlash) -> &'static Storage {
         let map = MapStorage::new(
             flash,
-            const { MapConfig::new(FLASH_OFFSET..FLASH_OFFSET + FLASH_LEN) },
+            const { MapConfig::new(CONFIG_OFFSET..CONFIG_OFFSET + CONFIG_LEN) },
             NoCache::new(),
         );
         STORAGE.init(Storage {
@@ -134,7 +134,7 @@ impl Storage {
     /// region to prove the flash round-trips. Leaves the scratch sector erased.
     /// Wears one sector per call, so this is a manual command, not a boot check.
     pub async fn self_test(&self) -> Result<(), &'static str> {
-        const SCRATCH: u32 = FLASH_OFFSET + FLASH_LEN;
+        const SCRATCH: u32 = CONFIG_OFFSET + CONFIG_LEN;
         let mut map = self.map.lock().await;
         let flash = map.flash();
 

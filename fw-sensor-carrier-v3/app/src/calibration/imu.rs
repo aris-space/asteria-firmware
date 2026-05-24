@@ -7,8 +7,9 @@ use embassy_time::{Duration, Instant, with_timeout};
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
+use super::Name;
 use super::imu_fit::{Estimator, Fit};
-use crate::sensors::IMU_COUNT;
+use crate::sensors::{IMU_0, IMU_1, IMU_COUNT, ImuId};
 use crate::signals::RAW_IMU_CHANNELS;
 use crate::storage::{self, Storage};
 use crate::types::{ImuSample, RawImuSample};
@@ -23,6 +24,11 @@ pub struct ImuCalWire {
 }
 
 impl ImuCalWire {
+    const IDENTITY: Self = Self {
+        fine_rot: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        gyro_bias: [0.0, 0.0, 0.0],
+    };
+
     fn from_parts(rotation: Matrix3<f32>, bias: Vector3<f32>) -> Self {
         Self {
             fine_rot: row_major(&rotation),
@@ -37,60 +43,83 @@ impl ImuCalWire {
     fn bias(&self) -> Vector3<f32> {
         Vector3::from(self.gyro_bias)
     }
+
+    fn apply_accel(&self, accel: Vector3<f32>) -> Vector3<f32> {
+        self.rotation() * sensor_to_board(accel)
+    }
+
+    fn apply_gyro(&self, gyro: Vector3<f32>) -> Vector3<f32> {
+        self.rotation() * (sensor_to_board(gyro) - self.bias())
+    }
 }
 
-const NAME_LEN: usize = 16;
+impl fmt::Display for ImuCalWire {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let r = &self.fine_rot;
+        let b = &self.gyro_bias;
+        writeln!(f, "{:^7}{:^27}   {:^10}", "axis", "fine-rot", "bias dps")?;
+        writeln!(
+            f,
+            "   x   [{:8.3}{:8.3}{:8.3} ]   [{:7.2} ]",
+            r[0], r[1], r[2], b[0]
+        )?;
+        writeln!(
+            f,
+            "   y   [{:8.3}{:8.3}{:8.3} ]   [{:7.2} ]",
+            r[3], r[4], r[5], b[1]
+        )?;
+        write!(
+            f,
+            "   z   [{:8.3}{:8.3}{:8.3} ]   [{:7.2} ]",
+            r[6], r[7], r[8], b[2]
+        )
+    }
+}
 
 /// Persisted per IMU: the applied correction plus the shared cross-IMU fit
 /// metadata (one fit covers both IMUs); only `wire` differs between them.
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct StoredCal {
-    pub name: [u8; NAME_LEN],
+    pub name: Name,
     pub residual_deg: f32,
     pub coverage: f32,
     pub pairs: u32,
     pub wire: ImuCalWire,
 }
 
-const fn name_bytes(s: &str) -> [u8; NAME_LEN] {
-    let b = s.as_bytes();
-    let mut out = [0u8; NAME_LEN];
-    let mut i = 0;
-    while i < b.len() && i < NAME_LEN {
-        out[i] = b[i];
-        i += 1;
-    }
-    out
-}
-
-fn name_str(b: &[u8; NAME_LEN]) -> &str {
-    let len = b.iter().position(|&c| c == 0).unwrap_or(NAME_LEN);
-    core::str::from_utf8(&b[..len]).unwrap_or("?")
-}
-
 impl StoredCal {
-    pub fn name_str(&self) -> &str {
-        name_str(&self.name)
+    const DEFAULT: Self = Self {
+        name: Name::new("default"),
+        residual_deg: 0.0,
+        coverage: 0.0,
+        pairs: 0,
+        wire: ImuCalWire::IDENTITY,
+    };
+
+    fn from_fit(name: Name, fit: &Fit, wire: ImuCalWire) -> Self {
+        Self {
+            name,
+            residual_deg: fit.rotation.residual_deg,
+            coverage: fit.rotation.coverage,
+            pairs: fit.pairs as u32,
+            wire,
+        }
+    }
+
+    fn is_default(&self) -> bool {
+        self.pairs == 0
     }
 }
 
 impl fmt::Display for StoredCal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // pairs == 0 marks the built-in default (no fit ran).
-        if self.pairs == 0 {
-            writeln!(
-                f,
-                "\"{}\" (built-in default, not calibrated)",
-                self.name_str()
-            )?;
+        if self.is_default() {
+            writeln!(f, "\"{}\" (built-in default, not calibrated)", self.name)?;
         } else {
             writeln!(
                 f,
                 "\"{}\"  residual {:.2} deg  coverage {:.2}  ({} pairs)",
-                self.name_str(),
-                self.residual_deg,
-                self.coverage,
-                self.pairs
+                self.name, self.residual_deg, self.coverage, self.pairs
             )?;
         }
         write!(f, "{}", self.wire)
@@ -101,47 +130,30 @@ impl fmt::Display for StoredCal {
 /// measurement actually happened.
 const DELAY: Duration = Duration::from_millis(0);
 
-const IDENTITY: ImuCalWire = ImuCalWire {
-    fine_rot: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-    gyro_bias: [0.0, 0.0, 0.0],
-};
-
-const fn default_cal(wire: ImuCalWire) -> StoredCal {
-    StoredCal {
-        name: name_bytes("default"),
-        residual_deg: 0.0,
-        coverage: 0.0,
-        pairs: 0,
-        wire,
-    }
-}
-
-const DEFAULTS: [StoredCal; IMU_COUNT] = [default_cal(IDENTITY), default_cal(IDENTITY)];
-const KEYS: [storage::Key; IMU_COUNT] = [storage::key("imu0"), storage::key("imu1")];
+pub const KEY_NAMES: [&str; IMU_COUNT] = ["imu0", "imu1"];
+const KEYS: [storage::Key; IMU_COUNT] = [storage::key(KEY_NAMES[0]), storage::key(KEY_NAMES[1])];
+const DEFAULTS: [StoredCal; IMU_COUNT] = [StoredCal::DEFAULT; IMU_COUNT];
 
 /// Live per-IMU cal, written once at startup; a reset reloads and applies it.
 static CAL: OnceLock<[StoredCal; IMU_COUNT]> = OnceLock::new();
 
 pub async fn load(storage: &Storage) {
     let cal = [
-        load_one(storage, &KEYS[0], 0).await,
-        load_one(storage, &KEYS[1], 1).await,
+        load_one(storage, IMU_0).await,
+        load_one(storage, IMU_1).await,
     ];
     let _ = CAL.init(cal);
 }
 
-async fn load_one(storage: &Storage, key: &storage::Key, idx: usize) -> StoredCal {
-    match storage.load::<StoredCal>(key).await {
+async fn load_one(storage: &Storage, id: ImuId) -> StoredCal {
+    match storage.load::<StoredCal>(&KEYS[id.index()]).await {
         Some(cal) => {
-            info!("IMU {}: cal \"{}\" loaded from flash", idx, cal.name_str());
+            info!("{}: cal \"{}\" loaded from flash", id, cal.name.as_str());
             cal
         }
         None => {
-            info!(
-                "IMU {}: no cal in flash, using identity (no correction)",
-                idx
-            );
-            default_cal(IDENTITY)
+            info!("{}: no cal in flash, using identity (no correction)", id);
+            StoredCal::DEFAULT
         }
     }
 }
@@ -164,10 +176,8 @@ fn sensor_to_board(v: Vector3<f32>) -> Vector3<f32> {
 
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
     let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].wire;
-    let rot = cal.rotation();
-    let accel = rot * sensor_to_board(Vector3::new(raw.accel.x, raw.accel.y, raw.accel.z));
-    let gyro =
-        rot * (sensor_to_board(Vector3::new(raw.gyro.x, raw.gyro.y, raw.gyro.z)) - cal.bias());
+    let accel = cal.apply_accel(Vector3::new(raw.accel.x, raw.accel.y, raw.accel.z));
+    let gyro = cal.apply_gyro(Vector3::new(raw.gyro.x, raw.gyro.y, raw.gyro.z));
     ImuSample {
         src: raw.src,
         ts: raw.ts - DELAY,
@@ -211,10 +221,10 @@ pub struct ImuCal {
 
 impl ImuCal {
     pub async fn capture_pose(&mut self) -> [usize; IMU_COUNT] {
-        let mut sub_0 = RAW_IMU_CHANNELS[0]
+        let mut sub_0 = RAW_IMU_CHANNELS[IMU_0.index()]
             .subscriber()
             .expect("imu cal: raw imu 0 subscribe failed");
-        let mut sub_1 = RAW_IMU_CHANNELS[1]
+        let mut sub_1 = RAW_IMU_CHANNELS[IMU_1.index()]
             .subscriber()
             .expect("imu cal: raw imu 1 subscribe failed");
         self.est.begin_pose();
@@ -224,8 +234,8 @@ impl ImuCal {
             let remaining = deadline - Instant::now();
             let next = select(sub_0.next_message_pure(), sub_1.next_message_pure());
             let (idx, s) = match with_timeout(remaining, next).await {
-                Ok(Either::First(s)) => (0, s),
-                Ok(Either::Second(s)) => (1, s),
+                Ok(Either::First(s)) => (IMU_0.index(), s),
+                Ok(Either::Second(s)) => (IMU_1.index(), s),
                 Err(_) => break,
             };
             let accel = sensor_to_board(Vector3::new(s.accel.x, s.accel.y, s.accel.z));
@@ -251,16 +261,18 @@ impl ImuCal {
         } else {
             [Vector3::zeros(); IMU_COUNT]
         };
-        let record = |wire| StoredCal {
-            name: name_bytes(name),
-            residual_deg: fit.rotation.residual_deg,
-            coverage: fit.rotation.coverage,
-            pairs: fit.pairs as u32,
-            wire,
-        };
+        let name = Name::new(name);
         let cal = [
-            record(ImuCalWire::from_parts(Matrix3::identity(), bias[0])),
-            record(ImuCalWire::from_parts(fit.rotation.rotation, bias[1])),
+            StoredCal::from_fit(
+                name,
+                &fit,
+                ImuCalWire::from_parts(Matrix3::identity(), bias[0]),
+            ),
+            StoredCal::from_fit(
+                name,
+                &fit,
+                ImuCalWire::from_parts(fit.rotation.rotation, bias[1]),
+            ),
         ];
         let stored =
             storage.store(&KEYS[0], &cal[0]).await && storage.store(&KEYS[1], &cal[1]).await;
@@ -396,29 +408,6 @@ impl fmt::Display for ImuCalReport {
             fit.gravity_n[1],
             fit.gyro_n[0] + fit.gyro_n[1],
             fit.peak_dps
-        )
-    }
-}
-
-impl fmt::Display for ImuCalWire {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let r = &self.fine_rot;
-        let b = &self.gyro_bias;
-        writeln!(f, "fine-rot / gyro bias dps")?;
-        writeln!(
-            f,
-            "   x   [{:8.3}{:8.3}{:8.3} ]   bias [{:7.2} ]",
-            r[0], r[1], r[2], b[0]
-        )?;
-        writeln!(
-            f,
-            "   y   [{:8.3}{:8.3}{:8.3} ]        [{:7.2} ]",
-            r[3], r[4], r[5], b[1]
-        )?;
-        write!(
-            f,
-            "   z   [{:8.3}{:8.3}{:8.3} ]        [{:7.2} ]",
-            r[6], r[7], r[8], b[2]
         )
     }
 }
