@@ -16,6 +16,7 @@ use static_cell::StaticCell;
 use crate::calibration::{Name, imu, mag};
 use crate::resources::flash;
 use crate::resources::usb::UsbDriver;
+use crate::sensors::{ImuId, MagnetometerId};
 use crate::storage::{self, Storage};
 
 type Class = CdcAcmClass<'static, UsbDriver>;
@@ -298,22 +299,24 @@ async fn cal_show(class: &mut ConsoleIo<'_>, storage: &Storage) {
 async fn show_mag_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
     let applied = mag::applied();
     let stored = mag::stored(storage).await;
-    for (i, label) in mag::KEY_NAMES.iter().enumerate() {
+    for id in MagnetometerId::ALL {
+        let i = id.index();
         let pending = stored[i]
-            .filter(|st| mag_pending(st, &applied[i]))
+            .filter(|st| st.differs_from(&applied[i]))
             .map(|st| st.name);
-        show_cal_slot(class, label, applied[i], pending).await;
+        show_cal_slot(class, id.name(), applied[i], pending).await;
     }
 }
 
 async fn show_imu_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
     let applied = imu::applied();
     let stored = imu::stored(storage).await;
-    for (i, label) in imu::KEY_NAMES.iter().enumerate() {
+    for id in ImuId::ALL {
+        let i = id.index();
         let pending = stored[i]
-            .filter(|st| imu_pending(st, &applied[i]))
+            .filter(|st| st.differs_from(&applied[i]))
             .map(|st| st.name);
-        show_cal_slot(class, label, applied[i], pending).await;
+        show_cal_slot(class, id.name(), applied[i], pending).await;
     }
 }
 
@@ -338,14 +341,6 @@ fn write_pending_cal(out: &mut impl fmt::Write, name: Name) {
         paint!(yellow, "  flash has \"{}\" pending; reset to apply"),
         name
     );
-}
-
-fn mag_pending(stored: &mag::StoredCal, applied: &mag::StoredCal) -> bool {
-    stored.name != applied.name || stored.field_nt != applied.field_nt
-}
-
-fn imu_pending(stored: &imu::StoredCal, applied: &imu::StoredCal) -> bool {
-    stored.name != applied.name || stored.wire.fine_rot != applied.wire.fine_rot
 }
 
 async fn report_outcome(class: &mut ConsoleIo<'_>, stored: bool) {
@@ -471,9 +466,13 @@ async fn flash_test(class: &mut ConsoleIo<'_>, storage: &Storage) {
 }
 
 async fn flash_list(class: &mut ConsoleIo<'_>) {
-    for name in mag::KEY_NAMES.iter().chain(imu::KEY_NAMES.iter()) {
+    let keys = MagnetometerId::ALL
+        .into_iter()
+        .map(|id| id.name())
+        .chain(ImuId::ALL.into_iter().map(|id| id.name()));
+    for key in keys {
         let mut s: String<24> = String::new();
-        let _ = writeln!(s, "{name}");
+        let _ = writeln!(s, "{key}");
         say(class, &s).await;
     }
 }

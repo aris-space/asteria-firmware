@@ -14,15 +14,149 @@ use crate::signals::RAW_MAG_CHANNELS;
 use crate::storage::{self, Storage};
 use crate::types::{MagSample, RawMagSample};
 
+// --- Calibration API ---------------------------------------------------------
+
+pub fn apply_calibration(raw: RawMagSample) -> MagSample {
+    let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].correction;
+    // Sensor-to-board on this board negates all three axes.
+    let board = -Vector3::new(raw.x, raw.y, raw.z);
+    let corrected = cal.correct_board_field(board);
+    MagSample {
+        src: raw.src,
+        ts: raw.ts - DELAY,
+        x: corrected.x,
+        y: corrected.y,
+        z: corrected.z,
+    }
+}
+
+pub async fn load(storage: &Storage) {
+    let cal = [
+        load_one(storage, MAG_BUS_1).await,
+        load_one(storage, MAG_BUS_2).await,
+    ];
+    let _ = CAL.init(cal);
+}
+
+pub fn applied() -> [StoredCal; MAGNETOMETER_COUNT] {
+    *CAL.try_get().unwrap_or(&DEFAULTS)
+}
+
+pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT] {
+    [
+        storage.load::<StoredCal>(&KEYS[0]).await,
+        storage.load::<StoredCal>(&KEYS[1]).await,
+    ]
+}
+
+// --- Live calibration state --------------------------------------------------
+
+/// Live per-sensor cal, written once at startup; a reset reloads and applies it.
+static CAL: OnceLock<[StoredCal; MAGNETOMETER_COUNT]> = OnceLock::new();
+
+const KEYS: [storage::Key; MAGNETOMETER_COUNT] = [
+    storage::key(MAG_BUS_1.name()),
+    storage::key(MAG_BUS_2.name()),
+];
+const DEFAULTS: [StoredCal; MAGNETOMETER_COUNT] = [StoredCal::DEFAULT; MAGNETOMETER_COUNT];
+
+/// How long ago (relative to read-completion time) the physical
+/// measurement actually happened.
+const DELAY: Duration = Duration::from_millis(0);
+
+async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
+    match storage.load::<StoredCal>(&KEYS[id.index()]).await {
+        Some(cal) => {
+            info!("{}: cal loaded from flash: {}", id, Display2Format(&cal));
+            cal
+        }
+        None => {
+            info!(
+                "{}: no cal in flash, using {}",
+                id,
+                Display2Format(&StoredCal::DEFAULT)
+            );
+            StoredCal::DEFAULT
+        }
+    }
+}
+
+// --- Stored + applied data ---------------------------------------------------
+
+// deci-uT keeps the ~50 uT field well inside i16; results scale back to nT.
+const NT_TO_DECI_UT: f32 = 1e-2;
+const DECI_UT_TO_NT: f32 = 100.0;
+const MIN_VALID_NT: f32 = 22_000.0;
+const MAX_VALID_NT: f32 = 67_000.0;
+
+/// What's persisted per sensor: the applied correction plus metadata about the
+/// fit that produced it, so a stored cal can be inspected later (`cal show`).
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct StoredCal {
+    pub name: Name,
+    pub field_nt: f32,
+    pub fit_error_pc: f32,
+    pub samples: u16,
+    pub correction: Correction,
+}
+
+impl StoredCal {
+    const DEFAULT: Self = Self {
+        name: Name::new("default"),
+        field_nt: 0.0,
+        fit_error_pc: 0.0,
+        samples: 0,
+        correction: Correction::IDENTITY,
+    };
+
+    fn from_fit(name: Name, fit: &Fit, samples: usize) -> Self {
+        Self {
+            name,
+            field_nt: fit.field_nt,
+            fit_error_pc: fit.fit_error_pc,
+            samples: samples.min(u16::MAX as usize) as u16,
+            correction: fit.correction,
+        }
+    }
+
+    fn is_default(&self) -> bool {
+        self.samples == 0
+    }
+
+    /// Whether applying this stored cal would change the live one: only the
+    /// label and correction are applied, so fit metadata is ignored.
+    pub fn differs_from(&self, applied: &Self) -> bool {
+        self.name != applied.name || self.correction != applied.correction
+    }
+}
+
+impl fmt::Display for StoredCal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_default() {
+            write!(f, "\"{}\" (built-in default, not calibrated)", self.name)?;
+        } else {
+            write!(
+                f,
+                "\"{}\"  field {:.1} uT  error {:.2} %  ({} samples)",
+                self.name,
+                self.field_nt / 1000.0,
+                self.fit_error_pc,
+                self.samples,
+            )?;
+        }
+        write!(f, "\n{}", self.correction)
+    }
+}
+
 /// Hard- and soft-iron correction, applied as `soft_iron * (board - hard_iron)`
 /// in nT. The soft-iron matrix also absorbs any residual mounting rotation.
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct MagCalWire {
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Correction {
     pub hard_iron: [f32; 3],
     pub soft_iron: [f32; 9],
 }
 
-impl MagCalWire {
+impl Correction {
     const IDENTITY: Self = Self {
         hard_iron: [0.0, 0.0, 0.0],
         soft_iron: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
@@ -52,60 +186,7 @@ impl MagCalWire {
     }
 }
 
-/// What's persisted per sensor: the applied correction plus metadata about the
-/// fit that produced it, so a stored cal can be inspected later (`cal show`).
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct StoredCal {
-    pub name: Name,
-    pub field_nt: f32,
-    pub fit_error_pc: f32,
-    pub samples: u16,
-    pub wire: MagCalWire,
-}
-
-impl StoredCal {
-    const DEFAULT: Self = Self {
-        name: Name::new("default"),
-        field_nt: 0.0,
-        fit_error_pc: 0.0,
-        samples: 0,
-        wire: MagCalWire::IDENTITY,
-    };
-
-    fn from_fit(name: Name, fit: &Fit, samples: usize) -> Self {
-        Self {
-            name,
-            field_nt: fit.field_nt,
-            fit_error_pc: fit.fit_error_pc,
-            samples: samples.min(u16::MAX as usize) as u16,
-            wire: fit.wire,
-        }
-    }
-
-    fn is_default(&self) -> bool {
-        self.samples == 0
-    }
-}
-
-impl fmt::Display for StoredCal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_default() {
-            write!(f, "\"{}\" (built-in default, not calibrated)", self.name)?;
-        } else {
-            write!(
-                f,
-                "\"{}\"  field {:.1} uT  error {:.2} %  ({} samples)",
-                self.name,
-                self.field_nt / 1000.0,
-                self.fit_error_pc,
-                self.samples,
-            )?;
-        }
-        write!(f, "\n{}", self.wire)
-    }
-}
-
-impl fmt::Display for MagCalWire {
+impl fmt::Display for Correction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let h = self.hard_iron;
         let s = self.soft_iron;
@@ -129,133 +210,7 @@ impl fmt::Display for MagCalWire {
     }
 }
 
-/// How long ago (relative to read-completion time) the physical
-/// measurement actually happened.
-const DELAY: Duration = Duration::from_millis(0);
-
-pub const KEY_NAMES: [&str; MAGNETOMETER_COUNT] = ["mag0", "mag1"];
-const KEYS: [storage::Key; MAGNETOMETER_COUNT] =
-    [storage::key(KEY_NAMES[0]), storage::key(KEY_NAMES[1])];
-const DEFAULTS: [StoredCal; MAGNETOMETER_COUNT] = [StoredCal::DEFAULT; MAGNETOMETER_COUNT];
-
-/// Live per-sensor cal, written once at startup; a reset reloads and applies it.
-static CAL: OnceLock<[StoredCal; MAGNETOMETER_COUNT]> = OnceLock::new();
-
-pub async fn load(storage: &Storage) {
-    let cal = [
-        load_one(storage, MAG_BUS_1).await,
-        load_one(storage, MAG_BUS_2).await,
-    ];
-    let _ = CAL.init(cal);
-}
-
-async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
-    match storage.load::<StoredCal>(&KEYS[id.index()]).await {
-        Some(cal) => {
-            info!("{}: cal loaded from flash: {}", id, Display2Format(&cal));
-            cal
-        }
-        None => {
-            info!(
-                "{}: no cal in flash, using {}",
-                id,
-                Display2Format(&StoredCal::DEFAULT)
-            );
-            StoredCal::DEFAULT
-        }
-    }
-}
-
-pub fn applied() -> [StoredCal; MAGNETOMETER_COUNT] {
-    *CAL.try_get().unwrap_or(&DEFAULTS)
-}
-
-pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT] {
-    [
-        storage.load::<StoredCal>(&KEYS[0]).await,
-        storage.load::<StoredCal>(&KEYS[1]).await,
-    ]
-}
-
-/// Sensor-to-board remap on this board is a negation of all three axes.
-pub fn apply_calibration(raw: RawMagSample) -> MagSample {
-    let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].wire;
-    let board = -Vector3::new(raw.x, raw.y, raw.z);
-    let corrected = cal.correct_board_field(board);
-    MagSample {
-        src: raw.src,
-        ts: raw.ts - DELAY,
-        x: corrected.x,
-        y: corrected.y,
-        z: corrected.z,
-    }
-}
-
-// deci-uT keeps the ~50 uT field well inside i16; results scale back to nT.
-const NT_TO_DECI_UT: f32 = 1e-2;
-const DECI_UT_TO_NT: f32 = 100.0;
-const MIN_VALID_NT: f32 = 22_000.0;
-const MAX_VALID_NT: f32 = 67_000.0;
-
-pub struct Fit {
-    pub tier: SolverTier,
-    pub field_nt: f32,
-    pub fit_error_pc: f32,
-    pub wire: MagCalWire,
-}
-
-pub struct CalReport {
-    pub id: MagnetometerId,
-    pub samples: usize,
-    pub outcome: CalOutcome,
-}
-
-pub enum CalOutcome {
-    Stored(Fit),
-    StoreFailed(Fit),
-    /// Field strength outside the plausible band.
-    ImplausibleField {
-        tier: SolverTier,
-        field_nt: f32,
-    },
-    TooFewSamples,
-}
-
-impl CalReport {
-    pub fn stored(&self) -> bool {
-        matches!(self.outcome, CalOutcome::Stored(_))
-    }
-}
-
-impl fmt::Display for CalReport {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = self.id.name();
-        match &self.outcome {
-            CalOutcome::Stored(fit) | CalOutcome::StoreFailed(fit) => {
-                let status = if self.stored() {
-                    "stored"
-                } else {
-                    "FLASH WRITE FAILED"
-                };
-                write!(
-                    f,
-                    "{name}  ({:?}, {} samples) -> {status}\n  field {:.1} uT    error {:.2} %\n{}",
-                    fit.tier,
-                    self.samples,
-                    fit.field_nt / 1000.0,
-                    fit.fit_error_pc,
-                    fit.wire,
-                )
-            }
-            CalOutcome::ImplausibleField { tier, field_nt } => write!(
-                f,
-                "{name}: {tier:?} fit, {} samples -> implausible field {field_nt} nT, discarded",
-                self.samples
-            ),
-            CalOutcome::TooFewSamples => write!(f, "{name}: too few samples ({})", self.samples),
-        }
-    }
-}
+// --- Calibration routine -----------------------------------------------------
 
 const TICK: Duration = Duration::from_secs(3);
 pub const PROGRESS_TICKS: usize = 10;
@@ -287,8 +242,8 @@ impl MagCal {
             let remaining = deadline - Instant::now();
             let next = select(sub_0.next_message_pure(), sub_1.next_message_pure());
             match with_timeout(remaining, next).await {
-                Ok(Either::First(s)) => self.solvers[0].push_sample(Self::to_board_counts(s)),
-                Ok(Either::Second(s)) => self.solvers[1].push_sample(Self::to_board_counts(s)),
+                Ok(Either::First(s)) => self.solvers[0].push_sample(to_board_counts(s)),
+                Ok(Either::Second(s)) => self.solvers[1].push_sample(to_board_counts(s)),
                 Err(_) => break,
             }
         }
@@ -307,10 +262,6 @@ impl MagCal {
             Self::finish_one(&mut s0, MAG_BUS_1, name, storage).await,
             Self::finish_one(&mut s1, MAG_BUS_2, name, storage).await,
         ]
-    }
-
-    fn to_board_counts(s: RawMagSample) -> [i16; 3] {
-        [s.x, s.y, s.z].map(|v| (-v * NT_TO_DECI_UT) as i16)
     }
 
     async fn finish_one(
@@ -353,12 +304,12 @@ impl MagCal {
             };
         }
 
-        let wire = MagCalWire::from_solver(cal.hard_iron, cal.soft_iron);
+        let correction = Correction::from_solver(cal.hard_iron, cal.soft_iron);
         let fit = Fit {
             tier: cal.tier,
             field_nt,
             fit_error_pc: cal.fit_error_percent,
-            wire,
+            correction,
         };
         let record = StoredCal::from_fit(Name::new(name), &fit, samples);
         let outcome = if storage.store(&KEYS[id.index()], &record).await {
@@ -372,4 +323,72 @@ impl MagCal {
             outcome,
         }
     }
+}
+
+pub struct Fit {
+    pub tier: SolverTier,
+    pub field_nt: f32,
+    pub fit_error_pc: f32,
+    pub correction: Correction,
+}
+
+pub struct CalReport {
+    pub id: MagnetometerId,
+    pub samples: usize,
+    pub outcome: CalOutcome,
+}
+
+pub enum CalOutcome {
+    Stored(Fit),
+    StoreFailed(Fit),
+    /// Field strength outside the plausible band.
+    ImplausibleField {
+        tier: SolverTier,
+        field_nt: f32,
+    },
+    TooFewSamples,
+}
+
+impl CalReport {
+    pub fn stored(&self) -> bool {
+        matches!(self.outcome, CalOutcome::Stored(_))
+    }
+}
+
+impl fmt::Display for CalReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = self.id.name();
+        match &self.outcome {
+            CalOutcome::Stored(fit) | CalOutcome::StoreFailed(fit) => {
+                let status = if self.stored() {
+                    "stored"
+                } else {
+                    "FLASH WRITE FAILED"
+                };
+                write!(
+                    f,
+                    "{name}  ({:?}, {} samples) -> {status}\n  field {:.1} uT    error {:.2} %\n{}",
+                    fit.tier,
+                    self.samples,
+                    fit.field_nt / 1000.0,
+                    fit.fit_error_pc,
+                    fit.correction,
+                )
+            }
+            CalOutcome::ImplausibleField { tier, field_nt } => write!(
+                f,
+                "{name}: {tier:?} fit, {} samples -> implausible field {field_nt} nT, discarded",
+                self.samples
+            ),
+            CalOutcome::TooFewSamples => write!(f, "{name}: too few samples ({})", self.samples),
+        }
+    }
+}
+
+// --- Helpers -----------------------------------------------------------------
+
+/// Raw sample to the solver's board-frame deci-uT counts: negate all axes
+/// (sensor-to-board) and scale nT to deci-uT to keep the field inside `i16`.
+fn to_board_counts(s: RawMagSample) -> [i16; 3] {
+    [s.x, s.y, s.z].map(|v| (-v * NT_TO_DECI_UT) as i16)
 }
