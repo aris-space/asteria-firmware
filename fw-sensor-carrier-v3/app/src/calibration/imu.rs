@@ -1,20 +1,16 @@
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use defmt::{Debug2Format, info};
+use embassy_sync::once_lock::OnceLock;
 use embassy_time::Duration;
-use firmware_params::{Param, make_key};
 use nalgebra::{Matrix3, Vector3};
-use postcard::experimental::max_size::MaxSize;
-use postcard_schema::Schema;
 use serde::{Deserialize, Serialize};
 
-use crate::sensors::{IMU_0, IMU_1, ImuId};
+use crate::sensors::IMU_COUNT;
+use crate::storage::{self, Storage};
 use crate::types::{ImuSample, RawImuSample};
 
-type Mutex = CriticalSectionRawMutex;
-
-/// On-wire representation of an IMU's residual rotation from the
-/// post-axis-flip sensor frame to the ideal board frame. Identity until
-/// populated by per-board cal.
-#[derive(Clone, Copy, Serialize, Deserialize, MaxSize, Schema)]
+/// Residual rotation from the post-axis-flip sensor frame to the ideal
+/// board frame. Identity until populated by per-board cal.
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct ImuCalWire {
     pub fine_rot: [f32; 9],
 }
@@ -27,14 +23,42 @@ const IDENTITY: ImuCalWire = ImuCalWire {
     fine_rot: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
 };
 
-pub static IMU_0_PARAM: Param<Mutex, ImuCalWire> = Param::new(make_key("v1/imu/0/cal"));
-pub static IMU_1_PARAM: Param<Mutex, ImuCalWire> = Param::new(make_key("v1/imu/1/cal"));
+const DEFAULTS: [ImuCalWire; IMU_COUNT] = [IDENTITY, IDENTITY];
+const KEYS: [storage::Key; IMU_COUNT] = [storage::key("imu0"), storage::key("imu1")];
 
-fn load(id: ImuId) -> ImuCalWire {
-    match id {
-        IMU_0 => IMU_0_PARAM.get_or(IDENTITY),
-        IMU_1 => IMU_1_PARAM.get_or(IDENTITY),
-        _ => unreachable!(),
+/// Live per-IMU cal, written once at startup. A fresh cal persists to flash
+/// but does not touch this; a reset reloads and applies it.
+static CAL: OnceLock<[ImuCalWire; IMU_COUNT]> = OnceLock::new();
+
+/// Read each IMU's stored cal (or identity) and publish it for the readout to
+/// apply. Call once at startup, before the readout tasks run.
+pub async fn load(storage: &Storage) {
+    let cal = [
+        load_one(storage, &KEYS[0], 0).await,
+        load_one(storage, &KEYS[1], 1).await,
+    ];
+    let _ = CAL.init(cal);
+}
+
+/// Load one IMU's cal, logging whether it came from flash or fell back to the
+/// identity (no-correction) default.
+async fn load_one(storage: &Storage, key: &storage::Key, idx: usize) -> ImuCalWire {
+    match storage.load::<ImuCalWire>(key).await {
+        Some(cal) => {
+            info!(
+                "IMU {}: fine-rot cal loaded from flash: {}",
+                idx,
+                Debug2Format(&cal.fine_rot)
+            );
+            cal
+        }
+        None => {
+            info!(
+                "IMU {}: no cal in flash, using identity (no correction)",
+                idx
+            );
+            IDENTITY
+        }
     }
 }
 
@@ -45,7 +69,7 @@ fn sensor_to_board(v: Vector3<f32>) -> Vector3<f32> {
 }
 
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
-    let cal = load(raw.src);
+    let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()];
     let fine_rot = Matrix3::from_row_slice(&cal.fine_rot);
     let accel = fine_rot * sensor_to_board(Vector3::new(raw.accel.x, raw.accel.y, raw.accel.z));
     let gyro = fine_rot * sensor_to_board(Vector3::new(raw.gyro.x, raw.gyro.y, raw.gyro.z));
