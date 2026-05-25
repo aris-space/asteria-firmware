@@ -205,15 +205,73 @@ const GOOD_COVERAGE: f32 = 0.7;
 
 const _: () = assert!(IMU_COUNT == 2, "ImuCal is written for exactly two IMUs");
 
-/// Cross-IMU calibration: the caller drives the pose loop (`capture_pose` per
-/// pose, then `finish`). IMU 0 is the reference; IMU 1 rotates into its frame.
-#[derive(Default)]
+/// One step of [`ImuCal`]; `advance` returns the stage it just entered.
+pub enum Stage<'a> {
+    /// Rest the board for pose `pose` (0-based), then `advance` again to capture.
+    Prompt { pose: usize },
+    /// Pose `pose` captured; `counts` is the still-sample tally per IMU.
+    Captured {
+        pose: usize,
+        counts: [usize; IMU_COUNT],
+    },
+    /// All poses captured and the fit stored; the report is ready.
+    Done(&'a ImuCalReport),
+}
+
+/// What the next `advance` does.
+enum Step {
+    Prompt(usize),
+    Capture(usize),
+    Finish,
+    Done,
+}
+
+/// Cross-IMU calibration as a state machine: each `advance().await` performs one
+/// step and reports the [`Stage`] it entered, so the caller can prompt and print
+/// between steps. IMU 0 is the reference; IMU 1 rotates into its frame.
 pub struct ImuCal {
     est: Estimator,
+    name: Name,
+    step: Step,
+    report: Option<ImuCalReport>,
 }
 
 impl ImuCal {
-    pub async fn capture_pose(&mut self) -> [usize; IMU_COUNT] {
+    pub fn new(name: &str) -> Self {
+        Self {
+            est: Estimator::default(),
+            name: Name::new(name),
+            step: Step::Prompt(0),
+            report: None,
+        }
+    }
+
+    pub async fn advance(&mut self, storage: &Storage) -> Stage<'_> {
+        match self.step {
+            Step::Prompt(pose) => {
+                self.step = Step::Capture(pose);
+                Stage::Prompt { pose }
+            }
+            Step::Capture(pose) => {
+                let counts = self.capture().await;
+                self.step = if pose + 1 < POSES {
+                    Step::Prompt(pose + 1)
+                } else {
+                    Step::Finish
+                };
+                Stage::Captured { pose, counts }
+            }
+            Step::Finish => {
+                let report = self.finalize(storage).await;
+                self.report = Some(report);
+                self.step = Step::Done;
+                Stage::Done(self.report.as_ref().unwrap())
+            }
+            Step::Done => Stage::Done(self.report.as_ref().unwrap()),
+        }
+    }
+
+    async fn capture(&mut self) -> [usize; IMU_COUNT] {
         let mut sub_0 = RAW_IMU_CHANNELS[IMU_0.index()]
             .subscriber()
             .expect("imu cal: raw imu 0 subscribe failed");
@@ -240,7 +298,7 @@ impl ImuCal {
         got
     }
 
-    pub async fn finish(self, name: &str, storage: &Storage) -> ImuCalReport {
+    async fn finalize(&self, storage: &Storage) -> ImuCalReport {
         let fit = self.est.solve();
         let still_ok = fit.peak_dps < STILL_MOTION_DPS && fit.gyro_n[0] > 0 && fit.gyro_n[1] > 0;
         if !still_ok {
@@ -254,15 +312,14 @@ impl ImuCal {
         } else {
             [Vector3::zeros(); IMU_COUNT]
         };
-        let name = Name::new(name);
         let cal = [
             StoredCal::from_fit(
-                name,
+                self.name,
                 &fit,
                 Correction::from_parts(Matrix3::identity(), bias[0]),
             ),
             StoredCal::from_fit(
-                name,
+                self.name,
                 &fit,
                 Correction::from_parts(fit.rotation.rotation, bias[1]),
             ),
@@ -271,7 +328,7 @@ impl ImuCal {
             && storage.store(&IMU_1.key(), &cal[1]).await;
         info!(
             "imu cal \"{}\" done: misalign {=f32} deg, {=usize} pairs, stored {=bool}",
-            name, fit.rotation.misalign_deg, fit.pairs, stored
+            self.name, fit.rotation.misalign_deg, fit.pairs, stored
         );
         ImuCalReport {
             fit,

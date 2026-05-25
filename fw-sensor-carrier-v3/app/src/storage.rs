@@ -118,10 +118,10 @@ impl Storage {
         }
     }
 
-    /// Read the flash chip's JEDEC ID (for diagnostics).
-    pub async fn jedec_id(&self) -> [u8; 3] {
+    /// Read the flash chip's mfr + device id (for diagnostics).
+    pub async fn read_mfr_device_id(&self) -> [u8; 2] {
         let mut map = self.map.lock().await;
-        map.flash().jedec_id()
+        map.flash().read_mfr_device_id()
     }
 
     /// Read flash status register 1 (for diagnostics).

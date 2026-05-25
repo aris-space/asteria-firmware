@@ -257,38 +257,44 @@ async fn cmd_cal_imu(
         "imu cal: rest the board still in several distinct orientations\n(its 6 faces work well); each capture takes the gyro bias too.\n",
     )
     .await;
-    let mut cal = imu::ImuCal::default();
-    for i in 0..imu::POSES {
-        let mut s: String<96> = String::new();
-        let _ = write!(
-            s,
-            "\npose {}/{}: rest it on a new face/edge, then press any key...\n",
-            i + 1,
-            imu::POSES
-        );
-        say(class, &s).await;
-        // Block until a byte arrives from the terminal (any key).
-        let mut key = [0u8; 1];
-        let _ = class.read(&mut key).await;
-        say(class, "  capturing...\n").await;
-
-        let n = cal.capture_pose().await;
-        let mut s: String<96> = String::new();
-        let _ = writeln!(
-            s,
-            "  pose {}/{} captured (imu0={} imu1={} still samples)",
-            i + 1,
-            imu::POSES,
-            n[0],
-            n[1]
-        );
-        say(class, &s).await;
+    let mut cal = imu::ImuCal::new(name);
+    loop {
+        match cal.advance(storage).await {
+            imu::Stage::Prompt { pose } => {
+                let mut s: String<96> = String::new();
+                let _ = write!(
+                    s,
+                    "\npose {}/{}: rest it on a new face/edge, then press any key...\n",
+                    pose + 1,
+                    imu::POSES
+                );
+                say(class, &s).await;
+                // Block until a byte arrives from the terminal (any key).
+                let mut key = [0u8; 1];
+                let _ = class.read(&mut key).await;
+                say(class, "  capturing...\n").await;
+            }
+            imu::Stage::Captured { pose, counts } => {
+                let mut s: String<96> = String::new();
+                let _ = writeln!(
+                    s,
+                    "  pose {}/{} captured (imu0={} imu1={} still samples)",
+                    pose + 1,
+                    imu::POSES,
+                    counts[0],
+                    counts[1]
+                );
+                say(class, &s).await;
+            }
+            imu::Stage::Done(report) => {
+                let mut s: String<1024> = String::new();
+                let _ = writeln!(s, "{report}");
+                say(class, &s).await;
+                report_outcome(class, report.stored()).await;
+                break;
+            }
+        }
     }
-    let report = cal.finish(name, storage).await;
-    let mut s: String<1024> = String::new();
-    let _ = writeln!(s, "{report}");
-    say(class, &s).await;
-    report_outcome(class, report.stored()).await;
 }
 
 async fn cal_show(class: &mut ConsoleIo<'_>, storage: &Storage) {
@@ -430,20 +436,22 @@ async fn cmd_flash(
 }
 
 async fn flash_info(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    let id = storage.jedec_id().await;
+    let id = storage.read_mfr_device_id().await;
     let status = storage.status().await;
     let mut s: String<192> = String::new();
     write_flash_identity(&mut s, id, status);
     say(class, &s).await;
 }
 
-fn write_flash_identity(out: &mut impl fmt::Write, id: [u8; 3], status: u8) {
-    let detected = if id[0] == flash::EXPECTED_JEDEC_ID[0] {
-        "Winbond (id bytes 1-2 unreliable; use 'flash test')"
+fn write_flash_identity(out: &mut impl fmt::Write, id: [u8; 2], status: u8) {
+    let detected = if id == flash::EXPECTED_MFR_DEVICE_ID {
+        "W25Q256JV"
+    } else if id[0] == flash::EXPECTED_MFR_DEVICE_ID[0] {
+        "Winbond, unexpected device id"
     } else {
         "UNKNOWN (check wiring/power)"
     };
-    let _ = writeln!(out, "jedec id:   {:02x} {:02x} {:02x}", id[0], id[1], id[2]);
+    let _ = writeln!(out, "mfr/device: {:02x} {:02x}", id[0], id[1]);
     let _ = writeln!(out, "detected:   {detected}");
     let _ = writeln!(out, "status reg: {:#04x} (wip={})", status, status & 1);
     let _ = write!(out, "capacity:   ");
