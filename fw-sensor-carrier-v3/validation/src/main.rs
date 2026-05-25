@@ -7,9 +7,12 @@ use embassy_executor::Spawner;
 use defmt_rtt as _;
 use panic_probe as _;
 
+mod bounce_i2c;
 mod checks;
 mod resources;
 mod support;
+
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 
 mod clocks {
     include!(concat!(
@@ -61,14 +64,16 @@ async fn main(_spawner: Spawner) -> ! {
     all_passed &= checks::imu(imu2_spi, imu2_int1, "imu2").await;
 
     // I2C buses: a barometer + magnetometer on each.
+    // bus1 = I2C5 (general DMA, DMAs straight from RAM); bus2 = I2C4 (BDMA, staged
+    // through SRAM4 inside its own BounceI2c). Both are plain shared I2C buses here.
     let bus1 = r.bus1.setup();
     let bus2 = r.bus2.setup();
-    all_passed &= checks::barometer(bus1, "barometer0 (bus1)").await;
-    all_passed &= checks::barometer(bus2, "barometer1 (bus2)").await;
-    all_passed &= checks::magnetometer(bus1, "magnetometer0 (bus1)").await;
-    all_passed &= checks::magnetometer(bus2, "magnetometer1 (bus2)").await;
-    all_passed &= checks::sht4x(bus1, "sht4x0 (bus1)").await;
-    all_passed &= checks::sht4x(bus2, "sht4x1 (bus2)").await;
+    all_passed &= checks::barometer(I2cDevice::new(bus1), "barometer0 (bus1)").await;
+    all_passed &= checks::barometer(I2cDevice::new(bus2), "barometer1 (bus2)").await;
+    all_passed &= checks::magnetometer(I2cDevice::new(bus1), "magnetometer0 (bus1)").await;
+    all_passed &= checks::magnetometer(I2cDevice::new(bus2), "magnetometer1 (bus2)").await;
+    all_passed &= checks::sht4x(I2cDevice::new(bus1), "sht4x0 (bus1)").await;
+    all_passed &= checks::sht4x(I2cDevice::new(bus2), "sht4x1 (bus2)").await;
 
     // UART GNSS receivers.
     let (_gps1_tx, gps1_rx) = r.gps1_uart.setup().split();

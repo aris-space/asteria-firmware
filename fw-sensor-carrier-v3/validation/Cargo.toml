@@ -14,7 +14,6 @@ embassy-stm32 = { version = "*", features = [
     "stm32h723zg",
     "single-bank",
     "time-driver-any",
-    "memory-x",
     "unstable-pac",
     "exti",
     "defmt",

@@ -67,11 +67,11 @@ assign_resources! {
         rx_dma: DMA2_CH7,
     }
     bus2: Bus2 {
-        periph: I2C2,
-        scl: PB10,
-        sda: PB11,
-        tx_dma: DMA2_CH0,
-        rx_dma: DMA2_CH1,
+        periph: I2C4,
+        scl: PF14,
+        sda: PF15,
+        tx_dma: BDMA_CH0,
+        rx_dma: BDMA_CH1,
     }
     flash: Flash {
         periph: OCTOSPI1,

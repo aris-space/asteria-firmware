@@ -6,9 +6,11 @@ use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
 use super::{Bus1, Bus2};
+use crate::bounce_i2c::BounceI2c;
 
 pub type SharedI2c = embassy_stm32::i2c::I2c<'static, Async, I2cMaster>;
 pub type SharedI2cBus = &'static Mutex<NoopRawMutex, SharedI2c>;
+pub type SharedBounceBus = &'static Mutex<NoopRawMutex, BounceI2c<SharedI2c>>;
 
 fn config() -> i2c::Config {
     let mut config = i2c::Config::default();
@@ -18,7 +20,7 @@ fn config() -> i2c::Config {
 }
 
 static SHARED_I2C_BUS_1: StaticCell<Mutex<NoopRawMutex, SharedI2c>> = StaticCell::new();
-static SHARED_I2C_BUS_2: StaticCell<Mutex<NoopRawMutex, SharedI2c>> = StaticCell::new();
+static SHARED_I2C_BUS_2: StaticCell<Mutex<NoopRawMutex, BounceI2c<SharedI2c>>> = StaticCell::new();
 
 impl Bus1 {
     pub fn setup(self) -> SharedI2cBus {
@@ -43,12 +45,12 @@ impl Bus1 {
 }
 
 impl Bus2 {
-    pub fn setup(self) -> SharedI2cBus {
+    pub fn setup(self) -> SharedBounceBus {
         bind_interrupts!(struct Bus2Irqs {
-            I2C2_EV => i2c::EventInterruptHandler<peripherals::I2C2>;
-            I2C2_ER => i2c::ErrorInterruptHandler<peripherals::I2C2>;
-            DMA2_STREAM0 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH0>;
-            DMA2_STREAM1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH1>;
+            I2C4_EV => i2c::EventInterruptHandler<peripherals::I2C4>;
+            I2C4_ER => i2c::ErrorInterruptHandler<peripherals::I2C4>;
+            BDMA_CHANNEL0 => embassy_stm32::dma::InterruptHandler<peripherals::BDMA_CH0>;
+            BDMA_CHANNEL1 => embassy_stm32::dma::InterruptHandler<peripherals::BDMA_CH1>;
         });
 
         let i2c = i2c::I2c::new(
@@ -60,6 +62,6 @@ impl Bus2 {
             Bus2Irqs,
             config(),
         );
-        SHARED_I2C_BUS_2.init(Mutex::new(i2c))
+        SHARED_I2C_BUS_2.init(Mutex::new(BounceI2c::new(i2c)))
     }
 }

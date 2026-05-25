@@ -1,12 +1,11 @@
 use defmt::{error, info};
-use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::mode::Async;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::usart::UartRx;
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::{Delay, Duration, Timer, with_timeout};
+use embedded_hal_async::i2c::I2c;
 use lsm6dso32::spi::Lsm6Dso32SpiInterface;
 use lsm6dso32::{
     AccelerometerFullScale, AccelerometerOdr, GyroscopeFullScale, GyroscopeOdr, Int1Config,
@@ -17,7 +16,6 @@ use ms5607::{Ms5607, Oversampling};
 use sht4x::{Precision, Sht4xAsync};
 use ublox::{FixedLinearBuffer, PacketRef, Parser};
 
-use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::resources::buzzer::BuzzerPwm;
 use crate::resources::flash::{BoardFlash, W25Q256JV_DEVICE_ID, WINBOND_MANUFACTURER_ID};
 use crate::resources::sd::Sd;
@@ -205,8 +203,7 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
 
 /// Init the MS5607 (it has no WHO_AM_I, so init reads/verifies its factory PROM),
 /// then take one pressure/temperature measurement.
-pub async fn barometer(bus: SharedI2cBus, label: &str) -> bool {
-    let i2c = I2cDevice::<NoopRawMutex, SharedI2c>::new(bus);
+pub async fn barometer<I: I2c>(i2c: I, label: &str) -> bool {
     let sensor = Ms5607::new(i2c, false);
 
     let mut sensor = match sensor.init(&mut Delay).await {
@@ -239,8 +236,7 @@ pub async fn barometer(bus: SharedI2cBus, label: &str) -> bool {
 
 /// Check the LSM303AGR WHO_AM_I, then put the magnetometer into continuous mode
 /// and read one magnetic-field sample.
-pub async fn magnetometer(bus: SharedI2cBus, label: &str) -> bool {
-    let i2c = I2cDevice::<NoopRawMutex, SharedI2c>::new(bus);
+pub async fn magnetometer<I: I2c>(i2c: I, label: &str) -> bool {
     let mut sensor = Lsm303agr::new_with_i2c(i2c);
 
     match sensor.magnetometer_id().await {
@@ -307,8 +303,7 @@ pub async fn magnetometer(bus: SharedI2cBus, label: &str) -> bool {
 
 /// Read the SHT4x serial number to confirm it responds, then take one
 /// temperature/humidity measurement.
-pub async fn sht4x(bus: SharedI2cBus, label: &str) -> bool {
-    let i2c = I2cDevice::<NoopRawMutex, SharedI2c>::new(bus);
+pub async fn sht4x<I: I2c>(i2c: I, label: &str) -> bool {
     let mut sensor = Sht4xAsync::new(i2c);
 
     match sensor.serial_number(&mut Delay).await {
