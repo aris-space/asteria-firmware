@@ -203,6 +203,8 @@ const STILL_MOTION_DPS: f32 = 30.0;
 const GOOD_RESIDUAL_DEG: f32 = 2.0;
 const GOOD_COVERAGE: f32 = 0.7;
 
+const _: () = assert!(IMU_COUNT == 2, "ImuCal is written for exactly two IMUs");
+
 /// Cross-IMU calibration: the caller drives the pose loop (`capture_pose` per
 /// pose, then `finish`). IMU 0 is the reference; IMU 1 rotates into its frame.
 #[derive(Default)]

@@ -203,6 +203,11 @@ pub const PROGRESS_TICKS: usize = 10;
 const MIN_VALID_NT: f32 = 22_000.0;
 const MAX_VALID_NT: f32 = 67_000.0;
 
+const _: () = assert!(
+    MAGNETOMETER_COUNT == 2,
+    "MagCal is written for exactly two magnetometers"
+);
+
 /// Magnetometer calibration: the caller drives the collection loop (`collect_tick`
 /// per window, then `finish`). One `magcal` solver per sensor.
 pub struct MagCal {
