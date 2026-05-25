@@ -4,7 +4,7 @@
 
 pub fn clocks_config() -> embassy_stm32::Config {
     use embassy_stm32::rcc::mux::{
-        I2c4sel, I2c1235sel, Saisel, Sdmmcsel, Usart16910sel, Usart234578sel, Usbsel,
+        I2c1235sel, Saisel, Sdmmcsel, Usart16910sel, Usart234578sel, Usbsel,
     };
     use embassy_stm32::rcc::{
         AHBPrescaler, APBPrescaler, Hse, HseMode, Hsi48Config, Pll, PllDiv, PllMul, PllPreDiv,
@@ -57,8 +57,7 @@ pub fn clocks_config() -> embassy_stm32::Config {
 
     // Kernel muxes
     config.rcc.mux.spi123sel = Saisel::PLL1_Q; // 240 MHz for SPI1/2/3
-    config.rcc.mux.i2c1235sel = I2c1235sel::PLL3_R; // 120 MHz for I2C1/2/3
-    config.rcc.mux.i2c4sel = I2c4sel::PLL3_R; // 120 MHz for I2C4/5
+    config.rcc.mux.i2c1235sel = I2c1235sel::PLL3_R; // 120 MHz for I2C1/2/3/5
 
     // (optional, handy defaults)
     config.rcc.mux.usart16910sel = Usart16910sel::PCLK2;

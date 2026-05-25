@@ -17,6 +17,7 @@ embassy-stm32 = { version = "*", features = [
     "unstable-pac",
     "exti",
     "defmt",
+    "memory-x",
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768", "defmt-timestamp-uptime-us"] }
 embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread"] }
@@ -53,12 +54,6 @@ embedded-fatfs = { git = "https://github.com/MabezDev/embedded-fatfs", version =
 ] }
 block-device-adapters = { git = "https://github.com/MabezDev/embedded-fatfs", version = "0.2.0" }
 embedded-partitions = { git = "https://github.com/MabezDev/embedded-fatfs", version = "0.1.0" }
-
-[features]
-default = []
-# Enable to put sensor block 2 on I2C4 (D3 domain, BDMA) staged through SRAM4.
-# Off (default) uses the hardware-bridged I2C2 path (no BDMA, no SRAM4).
-use-i2c4 = []
 
 [[bin]]
 name = "fw-sensor-carrier-v3-validation"

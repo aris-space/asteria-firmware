@@ -11,8 +11,6 @@ use panic_probe as _;
 mod fmt;
 
 mod assign_resources;
-#[cfg(feature = "use-i2c4")]
-mod bounce_i2c;
 mod checks;
 mod clocks;
 mod resources;
@@ -84,7 +82,7 @@ async fn main(spawner: Spawner) -> ! {
     let (imu2_spi, imu2_int1) = r.imu2.setup();
     all_passed &= checks::imu(imu2_spi, imu2_int1, "imu2").await;
 
-    // bus1 = I2C5; bus2 = I2C4 (BDMA, via SRAM4 bounce) or bridged I2C2.
+    // bus1 = I2C5; bus2 = bridged I2C2.
     let bus1 = r.bus1.setup();
     let bus2 = r.bus2.setup();
     all_passed &= checks::barometer(I2cDevice::new(bus1), "barometer0 (bus1)").await;

@@ -71,16 +71,7 @@ assign_resources! {
         tx_dma: DMA2_CH2,
         rx_dma: DMA2_CH7,
     }
-    // Sensor block 2: I2C4 (BDMA/SRAM4) with `use-i2c4`, else bridged I2C2.
-    #[cfg(feature = "use-i2c4")]
-    bus2: Bus2 {
-        periph: I2C4,
-        scl: PF14,
-        sda: PF15,
-        tx_dma: BDMA_CH0,
-        rx_dma: BDMA_CH1,
-    }
-    #[cfg(not(feature = "use-i2c4"))]
+    // Sensor block 2 on the hardware-bridged I2C2.
     bus2: Bus2 {
         periph: I2C2,
         scl: PB10,
