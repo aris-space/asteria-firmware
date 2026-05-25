@@ -13,10 +13,9 @@ fn main() {
     println!("cargo:rustc-link-search={}", out.display());
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 
-    // Only the BDMA build needs the SRAM4 bounce buffer. INSERT AFTER .uninit (not
-    // .bss): cortex-m-rt folds `INSERT AFTER .bss` sections into its .bss-zeroing
-    // by extending __ebss past them, which for a RAM_D3 section would make startup
-    // zero all of memory. .uninit is past every RAM bound symbol.
+    // INSERT AFTER .uninit, not .bss: cortex-m-rt extends __ebss over `INSERT
+    // AFTER .bss` sections to zero them, which for a RAM_D3 section would zero all
+    // of memory at boot. .uninit is past every RAM bound symbol.
     if env::var_os("CARGO_FEATURE_USE_I2C4").is_some() {
         fs::write(
             out.join("sram4.x"),

@@ -1,37 +1,32 @@
-//! I2C4 lives in the D3 domain, so its DMA is BDMA, and BDMA can only reach D3
-//! RAM (SRAM4) — not the AXI SRAM where buffers normally live. [`BounceI2c`] wraps
-//! such a bus and stages every transfer through a buffer in SRAM4, so the DMA only
-//! ever touches D3 RAM and the async sensor drivers run unchanged.
+//! Stages each I2C transfer through a buffer in SRAM4. I2C4's only DMA is BDMA,
+//! which reaches SRAM4 but not the AXI SRAM where buffers normally live, so DMA
+//! straight from a normal buffer would fault.
 //!
-//! Wrap a bus once and share it behind a mutex: the SRAM4 buffer is handed out
-//! exactly once (so a second `BounceI2c` cannot exist), and the sharing mutex
-//! serialises every transfer through it.
+//! Not strictly needed here: validation could use blocking I2C and sidestep this
+//! entirely. It exists to prototype the bounce the firmware may later adopt, so
+//! this stays close to the firmware's eventual data path.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embedded_hal::i2c::{Operation, SevenBitAddress};
 use embedded_hal_async::i2c::{ErrorType, I2c};
 
-/// The largest single transfer the on-board sensors perform is a handful of
-/// bytes; 64 is comfortable headroom.
 const BOUNCE_LEN: usize = 64;
 
-/// Bounce buffer placed in SRAM4 by the linker (see `build.rs`).
+/// In SRAM4 (see `build.rs`).
 #[unsafe(link_section = ".sram4")]
 static mut BUFFER: [u8; BOUNCE_LEN] = [0; BOUNCE_LEN];
 
-/// Guards the SRAM4 buffer so it is lent out exactly once.
+/// Lends the buffer out exactly once.
 static TAKEN: AtomicBool = AtomicBool::new(false);
 
-/// Wraps an I2C bus whose DMA is BDMA, staging transfers through SRAM4.
 pub struct BounceI2c<I> {
     inner: I,
     buf: &'static mut [u8; BOUNCE_LEN],
 }
 
 impl<I> BounceI2c<I> {
-    /// Wrap `inner`. Panics if called more than once: there is a single SRAM4
-    /// bounce buffer, hence a single BDMA bus.
+    /// Panics if called twice; there is only one SRAM4 buffer.
     pub fn new(inner: I) -> Self {
         assert!(
             !TAKEN.swap(true, Ordering::AcqRel),
@@ -92,8 +87,6 @@ impl<I: I2c<SevenBitAddress>> I2c<SevenBitAddress> for BounceI2c<I> {
         address: u8,
         operations: &mut [Operation<'_>],
     ) -> Result<(), Self::Error> {
-        // The sensor drivers here only use read/write/write_read, so each operation
-        // is bounced on its own; this is not one repeated-start transaction.
         for op in operations {
             match op {
                 Operation::Read(read) => {

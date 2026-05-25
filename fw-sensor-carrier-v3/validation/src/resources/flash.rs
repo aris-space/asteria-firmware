@@ -33,10 +33,9 @@ pub struct BoardFlash {
 }
 
 impl BoardFlash {
-    /// Read the manufacturer and device ID with the 0x90 "Read Manufacturer /
-    /// Device ID" command. Unlike the address-less 0x9F JEDEC read, 0x90 clocks a
-    /// 24-bit address first; those cycles warm up read sampling so both returned
-    /// bytes latch reliably (the address-less path garbles everything past byte 0).
+    /// Read manufacturer + device ID via 0x90. Its 24-bit address phase warms up
+    /// read sampling so both bytes latch; the address-less 0x9F read garbles
+    /// everything past byte 0.
     pub fn read_id(&mut self) -> FlashId {
         let mut buf = [0u8; 2];
         let _ = self.ospi.blocking_read(
@@ -73,8 +72,8 @@ fn config() -> OspiConfig {
 
 impl Flash {
     pub fn setup(self) -> BoardFlash {
-        // IO2 (/WP) and IO3 (/HOLD) are unused in single-line SPI; hold them high
-        // so the chip never write-protects or pauses on hold.
+        // /WP and /HOLD are unused in 1-line SPI; hold high so the chip doesn't
+        // write-protect or pause.
         let wp = Output::new(self.wp, Level::High, Speed::VeryHigh);
         let hold = Output::new(self.hold, Level::High, Speed::VeryHigh);
 

@@ -11,8 +11,7 @@ use crate::bounce_i2c::BounceI2c;
 
 pub type SharedI2c = embassy_stm32::i2c::I2c<'static, Async, I2cMaster>;
 pub type SharedI2cBus = &'static Mutex<NoopRawMutex, SharedI2c>;
-/// With `use-i2c4`, bus2 is I2C4 whose BDMA can only reach SRAM4, so it is staged
-/// through [`BounceI2c`]; see its docs.
+/// With `use-i2c4`, bus2 is I2C4 and staged through [`BounceI2c`].
 #[cfg(feature = "use-i2c4")]
 pub type SharedBounceBus = &'static Mutex<NoopRawMutex, BounceI2c<SharedI2c>>;
 
@@ -51,8 +50,7 @@ impl Bus1 {
     }
 }
 
-// With `use-i2c4`: I2C4 (D3 domain), BDMA-served, staged through SRAM4 by
-// BounceI2c. Without it: the hardware-bridged I2C2 on general DMA, used directly.
+// use-i2c4: I2C4 via BounceI2c (BDMA/SRAM4). Off: bridged I2C2, used directly.
 #[cfg(feature = "use-i2c4")]
 impl Bus2 {
     pub fn setup(self) -> SharedBounceBus {

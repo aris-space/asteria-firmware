@@ -38,9 +38,8 @@ async fn beep(buzzer: &mut BuzzerPwm, freq: u32, ms: u64) {
     buzzer.ch4().disable();
 }
 
-/// Light all three LEDs and beep the buzzer. These have no electrical readback,
-/// so the operator confirms them visually/audibly. The LEDs stay on for the rest
-/// of the run; `announce` later collapses them to the pass/fail verdict.
+/// Light all LEDs and beep. No electrical readback, so confirmed by eye/ear. The
+/// LEDs stay on until `announce` sets the verdict.
 pub async fn leds_and_buzzer(
     green: &mut Output<'static>,
     yellow: &mut Output<'static>,
@@ -53,7 +52,7 @@ pub async fn leds_and_buzzer(
     yellow.set_high();
     red.set_high();
 
-    // Passive piezo: sweep a couple of tones so it audibly buzzes.
+    // Sweep tones so the passive piezo audibly buzzes.
     for freq in [2400u32, 3200] {
         beep(buzzer, freq, 200).await;
         Timer::after(Duration::from_millis(80)).await;
@@ -117,8 +116,7 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
         return false;
     }
 
-    // Route the accelerometer data-ready flag to INT1 so we exercise the physical
-    // interrupt line, not just the SPI link.
+    // Route accel DRDY to INT1 to exercise the interrupt line, not just SPI.
     if let Err(e) = sensor
         .configure_interrupts(
             Some(Int1Config {
@@ -133,9 +131,8 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
         return false;
     }
 
-    // DRDY is level-held until the sample is read, so clear it (INT1 drops low),
-    // then wait for the next conversion to drive a fresh rising edge. At 104 Hz a
-    // new sample arrives every ~10 ms, well inside the timeout.
+    // DRDY is level-held: read once to clear it (INT1 low), then catch the next
+    // rising edge.
     let _ = sensor.read_acceleration().await;
     let int1_ok = with_timeout(Duration::from_millis(150), int1.wait_for_rising_edge())
         .await
@@ -182,7 +179,7 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
         gy += gyro.y;
         gz += gyro.z;
         temp_c += temp.value;
-        // One ODR period (104 Hz) so each read sees a fresh sample.
+        // ~one ODR period, so each read is fresh.
         Timer::after(Duration::from_millis(10)).await;
     }
     let n = SAMPLES as f32;
@@ -279,11 +276,10 @@ pub async fn magnetometer<I: I2c>(i2c: I, label: &str) -> bool {
         return false;
     }
 
-    // Collect per-sample magnitudes over a longer window, then take a trimmed mean
-    // so an occasional interference spike does not skew |B|.
+    // Per-sample |B|, then a trimmed mean to reject interference spikes.
     let mut mags = [0.0f32; MAG_SAMPLES];
     for slot in mags.iter_mut() {
-        // Wait past one 100 Hz sample period so each read is a fresh measurement.
+        // > one 100 Hz period, so each read is fresh.
         Timer::after(Duration::from_millis(15)).await;
         match sensor.magnetic_field().await {
             Ok(f) => {
@@ -334,10 +330,8 @@ pub async fn sht4x<I: I2c>(i2c: I, label: &str) -> bool {
     SHT_TEMP_C.check(label, "temp", temp) & SHT_RH_PCT.check(label, "RH", humidity)
 }
 
-/// Validate a GNSS receiver: confirm the UART link, that we decode valid u-blox
-/// packets, and specifically that UBX-NAV-STATUS arrives (it carries the fix
-/// state we rely on). A receiver that talks but never sends NAV-STATUS is
-/// misconfigured.
+/// Validate a GNSS receiver: UART link up, valid UBX packets, and UBX-NAV-STATUS
+/// present. A receiver that talks but never sends NAV-STATUS is misconfigured.
 pub async fn gnss(mut rx: UartRx<'static, Async>, label: &str) -> bool {
     let mut buf = [0u8; 256];
     let mut parse_buf = [0u8; 1024];
@@ -347,8 +341,7 @@ pub async fn gnss(mut rx: UartRx<'static, Async>, label: &str) -> bool {
     let mut packets = 0usize;
     let mut nav_status = false;
 
-    // NAV-STATUS is typically emitted at 1 Hz, so listen for a few seconds,
-    // bailing as soon as we have decoded one.
+    // NAV-STATUS is ~1 Hz; listen a few seconds, bail once we decode one.
     for _ in 0..12 {
         match with_timeout(Duration::from_millis(300), rx.read_until_idle(&mut buf)).await {
             Ok(Ok(n)) if n > 0 => {
@@ -421,13 +414,11 @@ pub fn flash(mut flash: BoardFlash) -> bool {
     }
 }
 
-/// Validate the SD card at the register level (embassy's H723 SDMMC driver hangs,
-/// but the peripheral works): CMD0 -> CMD8 (a v2 card responds) -> ACMD41 (the
-/// card finishes power-up). Fully bounded, so it cannot hang.
+/// Validate the SD card at the register level (embassy's H723 SDMMC driver can
+/// hang): CMD0 -> CMD8 -> ACMD41 power-up. Bounded, so it cannot hang.
 pub async fn sd_card(_sdmmc: Sd, detect: Input<'static>, _power: Output<'static>) -> bool {
-    /// Issue one SDMMC command at the register level with bounded polling, so it
-    /// can never hang. Returns the short response register on success, `None` on
-    /// timeout.
+    /// Issue one SDMMC command with bounded polling. Returns the short response,
+    /// or `None` on timeout.
     fn sd_cmd(index: u8, arg: u32, expect_response: bool) -> Option<u32> {
         use embassy_stm32::pac::SDMMC1;
 

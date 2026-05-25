@@ -10,6 +10,9 @@ pub mod sd;
 pub mod sensors;
 pub mod uart;
 
+// TODO: this resource map is a copy of the real firmware's
+// (fw-sensor-carrier-v3/app/src/resources). Ideally both move to a shared crate,
+// along with the patched assign_resources macro, instead of being duplicated.
 assign_resources! {
     buzzer: Buzzer {
         timer: TIM4,
@@ -67,8 +70,7 @@ assign_resources! {
         tx_dma: DMA2_CH2,
         rx_dma: DMA2_CH7,
     }
-    // Sensor block 2. With `use-i2c4` it is I2C4 (BDMA, staged through SRAM4);
-    // without it, the hardware-bridged I2C2 on general DMA.
+    // Sensor block 2: I2C4 (BDMA/SRAM4) with `use-i2c4`, else bridged I2C2.
     #[cfg(feature = "use-i2c4")]
     bus2: Bus2 {
         periph: I2C4,

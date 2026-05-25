@@ -1,6 +1,5 @@
-//! Helpers for reducing sampled sensor readings and checking them against wide
-//! nominal ranges. Bounds are intentionally loose: they catch a dead sensor or a
-//! wrong scale, not a precise calibration, and tolerate orientation and handling.
+//! Reduce sampled readings and range-check them. Bounds are wide on purpose:
+//! they catch a dead or wrong-scale sensor, not calibration.
 
 use defmt::error;
 
@@ -15,8 +14,8 @@ impl Nominal {
         Self { lo, hi }
     }
 
-    /// Return whether `value` sits inside the range, logging an error if not.
-    /// The reading itself is logged by the caller on one combined line.
+    /// Whether `value` is in range; logs an error if not. The value itself is
+    /// logged by the caller.
     pub fn check(&self, label: &str, quantity: &str, value: f32) -> bool {
         if value >= self.lo && value <= self.hi {
             true
@@ -30,17 +29,15 @@ impl Nominal {
     }
 }
 
-// Stationary on the bench: gravity vector magnitude ~1 g, room-ish temperature.
-// Earth's field in Switzerland is ~48 uT (48000 nT). The gyro bound is loose: at
-// ±2000 dps these uncalibrated parts show a large zero-rate bias, so this only
-// catches a railed/runaway gyro, not a precise zero.
+// Bench-rest values (Earth field ~48 uT). Gyro bound is loose: at ±2000 dps the
+// uncalibrated zero-rate bias is large, so it only catches a railed gyro.
 pub const ACCEL_MAGNITUDE_G: Nominal = Nominal::new(0.7, 1.3);
 pub const GYRO_MAGNITUDE_DPS: Nominal = Nominal::new(0.0, 100.0);
 pub const IMU_TEMP_C: Nominal = Nominal::new(0.0, 50.0);
 pub const BARO_PRESSURE_MBAR: Nominal = Nominal::new(700.0, 1100.0);
 pub const BARO_TEMP_C: Nominal = Nominal::new(0.0, 50.0);
-// Wide because raw |B| includes per-location hard-iron offset (corrected in
-// firmware); this catches a dead (~0) or railed sensor, not the exact field.
+// Wide: raw |B| carries hard-iron offset, so this catches dead/railed, not the
+// exact field.
 pub const MAG_MAGNITUDE_NT: Nominal = Nominal::new(10_000.0, 130_000.0);
 pub const SHT_TEMP_C: Nominal = Nominal::new(0.0, 50.0);
 pub const SHT_RH_PCT: Nominal = Nominal::new(5.0, 95.0);
@@ -48,9 +45,8 @@ pub const SHT_RH_PCT: Nominal = Nominal::new(5.0, 95.0);
 /// Number of samples averaged per sensor for a steadier estimate.
 pub const SAMPLES: u32 = 16;
 
-/// The magnetometer is sampled over a longer window and reduced with a trimmed
-/// mean (drop the lowest and highest `MAG_TRIM`) so an interference spike on a
-/// single reading does not skew |B|.
+/// Magnetometer is reduced with a trimmed mean (drop lowest/highest `MAG_TRIM`)
+/// to reject interference spikes.
 pub const MAG_SAMPLES: usize = 20;
 pub const MAG_TRIM: usize = 2;
 

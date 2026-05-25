@@ -11,27 +11,18 @@ mod assign_resources;
 #[cfg(feature = "use-i2c4")]
 mod bounce_i2c;
 mod checks;
+mod clocks;
 mod resources;
 mod support;
 
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 
-mod clocks {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shared/stm32h723_clocks.rs"
-    ));
-}
-
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
     let mut clock_config = clocks::clocks_config();
     {
-        // SDMMC's default kernel clock is PLL1_Q, which this board runs at 240 MHz
-        // (shared with SPI). That exceeds the SDMMC kernel-clock max (~200 MHz), so
-        // the peripheral misbehaves and init hangs. Give SDMMC a dedicated PLL2_R
-        // at 200 MHz instead. (The firmware will need the same once it uses the SD
-        // card.)
+        // The default SDMMC kernel clock (PLL1_Q) is 240 MHz here, over the ~200 MHz
+        // max, so give it a dedicated 200 MHz PLL2_R. The firmware will need this too.
         use embassy_stm32::rcc::{Pll, PllDiv, PllMul, PllPreDiv, PllSource, mux};
         clock_config.rcc.pll2 = Some(Pll {
             source: PllSource::HSE,
@@ -49,7 +40,7 @@ async fn main(_spawner: Spawner) -> ! {
 
     println!("=== sensor-carrier-v3 hardware validation ===");
 
-    // Visual/audible peripherals first; the operator confirms these by eye/ear.
+    // Visual/audible first; the operator confirms these by eye/ear.
     let mut green = r.green_led.setup();
     let mut yellow = r.yellow_led.setup();
     let mut red = r.red_led.setup();
@@ -58,16 +49,12 @@ async fn main(_spawner: Spawner) -> ! {
 
     let mut all_passed = true;
 
-    // SPI IMUs: SPI link + WHO_AM_I, a DRDY rising edge on INT1, then a live
-    // accel/gyro/temperature read.
     let (imu1_spi, imu1_int1) = r.imu1.setup();
     all_passed &= checks::imu(imu1_spi, imu1_int1, "imu1").await;
     let (imu2_spi, imu2_int1) = r.imu2.setup();
     all_passed &= checks::imu(imu2_spi, imu2_int1, "imu2").await;
 
-    // I2C buses: a barometer + magnetometer on each.
-    // bus1 = I2C5 (general DMA, DMAs straight from RAM); bus2 = I2C4 (BDMA, staged
-    // through SRAM4 inside its own BounceI2c). Both are plain shared I2C buses here.
+    // bus1 = I2C5; bus2 = I2C4 (BDMA, via SRAM4 bounce) or bridged I2C2.
     let bus1 = r.bus1.setup();
     let bus2 = r.bus2.setup();
     all_passed &= checks::barometer(I2cDevice::new(bus1), "barometer0 (bus1)").await;
@@ -77,13 +64,11 @@ async fn main(_spawner: Spawner) -> ! {
     all_passed &= checks::sht4x(I2cDevice::new(bus1), "sht4x0 (bus1)").await;
     all_passed &= checks::sht4x(I2cDevice::new(bus2), "sht4x1 (bus2)").await;
 
-    // UART GNSS receivers.
     let (_gps1_tx, gps1_rx) = r.gps1_uart.setup().split();
     all_passed &= checks::gnss(gps1_rx, "gnss1").await;
     let (_gps2_tx, gps2_rx) = r.gps2_uart.setup().split();
     all_passed &= checks::gnss(gps2_rx, "gnss2").await;
 
-    // OCTOSPI flash.
     all_passed &= checks::flash(r.flash.setup());
 
     let verdict = if all_passed {
@@ -93,13 +78,11 @@ async fn main(_spawner: Spawner) -> ! {
     };
     println!("{}", verdict);
 
-    // Announce the verdict for the core peripherals BEFORE touching the SD card.
-    // embassy's blocking SD init can spin forever on a card that won't finish its
-    // ACMD41 power-up, and that must not swallow the LED/buzzer verdict.
+    // Announce the core verdict before the SD card, whose init can stall and must
+    // not swallow the LED/buzzer result.
     checks::announce(&mut green, &mut yellow, &mut red, &mut buzzer, all_passed).await;
 
-    // SD card runs last, as an addendum. If it completes and fails, downgrade the
-    // verdict LED to red; the register-level check is bounded so it cannot hang.
+    // SD runs last; if it fails, downgrade the verdict to red. Bounded, can't hang.
     let (sdmmc, sd_detect, sd_power) = r.sd_card.setup();
     if !checks::sd_card(sdmmc, sd_detect, sd_power).await && all_passed {
         green.set_low();
