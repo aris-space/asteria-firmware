@@ -1,14 +1,14 @@
 use embassy_stm32::i2c::mode::Master as I2cMaster;
 use embassy_stm32::mode::Async;
 use embassy_stm32::{bind_interrupts, i2c, peripherals};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
 use super::{Bus1, Bus2};
 
 pub type SharedI2c = embassy_stm32::i2c::I2c<'static, Async, I2cMaster>;
-pub type SharedI2cBus = &'static Mutex<CriticalSectionRawMutex, SharedI2c>;
+pub type SharedI2cBus = &'static Mutex<NoopRawMutex, SharedI2c>;
 
 fn config() -> i2c::Config {
     let mut config = i2c::Config::default();
@@ -17,8 +17,8 @@ fn config() -> i2c::Config {
     config
 }
 
-static SHARED_I2C_BUS_1: StaticCell<Mutex<CriticalSectionRawMutex, SharedI2c>> = StaticCell::new();
-static SHARED_I2C_BUS_2: StaticCell<Mutex<CriticalSectionRawMutex, SharedI2c>> = StaticCell::new();
+static SHARED_I2C_BUS_1: StaticCell<Mutex<NoopRawMutex, SharedI2c>> = StaticCell::new();
+static SHARED_I2C_BUS_2: StaticCell<Mutex<NoopRawMutex, SharedI2c>> = StaticCell::new();
 
 impl Bus1 {
     pub fn setup(self) -> SharedI2cBus {

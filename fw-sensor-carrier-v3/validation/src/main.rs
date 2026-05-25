@@ -9,6 +9,7 @@ use panic_probe as _;
 
 mod checks;
 mod resources;
+mod support;
 
 mod clocks {
     include!(concat!(
@@ -31,26 +32,13 @@ async fn main(_spawner: Spawner) -> ! {
             source: PllSource::HSE,
             prediv: PllPreDiv::DIV1,
             mul: PllMul::MUL25, // 16 MHz * 25 = 400 MHz VCO
-            // Drop the SDMMC kernel clock to 50 MHz to test whether 200 MHz is
-            // simply too fast for the H723 SDMMC peripheral.
-            divp: Some(PllDiv::DIV8),
-            divq: Some(PllDiv::DIV8),
-            divr: Some(PllDiv::DIV8), // 400 / 8 = 50 MHz -> SDMMC kernel
+            divp: Some(PllDiv::DIV2),
+            divq: Some(PllDiv::DIV2),
+            divr: Some(PllDiv::DIV2), // 400 / 2 = 200 MHz -> SDMMC kernel
         });
         clock_config.rcc.mux.sdmmcsel = mux::Sdmmcsel::PLL2_R;
     }
     let p = embassy_stm32::init(clock_config);
-
-    {
-        // SDMMC clock diagnostic. CR bit26=PLL2ON, bit27=PLL2RDY;
-        // D1CCIPR bit16=SDMMCSEL (0 = PLL1_Q @240MHz, 1 = PLL2_R @200MHz).
-        use embassy_stm32::pac::RCC;
-        defmt::info!(
-            "rcc diag: cr={:#x} d1ccipr={:#x}",
-            RCC.cr().read().0,
-            RCC.d1ccipr().read().0
-        );
-    }
 
     let r = resources::split(p);
 
@@ -65,13 +53,12 @@ async fn main(_spawner: Spawner) -> ! {
 
     let mut all_passed = true;
 
-    // SPI IMUs. INT1 lines are left unconfigured here; validating them reliably
-    // means replicating the firmware's DRDY/FIFO interrupt setup, so we only
-    // check the SPI link + WHOAMI + a live read.
-    let (imu1_spi, _imu1_int1) = r.imu1.setup();
-    all_passed &= checks::imu(imu1_spi, "imu1").await;
-    let (imu2_spi, _imu2_int1) = r.imu2.setup();
-    all_passed &= checks::imu(imu2_spi, "imu2").await;
+    // SPI IMUs: SPI link + WHO_AM_I, a DRDY rising edge on INT1, then a live
+    // accel/gyro/temperature read.
+    let (imu1_spi, imu1_int1) = r.imu1.setup();
+    all_passed &= checks::imu(imu1_spi, imu1_int1, "imu1").await;
+    let (imu2_spi, imu2_int1) = r.imu2.setup();
+    all_passed &= checks::imu(imu2_spi, imu2_int1, "imu2").await;
 
     // I2C buses: a barometer + magnetometer on each.
     let bus1 = r.bus1.setup();
@@ -105,16 +92,8 @@ async fn main(_spawner: Spawner) -> ! {
     checks::announce(&mut green, &mut yellow, &mut red, &mut buzzer, all_passed).await;
 
     // SD card runs last, as an addendum. If it completes and fails, downgrade the
-    // verdict LED to red; if it hangs, the core verdict is already shown.
+    // verdict LED to red; the register-level check is bounded so it cannot hang.
     let (sdmmc, sd_detect, sd_power) = r.sd_card.setup();
-    // If this line prints, reading SDMMC status works (kernel clock reaches the
-    // peripheral) and the value shows whether CPSMACT(bit8)/DPSMACT(bit9) are
-    // stuck. If it does NOT print, the register read itself stalls.
-    defmt::info!(
-        "sd: SDMMC STAR={:#x} CLKCR={:#x}",
-        embassy_stm32::pac::SDMMC1.star().read().0,
-        embassy_stm32::pac::SDMMC1.clkcr().read().0
-    );
     if !checks::sd_card(sdmmc, sd_detect, sd_power).await && all_passed {
         green.set_low();
         red.set_high();

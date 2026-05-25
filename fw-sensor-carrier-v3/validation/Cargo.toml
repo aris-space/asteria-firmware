@@ -17,7 +17,7 @@ embassy-stm32 = { version = "*", features = [
     "memory-x",
     "unstable-pac",
     "exti",
-    "defmt",           # enables embassy's internal trace/debug logs (e.g. SDMMC)
+    "defmt",
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768", "defmt-timestamp-uptime-us"] }
 embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread"] }
@@ -44,6 +44,7 @@ defmt-rtt = "1"
 
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 heapless = "0.9.2"
+libm = "0.2"
 
 [[bin]]
 name = "fw-sensor-carrier-v3-validation"

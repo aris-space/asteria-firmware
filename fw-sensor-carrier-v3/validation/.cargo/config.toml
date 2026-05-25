@@ -13,7 +13,7 @@ runner = [
     "{t} {L:severity} {s}",
 ]
 
-# Show app logs at info, plus embassy's internal SDMMC trace, to debug the SD
-# init. Overrides the inherited DEFMT_LOG=trace so SPI/I2C/DMA don't flood.
+# App logs at info. Overrides the inherited DEFMT_LOG=trace so embassy's internal
+# SPI/I2C/DMA trace doesn't flood the output.
 [env]
-DEFMT_LOG = "info,embassy_stm32::sdmmc=trace"
+DEFMT_LOG = "info"

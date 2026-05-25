@@ -5,7 +5,9 @@
 
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::mode::Blocking;
-use embassy_stm32::ospi::{Config as OspiConfig, MemorySize, Ospi, OspiWidth, TransferConfig};
+use embassy_stm32::ospi::{
+    AddressSize, Config as OspiConfig, MemorySize, Ospi, OspiWidth, TransferConfig,
+};
 use embassy_stm32::peripherals::OCTOSPI1;
 
 use super::Flash;
@@ -13,7 +15,16 @@ use super::Flash;
 /// JEDEC manufacturer byte a healthy W25Q256JV returns: Winbond.
 pub const WINBOND_MANUFACTURER_ID: u8 = 0xEF;
 
-const READ_JEDEC_ID: u8 = 0x9F;
+/// Device ID this board's W25Q256JV returns to the 0x90 command.
+pub const W25Q256JV_DEVICE_ID: u8 = 0x20;
+
+const READ_MANUFACTURER_DEVICE_ID: u8 = 0x90;
+
+/// Manufacturer and device bytes read from the flash.
+pub struct FlashId {
+    pub manufacturer: u8,
+    pub device: u8,
+}
 
 pub struct BoardFlash {
     ospi: Ospi<'static, OCTOSPI1, Blocking>,
@@ -22,21 +33,28 @@ pub struct BoardFlash {
 }
 
 impl BoardFlash {
-    /// Read the JEDEC manufacturer byte. On this instruction-then-data OSPI path
-    /// the continuation bytes mis-clock, so only byte 0 (the manufacturer) is
-    /// trustworthy; that is enough for a "chip present" probe.
-    pub fn manufacturer_id(&mut self) -> u8 {
-        let mut id = [0u8; 1];
+    /// Read the manufacturer and device ID with the 0x90 "Read Manufacturer /
+    /// Device ID" command. Unlike the address-less 0x9F JEDEC read, 0x90 clocks a
+    /// 24-bit address first; those cycles warm up read sampling so both returned
+    /// bytes latch reliably (the address-less path garbles everything past byte 0).
+    pub fn read_id(&mut self) -> FlashId {
+        let mut buf = [0u8; 2];
         let _ = self.ospi.blocking_read(
-            &mut id,
+            &mut buf,
             TransferConfig {
                 iwidth: OspiWidth::SING,
-                instruction: Some(READ_JEDEC_ID as u32),
+                instruction: Some(READ_MANUFACTURER_DEVICE_ID as u32),
+                adwidth: OspiWidth::SING,
+                address: Some(0x00_0000), // returns manufacturer then device
+                adsize: AddressSize::_24bit,
                 dwidth: OspiWidth::SING,
                 ..Default::default()
             },
         );
-        id[0]
+        FlashId {
+            manufacturer: buf[0],
+            device: buf[1],
+        }
     }
 }
 
