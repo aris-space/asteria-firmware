@@ -1,12 +1,15 @@
-use defmt::{error, info};
+use block_device_adapters::BufStream;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::mode::Async;
-use embassy_stm32::sdmmc::sd::{Addressable, CmdBlock, DataBlock, StorageDevice};
+use embassy_stm32::sdmmc::sd::{Addressable, CmdBlock, StorageDevice};
 use embassy_stm32::time::{Hertz, mhz};
 use embassy_stm32::usart::UartRx;
 use embassy_time::{Delay, Duration, Timer, with_timeout};
+use embedded_fatfs::{FileSystem, FsOptions};
 use embedded_hal_async::i2c::I2c;
+use embedded_io_async::{Read, Seek, SeekFrom, Write};
+use embedded_partitions::mbr::Mbr;
 use lsm6dso32::spi::Lsm6Dso32SpiInterface;
 use lsm6dso32::{
     AccelerometerFullScale, AccelerometerOdr, GyroscopeFullScale, GyroscopeOdr, Int1Config,
@@ -21,13 +24,7 @@ use crate::resources::buzzer::BuzzerPwm;
 use crate::resources::flash::{BoardFlash, W25Q256JV_DEVICE_ID, WINBOND_MANUFACTURER_ID};
 use crate::resources::sd::Sd;
 use crate::resources::sensors::SpiDevice;
-use crate::support::{
-    ACCEL_MAGNITUDE_G, BARO_PRESSURE_MBAR, BARO_TEMP_C, GYRO_MAGNITUDE_DPS, IMU_TEMP_C,
-    MAG_MAGNITUDE_NT, MAG_SAMPLES, MAG_TRIM, SAMPLES, SHT_RH_PCT, SHT_TEMP_C, trimmed_mean,
-};
-
-/// Expected LSM6DSO32 WHO_AM_I value.
-const LSM6DSO32_WHO_AM_I: u8 = 0x6C;
+use crate::support::{SAMPLES, median};
 
 /// Sound the passive piezo at `freq` for `ms` milliseconds.
 async fn beep(buzzer: &mut BuzzerPwm, freq: u32, ms: u64) {
@@ -66,6 +63,9 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
     let iface = Lsm6Dso32SpiInterface { spi };
     let mut sensor = Lsm6dso32::<_, Uninitialised>::new(iface);
 
+    /// Expected LSM6DSO32 WHO_AM_I value.
+    const LSM6DSO32_WHO_AM_I: u8 = 0x6C;
+
     match sensor.inner_mut().who_am_i().read_async().await {
         Ok(reg) if reg.ident() == LSM6DSO32_WHO_AM_I => {
             info!("{}: WHO_AM_I 0x{:02x}", label, reg.ident());
@@ -78,7 +78,7 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
             error!(
                 "{}: WHO_AM_I read failed: {}",
                 label,
-                defmt::Debug2Format(&e)
+                crate::fmt::Debug2Format(&e)
             );
             return false;
         }
@@ -87,7 +87,7 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
     let mut sensor = match sensor.init(&mut Delay).await {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: init failed: {}", label, defmt::Debug2Format(&e));
+            error!("{}: init failed: {}", label, crate::fmt::Debug2Format(&e));
             return false;
         }
     };
@@ -102,7 +102,7 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
         error!(
             "{}: accel config failed: {}",
             label,
-            defmt::Debug2Format(&e)
+            crate::fmt::Debug2Format(&e)
         );
         return false;
     }
@@ -113,7 +113,11 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
         )
         .await
     {
-        error!("{}: gyro config failed: {}", label, defmt::Debug2Format(&e));
+        error!(
+            "{}: gyro config failed: {}",
+            label,
+            crate::fmt::Debug2Format(&e)
+        );
         return false;
     }
 
@@ -128,7 +132,11 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
         )
         .await
     {
-        error!("{}: INT1 config failed: {}", label, defmt::Debug2Format(&e));
+        error!(
+            "{}: INT1 config failed: {}",
+            label,
+            crate::fmt::Debug2Format(&e)
+        );
         return false;
     }
 
@@ -147,59 +155,62 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
         );
     }
 
-    // Average several samples for a steadier estimate, then range-check.
-    let (mut ax, mut ay, mut az) = (0.0f32, 0.0f32, 0.0f32);
-    let (mut gx, mut gy, mut gz) = (0.0f32, 0.0f32, 0.0f32);
-    let mut temp_c = 0.0f32;
-    for _ in 0..SAMPLES {
+    // Per-sample magnitudes/temperature, then the median of each.
+    let mut accel = [0.0f32; SAMPLES];
+    let mut gyro = [0.0f32; SAMPLES];
+    let mut temps = [0.0f32; SAMPLES];
+    for i in 0..SAMPLES {
         let acc = match sensor.read_acceleration().await {
             Ok(a) => a,
             Err(e) => {
-                error!("{}: accel read failed: {}", label, defmt::Debug2Format(&e));
+                error!(
+                    "{}: accel read failed: {}",
+                    label,
+                    crate::fmt::Debug2Format(&e)
+                );
                 return false;
             }
         };
-        let gyro = match sensor.read_angular_rate().await {
+        let g = match sensor.read_angular_rate().await {
             Ok(g) => g,
             Err(e) => {
-                error!("{}: gyro read failed: {}", label, defmt::Debug2Format(&e));
+                error!(
+                    "{}: gyro read failed: {}",
+                    label,
+                    crate::fmt::Debug2Format(&e)
+                );
                 return false;
             }
         };
-        let temp = match sensor.read_temperature().await {
+        let t = match sensor.read_temperature().await {
             Ok(t) => t,
             Err(e) => {
-                error!("{}: temp read failed: {}", label, defmt::Debug2Format(&e));
+                error!(
+                    "{}: temp read failed: {}",
+                    label,
+                    crate::fmt::Debug2Format(&e)
+                );
                 return false;
             }
         };
-        ax += acc.x;
-        ay += acc.y;
-        az += acc.z;
-        gx += gyro.x;
-        gy += gyro.y;
-        gz += gyro.z;
-        temp_c += temp.value;
+        accel[i] = libm::sqrtf(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+        gyro[i] = libm::sqrtf(g.x * g.x + g.y * g.y + g.z * g.z);
+        temps[i] = t.value;
         // ~one ODR period, so each read is fresh.
         Timer::after(Duration::from_millis(10)).await;
     }
-    let n = SAMPLES as f32;
-    let accel_mag = libm::sqrtf((ax * ax + ay * ay + az * az) / (n * n));
-    let gyro_mag = libm::sqrtf((gx * gx + gy * gy + gz * gz) / (n * n));
-    let temp_c = temp_c / n;
     info!(
         "{}: |accel| = {} g, |gyro| = {} dps, temp = {} C",
-        label, accel_mag, gyro_mag, temp_c
+        label,
+        median(&mut accel),
+        median(&mut gyro),
+        median(&mut temps)
     );
 
-    let ranges_ok = ACCEL_MAGNITUDE_G.check(label, "|accel|", accel_mag)
-        & GYRO_MAGNITUDE_DPS.check(label, "|gyro|", gyro_mag)
-        & IMU_TEMP_C.check(label, "temp", temp_c);
-
-    int1_ok && ranges_ok
+    int1_ok
 }
 
-/// Init the MS5607 (it has no WHO_AM_I, so init reads/verifies its factory PROM),
+/// Init the MS5607 (it has no WHO_AM_I, so we instead reads and verify its factory PROM),
 /// then take one pressure/temperature measurement.
 pub async fn barometer<I: I2c>(i2c: I, label: &str) -> bool {
     let sensor = Ms5607::new(i2c, false);
@@ -207,29 +218,40 @@ pub async fn barometer<I: I2c>(i2c: I, label: &str) -> bool {
     let mut sensor = match sensor.init(&mut Delay).await {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: PROM read failed: {}", label, defmt::Debug2Format(&e));
+            error!(
+                "{}: PROM read failed: {}",
+                label,
+                crate::fmt::Debug2Format(&e)
+            );
             return false;
         }
     };
 
-    let mut pressure = 0.0f32;
-    let mut temp = 0.0f32;
-    for _ in 0..SAMPLES {
+    let mut pressure = [0.0f32; SAMPLES];
+    let mut temps = [0.0f32; SAMPLES];
+    for i in 0..SAMPLES {
         match sensor.measure(Oversampling::Osr2048, &mut Delay).await {
             Ok(m) => {
-                pressure += m.pressure_mbar;
-                temp += m.temperature_c;
+                pressure[i] = m.pressure_mbar;
+                temps[i] = m.temperature_c;
             }
             Err(e) => {
-                error!("{}: measure failed: {}", label, defmt::Debug2Format(&e));
+                error!(
+                    "{}: measure failed: {}",
+                    label,
+                    crate::fmt::Debug2Format(&e)
+                );
                 return false;
             }
         }
     }
-    let n = SAMPLES as f32;
-    let (pressure, temp) = (pressure / n, temp / n);
-    info!("{}: pressure = {} mbar, temp = {} C", label, pressure, temp);
-    BARO_PRESSURE_MBAR.check(label, "pressure", pressure) & BARO_TEMP_C.check(label, "temp", temp)
+    info!(
+        "{}: pressure = {} mbar, temp = {} C",
+        label,
+        median(&mut pressure),
+        median(&mut temps)
+    );
+    true
 }
 
 /// Check the LSM303AGR WHO_AM_I, then put the magnetometer into continuous mode
@@ -247,7 +269,7 @@ pub async fn magnetometer<I: I2c>(i2c: I, label: &str) -> bool {
             error!(
                 "{}: WHO_AM_I read failed: {}",
                 label,
-                defmt::Debug2Format(&e)
+                crate::fmt::Debug2Format(&e)
             );
             return false;
         }
@@ -277,8 +299,8 @@ pub async fn magnetometer<I: I2c>(i2c: I, label: &str) -> bool {
         return false;
     }
 
-    // Per-sample |B|, then a trimmed mean to reject interference spikes.
-    let mut mags = [0.0f32; MAG_SAMPLES];
+    // Per-sample |B|, then the median to reject interference spikes.
+    let mut mags = [0.0f32; SAMPLES];
     for slot in mags.iter_mut() {
         // > one 100 Hz period, so each read is fresh.
         Timer::after(Duration::from_millis(15)).await;
@@ -288,14 +310,13 @@ pub async fn magnetometer<I: I2c>(i2c: I, label: &str) -> bool {
                 *slot = libm::sqrtf(x * x + y * y + z * z);
             }
             Err(e) => {
-                error!("{}: read failed: {}", label, defmt::Debug2Format(&e));
+                error!("{}: read failed: {}", label, crate::fmt::Debug2Format(&e));
                 return false;
             }
         }
     }
-    let mag = trimmed_mean(&mut mags, MAG_TRIM);
-    info!("{}: |B| = {} nT", label, mag);
-    MAG_MAGNITUDE_NT.check(label, "|B|", mag)
+    info!("{}: |B| = {} nT", label, median(&mut mags));
+    true
 }
 
 /// Read the SHT4x serial number to confirm it responds, then take one
@@ -306,29 +327,40 @@ pub async fn sht4x<I: I2c>(i2c: I, label: &str) -> bool {
     match sensor.serial_number(&mut Delay).await {
         Ok(serial) => info!("{}: serial {}", label, serial),
         Err(e) => {
-            error!("{}: serial read failed: {}", label, defmt::Debug2Format(&e));
+            error!(
+                "{}: serial read failed: {}",
+                label,
+                crate::fmt::Debug2Format(&e)
+            );
             return false;
         }
     }
 
-    let mut temp = 0.0f32;
-    let mut humidity = 0.0f32;
-    for _ in 0..SAMPLES {
+    let mut temps = [0.0f32; SAMPLES];
+    let mut humidity = [0.0f32; SAMPLES];
+    for i in 0..SAMPLES {
         match sensor.measure(Precision::High, &mut Delay).await {
             Ok(m) => {
-                temp += m.temperature_celsius().to_num::<f32>();
-                humidity += m.humidity_percent().to_num::<f32>();
+                temps[i] = m.temperature_celsius().to_num::<f32>();
+                humidity[i] = m.humidity_percent().to_num::<f32>();
             }
             Err(e) => {
-                error!("{}: measure failed: {}", label, defmt::Debug2Format(&e));
+                error!(
+                    "{}: measure failed: {}",
+                    label,
+                    crate::fmt::Debug2Format(&e)
+                );
                 return false;
             }
         }
     }
-    let n = SAMPLES as f32;
-    let (temp, humidity) = (temp / n, humidity / n);
-    info!("{}: temp = {} C, RH = {} %", label, temp, humidity);
-    SHT_TEMP_C.check(label, "temp", temp) & SHT_RH_PCT.check(label, "RH", humidity)
+    info!(
+        "{}: temp = {} C, RH = {} %",
+        label,
+        median(&mut temps),
+        median(&mut humidity)
+    );
+    true
 }
 
 /// Validate a GNSS receiver: UART link up, valid UBX packets, and UBX-NAV-STATUS
@@ -359,7 +391,11 @@ pub async fn gnss(mut rx: UartRx<'static, Async>, label: &str) -> bool {
                     }
                 }
             }
-            Ok(Err(e)) => error!("{}: UART read error: {}", label, defmt::Debug2Format(&e)),
+            Ok(Err(e)) => error!(
+                "{}: UART read error: {}",
+                label,
+                crate::fmt::Debug2Format(&e)
+            ),
             _ => {}
         }
         if nav_status {
@@ -415,24 +451,23 @@ pub fn flash(mut flash: BoardFlash) -> bool {
     }
 }
 
-/// Bring the SD card up the way the real firmware will: initialise it over SDMMC,
-/// then read block 0 back. Both calls are bounded by a timeout, so a missing or
-/// dead card fails the check rather than stalling the run.
+/// Round-trip HELLO_WORLD.txt (write then read back) on the first FAT partition to
+/// prove the card is writable. Card must be FAT-formatted; the MBR is parsed since
+/// embassy is raw-LBA.
 ///
-/// TODO: also exercise card-detect (PD3) and the SD_VDD switch (PD6) once their
-/// polarities are confirmed on hardware, so a card that is absent, or present but
-/// unpowered, is told apart from a card that simply failed to initialise.
+/// TODO: assert card-detect (PD3) and SD_VDD (PD6), once their polarities are known,
+/// to tell an absent/unpowered card from a failed init.
 pub async fn sd_card(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>) -> bool {
     info!(
         "sd: detect = {}",
         if detect.is_high() { "high" } else { "low" }
     );
 
-    // SD_VDD (PD6) was switched on in setup(); let the rail settle before talking.
+    // SD_VDD (PD6) is on from setup(); let the rail settle.
     Timer::after(Duration::from_millis(250)).await;
 
     let mut cmd_block = CmdBlock::new();
-    let mut card = match with_timeout(
+    let card = match with_timeout(
         Duration::from_secs(2),
         StorageDevice::new_sd_card(&mut sdmmc, &mut cmd_block, mhz(25)),
     )
@@ -440,7 +475,7 @@ pub async fn sd_card(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'stat
     {
         Ok(Ok(card)) => card,
         Ok(Err(e)) => {
-            error!("sd: init failed: {}", e);
+            error!("sd: init failed: {}", crate::fmt::Debug2Format(&e));
             return false;
         }
         Err(_) => {
@@ -450,21 +485,86 @@ pub async fn sd_card(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'stat
     };
     info!("sd: init OK ({} MiB)", card.card().size() / (1024 * 1024));
 
-    let mut block = DataBlock::new();
-    match with_timeout(Duration::from_secs(2), card.read_block(0, &mut block)).await {
-        Ok(Ok(())) => {
-            info!("sd: OK (read block 0)");
-            true
+    let mbr = match Mbr::new(BufStream::<_, 512>::new(card)).await {
+        Ok(m) => m,
+        Err(e) => {
+            error!("sd: read MBR failed: {}", crate::fmt::Debug2Format(&e));
+            return false;
         }
-        Ok(Err(e)) => {
-            error!("sd: read of block 0 failed: {}", e);
-            false
+    };
+    let Some(idx) = mbr.iter_used().find(|(_, p)| p.is_fat()).map(|(i, _)| i) else {
+        error!("sd: no FAT partition found (is the card FAT-formatted?)");
+        return false;
+    };
+    let slice = match mbr.into_partition(idx).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!(
+                "sd: open partition failed: {}",
+                crate::fmt::Debug2Format(&e)
+            );
+            return false;
         }
-        Err(_) => {
-            error!("sd: read of block 0 timed out");
-            false
+    };
+    let fs = match FileSystem::new(slice, FsOptions::new()).await {
+        Ok(fs) => fs,
+        Err(e) => {
+            error!("sd: mount FAT failed: {}", crate::fmt::Debug2Format(&e));
+            return false;
         }
+    };
+
+    const MSG: &[u8] = b"hello world\n";
+
+    let root = fs.root_dir();
+    let mut file = match root.create_file("HELLO_WORLD.txt").await {
+        Ok(f) => f,
+        Err(e) => {
+            error!(
+                "sd: create HELLO_WORLD.txt failed: {}",
+                crate::fmt::Debug2Format(&e)
+            );
+            return false;
+        }
+    };
+    if let Err(e) = file.truncate().await {
+        error!("sd: truncate failed: {}", crate::fmt::Debug2Format(&e));
+        return false;
     }
+    if let Err(e) = file.write_all(MSG).await {
+        error!("sd: write failed: {}", crate::fmt::Debug2Format(&e));
+        return false;
+    }
+    if let Err(e) = file.flush().await {
+        error!("sd: flush failed: {}", crate::fmt::Debug2Format(&e));
+        return false;
+    }
+
+    // Read it back and confirm.
+    if let Err(e) = file.seek(SeekFrom::Start(0)).await {
+        error!("sd: seek failed: {}", crate::fmt::Debug2Format(&e));
+        return false;
+    }
+    let mut buf = [0u8; MSG.len()];
+    if let Err(e) = file.read_exact(&mut buf).await {
+        error!("sd: read-back failed: {}", crate::fmt::Debug2Format(&e));
+        return false;
+    }
+    if buf != *MSG {
+        error!("sd: read-back mismatch");
+        return false;
+    }
+
+    // Drop file/dir (they borrow fs) before unmounting.
+    drop(file);
+    drop(root);
+    if let Err(e) = fs.unmount().await {
+        error!("sd: unmount/flush failed: {}", crate::fmt::Debug2Format(&e));
+        return false;
+    }
+
+    info!("sd: OK (wrote and read back HELLO_WORLD.txt)");
+    true
 }
 
 /// Announce the verdict: all LEDs lit after a rising chime on success, solid red

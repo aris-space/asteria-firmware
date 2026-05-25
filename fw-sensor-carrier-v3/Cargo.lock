@@ -205,10 +205,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-device-adapters"
+version = "0.2.0"
+source = "git+https://github.com/MabezDev/embedded-fatfs#518528cc111fcf65c48abbdeb80735a38eada112"
+dependencies = [
+ "aligned",
+ "block-device-driver",
+ "embedded-io-async 0.7.0",
+]
+
+[[package]]
 name = "block-device-driver"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c051592f59fe68053524b4c4935249b806f72c1f544cfb7abe4f57c3be258e"
+source = "git+https://github.com/MabezDev/embedded-fatfs#518528cc111fcf65c48abbdeb80735a38eada112"
 dependencies = [
  "aligned",
 ]
@@ -604,12 +613,6 @@ dependencies = [
 [[package]]
 name = "embassy-net-driver"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "524eb3c489760508f71360112bca70f6e53173e6fe48fc5f0efd0f5ab217751d"
-
-[[package]]
-name = "embassy-net-driver"
-version = "0.2.0"
 source = "git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd#cf6a6cd33bc21907212384d9fe5f017ecf2e006c"
 dependencies = [
  "defmt 1.0.1",
@@ -618,11 +621,10 @@ dependencies = [
 [[package]]
 name = "embassy-net-driver-channel"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a07d2eb9f05a6fc876500949856ea1be40773d866d8cb99384f72d0ae4568c16"
+source = "git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd#cf6a6cd33bc21907212384d9fe5f017ecf2e006c"
 dependencies = [
  "embassy-futures",
- "embassy-net-driver 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "embassy-net-driver",
  "embassy-sync",
 ]
 
@@ -644,12 +646,12 @@ dependencies = [
  "embassy-embedded-hal",
  "embassy-futures",
  "embassy-hal-internal",
- "embassy-net-driver 0.2.0 (git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd)",
+ "embassy-net-driver",
  "embassy-sync",
  "embassy-time",
  "embassy-time-driver",
  "embassy-time-queue-utils",
- "embassy-usb-driver 0.2.0 (git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd)",
+ "embassy-usb-driver",
  "embassy-usb-synopsys-otg",
  "embedded-can",
  "embedded-hal 0.2.7",
@@ -728,15 +730,15 @@ dependencies = [
 [[package]]
 name = "embassy-usb"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a25746d8b152b72fbf2a217f489a083dbbe243f281f09184a1f2cfbe9bbb245f"
+source = "git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd#cf6a6cd33bc21907212384d9fe5f017ecf2e006c"
 dependencies = [
  "bitflags 2.11.0",
+ "defmt 1.0.1",
  "embassy-futures",
  "embassy-net-driver-channel",
  "embassy-sync",
  "embassy-time",
- "embassy-usb-driver 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "embassy-usb-driver",
  "embedded-io-async 0.7.0",
  "heapless 0.9.2",
  "ssmarshal",
@@ -746,19 +748,22 @@ dependencies = [
 [[package]]
 name = "embassy-usb-driver"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17119855ccc2d1f7470a39756b12068454ae27a3eabb037d940b5c03d9c77b7a"
-dependencies = [
- "embedded-io-async 0.6.1",
-]
-
-[[package]]
-name = "embassy-usb-driver"
-version = "0.2.0"
 source = "git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd#cf6a6cd33bc21907212384d9fe5f017ecf2e006c"
 dependencies = [
  "defmt 1.0.1",
  "embedded-io-async 0.7.0",
+]
+
+[[package]]
+name = "embassy-usb-logger"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d67df3b052328a06f8d1d9bb0cb8a013aff9740e43eaa03cc2015e8ccc48d8e5"
+dependencies = [
+ "embassy-futures",
+ "embassy-sync",
+ "embassy-usb",
+ "log",
 ]
 
 [[package]]
@@ -769,7 +774,7 @@ dependencies = [
  "critical-section",
  "defmt 1.0.1",
  "embassy-sync",
- "embassy-usb-driver 0.2.0 (git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd)",
+ "embassy-usb-driver",
 ]
 
 [[package]]
@@ -779,6 +784,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9d2e857f87ac832df68fa498d18ddc679175cf3d2e4aa893988e5601baf9438"
 dependencies = [
  "nb 1.1.0",
+]
+
+[[package]]
+name = "embedded-fatfs"
+version = "0.1.0"
+source = "git+https://github.com/MabezDev/embedded-fatfs#518528cc111fcf65c48abbdeb80735a38eada112"
+dependencies = [
+ "bitflags 1.3.2",
+ "embedded-io-async 0.7.0",
 ]
 
 [[package]]
@@ -866,6 +880,15 @@ checksum = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0"
 dependencies = [
  "defmt 1.0.1",
  "embedded-io 0.7.1",
+]
+
+[[package]]
+name = "embedded-partitions"
+version = "0.1.0"
+source = "git+https://github.com/MabezDev/embedded-fatfs#518528cc111fcf65c48abbdeb80735a38eada112"
+dependencies = [
+ "block-device-adapters",
+ "embedded-io-async 0.7.0",
 ]
 
 [[package]]
@@ -1015,21 +1038,28 @@ dependencies = [
 name = "fw-sensor-carrier-v3-validation"
 version = "0.1.0"
 dependencies = [
+ "block-device-adapters",
  "cortex-m",
  "cortex-m-rt",
  "defmt 1.0.1",
  "defmt-rtt",
  "embassy-embedded-hal",
  "embassy-executor",
+ "embassy-futures",
  "embassy-stm32",
  "embassy-sync",
  "embassy-time",
+ "embassy-usb",
+ "embassy-usb-logger",
+ "embedded-fatfs",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io-async 0.7.0",
+ "embedded-partitions",
  "heapless 0.9.2",
  "libm",
+ "log",
  "lsm303agr",
  "lsm6dso32",
  "ms5607",

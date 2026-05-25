@@ -4,11 +4,11 @@
 
 pub fn clocks_config() -> embassy_stm32::Config {
     use embassy_stm32::rcc::mux::{
-        I2c4sel, I2c1235sel, Saisel, Sdmmcsel, Usart16910sel, Usart234578sel,
+        I2c4sel, I2c1235sel, Saisel, Sdmmcsel, Usart16910sel, Usart234578sel, Usbsel,
     };
     use embassy_stm32::rcc::{
-        AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllDiv, PllMul, PllPreDiv, PllSource,
-        Sysclk, VoltageScale,
+        AHBPrescaler, APBPrescaler, Hse, HseMode, Hsi48Config, Pll, PllDiv, PllMul, PllPreDiv,
+        PllSource, Sysclk, VoltageScale,
     };
     use embassy_stm32::time::Hertz;
 
@@ -20,7 +20,7 @@ pub fn clocks_config() -> embassy_stm32::Config {
         mode: HseMode::Oscillator,
     });
 
-    config.rcc.voltage_scale = VoltageScale::Scale0; // GO INSANTLY FAST.
+    config.rcc.voltage_scale = VoltageScale::Scale0; // GO Insanely FAST.
 
     // PLL1: VCO = 16 MHz * 30 = 480 MHz
     //   P = 480/2 = 240 MHz -> SYSCLK
@@ -65,8 +65,8 @@ pub fn clocks_config() -> embassy_stm32::Config {
     config.rcc.mux.usart234578sel = Usart234578sel::PCLK1;
 
     // SDMMC needs a dedicated kernel clock: the default PLL1_Q is 240 MHz here,
-    // over the ~200 MHz max, so give it a 200 MHz PLL2_R. The firmware will need
-    // this too once it uses the SD card.
+    // over the ~200 MHz max, so give it a 200 MHz PLL2_R. TODO: we'll need to implement
+    // this in the firmware too...
     config.rcc.pll2 = Some(Pll {
         source: PllSource::HSE,
         prediv: PllPreDiv::DIV1,
@@ -76,6 +76,12 @@ pub fn clocks_config() -> embassy_stm32::Config {
         divr: Some(PllDiv::DIV2), // 400 / 2 = 200 MHz -> SDMMC kernel
     });
     config.rcc.mux.sdmmcsel = Sdmmcsel::PLL2_R;
+
+    // USB FS needs a 48 MHz kernel clock; HSI48 trimmed off USB SOF (CRS).
+    config.rcc.hsi48 = Some(Hsi48Config {
+        sync_from_usb: true,
+    });
+    config.rcc.mux.usbsel = Usbsel::HSI48;
 
     config
 }

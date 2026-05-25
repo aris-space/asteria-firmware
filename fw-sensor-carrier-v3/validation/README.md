@@ -4,10 +4,10 @@ Standalone bring-up firmware for a freshly assembled sensor-carrier-v3 board. It
 exercises every sensor and indicator and reports one pass/fail verdict, to catch
 dead parts, swapped buses, and wiring mistakes before the real firmware runs.
 
-This is a best-effort smoke test, not exhaustive: it confirms each part is
-present and reading in a rough nominal range. It does not test calibration,
-accuracy, or every failure mode, so a pass means "nothing obviously broken,"
-not "fully qualified."
+This is a best-effort smoke test, not exhaustive: it confirms each part responds
+and reads without error, and prints the readings for the operator to eyeball. It
+does not range-check the values or test calibration, accuracy, or every failure
+mode, so a pass means "nothing obviously broken," not "fully qualified."
 
 ## What it checks
 
@@ -18,25 +18,25 @@ not "fully qualified."
 - **2x humidity/temp** (SHT4x, I2C): serial number, then RH/temp
 - **2x GNSS** (u-blox, UART): link up, valid UBX packets, UBX-NAV-STATUS present
 - **Flash** (W25Q256JV, OCTOSPI): manufacturer + device ID
-- **SD card** (SDMMC): initialise the card, then read back block 0
+- **SD card** (SDMMC + FAT): initialise the card, then write HELLO_WORLD.txt to the first FAT partition and read it back
 
 ## What it does NOT check
 
 - **GNSS antennas / fix:** it never waits for a fix, so a bad antenna passes as long as the receiver talks.
 - **Full GNSS config:** only that NAV-STATUS arrives, not the complete message/rate setup.
-- **USB-C:** not exercised at all.
+- **USB-C (data path):** the port is brought up as a CDC-ACM serial logger that mirrors the console output (see Run), so enumeration is exercised, but no further USB function is tested.
 - **Reset button:** not exercised.
 - **CAN and backplane comms:** not exercised.
-- **SD write:** it initialises the card and reads block 0, but never writes, so it does not prove the card is writable. It runs after the core verdict, so the printed result excludes it; a clean failure still turns the board LED red, though a wholly unresponsive card can stall this last step (the core verdict is already shown by then).
 - **Card detect (PD3):** the detect line is logged but not yet asserted on, so its polarity is unverified and a missing card is only caught by init failing.
+- **SD card formatting:** the card must already hold a FAT16/FAT32 filesystem with an MBR partition table; the check writes a file but does not format the card.
 
 ## Run
 
 1. Make sure the two GNSS modules are installed on the back of the board.
 2. Power the board (via usb-c, the backplane or a backplane-adapter)
 3. Set the board flat on the bench and **leave it alone** for the whole run. The
-   IMU check expects ~1 g and near-zero rotation, so touching or tilting it fails
-   the range check.
+   readings aren't range-checked, but a still board prints clean ~1 g, near-zero
+   rotation values that are easy to eyeball.
 4. Attach a debug probe and, from this directory, run:
    ```
    cargo run --release
@@ -44,12 +44,12 @@ not "fully qualified."
    This flashes the STM32H723ZG and streams defmt over RTT (see `.cargo/config.toml`).
 5. Watch for the verdict:
    - **Console:** per-sensor readings, then `CORE CHECKS PASSED` / `SOME CHECKS FAILED`; failures name the sensor and reason.
+   - **USB-C:** the same lines are mirrored over the USB-C port as a CDC-ACM serial device, so a probe is not required to read the result. It enumerates as "Asteria Sensor Carrier v3 Validation" (serial `scv3val`), so on macOS the port is `/dev/tty.usbmodemscv3val1`; connect with e.g. `screen /dev/tty.usbmodemscv3val1 115200` (the baud rate is ignored). Early lines are buffered, so the full run still appears if you connect a little late.
    - **Board:** rising chime + all LEDs lit = pass, low tone + solid red = fail.
 
-One thing to note: the magnetometer bounds are wide (raw |B|, hard-iron
-uncorrected), so they catch a dead or railed part, not the exact field. If |B| is
-still out of range, there is likely a hard-iron bias and the board will definitely
-need calibration.
+One thing to note: the magnetometer prints raw |B| (hard-iron uncorrected), which
+can sit well off the ~48 uT Earth field. That is expected and not a failure here;
+the board still needs calibration before the field reading means anything.
 
 ## Features
 

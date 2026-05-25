@@ -9,9 +9,10 @@ pub mod leds;
 pub mod sd;
 pub mod sensors;
 pub mod uart;
+pub mod usb;
 
-// TODO: this resource map is a copy of the real firmware's
-// (fw-sensor-carrier-v3/app/src/resources). Ideally both move to a shared crate,
+// TODO: this resource map is (ideally) a copy of the real firmware's
+// (fw-sensor-carrier-v3/app/src/resources). Really, we should move this to a shared crate,
 // along with the patched assign_resources macro, instead of being duplicated.
 assign_resources! {
     buzzer: Buzzer {
@@ -95,6 +96,11 @@ assign_resources! {
         hold: PA6,
         wp: PA7,
         ncs: PG6,
+    }
+    usb: Usb {
+        periph: USB_OTG_HS,
+        dp: PA12,
+        dm: PA11,
     }
     sd_card: SdCard {
         periph: SDMMC1,
