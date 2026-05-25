@@ -1,14 +1,14 @@
 #![allow(dead_code)]
 
+//! Materialised per sensor samples. A sample is a measurement
+//! that tracks provenance and its timestamp. Downstream code should not
+//! see uncalibrated values or untimed observations.
+
 use embassy_time::Instant;
 use lsm6dso32::types::{Acceleration, AngularRate};
 use nalgebra::UnitQuaternion;
 
 use crate::sensors::{BarometerId, DhtId, GnssId, ImuId, MagnetometerId};
-
-// Per-sensor samples. Each carries its source sensor id and a measurement
-// timestamp inline; downstream code never sees uncalibrated values or
-// untimed observations.
 
 #[derive(Clone, Copy, Debug)]
 pub struct ImuSample {

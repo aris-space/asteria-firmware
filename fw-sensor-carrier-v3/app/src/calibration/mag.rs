@@ -62,7 +62,7 @@ async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
             cal
         }
         None => {
-            info!("{}: no cal in flash, using identity (default)", id);
+            warn!("{}: no cal in flash, using identity (default)", id);
             StoredCal::DEFAULT
         }
     }
