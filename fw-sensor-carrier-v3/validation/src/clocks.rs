@@ -1,9 +1,11 @@
-// TODO: this is a copy of the repo's shared/stm32h723_clocks.rs. Ideally the clock
+// TODO: this is (mostly) a copy of the repo's shared/stm32h723_clocks.rs. Ideally the clock
 // config (and the duplicated resources, see resources/mod.rs) move into a shared
 // crate instead of being copied here.
 
 pub fn clocks_config() -> embassy_stm32::Config {
-    use embassy_stm32::rcc::mux::{I2c4sel, I2c1235sel, Saisel, Usart16910sel, Usart234578sel};
+    use embassy_stm32::rcc::mux::{
+        I2c4sel, I2c1235sel, Saisel, Sdmmcsel, Usart16910sel, Usart234578sel,
+    };
     use embassy_stm32::rcc::{
         AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllDiv, PllMul, PllPreDiv, PllSource,
         Sysclk, VoltageScale,
@@ -61,6 +63,19 @@ pub fn clocks_config() -> embassy_stm32::Config {
     // (optional, handy defaults)
     config.rcc.mux.usart16910sel = Usart16910sel::PCLK2;
     config.rcc.mux.usart234578sel = Usart234578sel::PCLK1;
+
+    // SDMMC needs a dedicated kernel clock: the default PLL1_Q is 240 MHz here,
+    // over the ~200 MHz max, so give it a 200 MHz PLL2_R. The firmware will need
+    // this too once it uses the SD card.
+    config.rcc.pll2 = Some(Pll {
+        source: PllSource::HSE,
+        prediv: PllPreDiv::DIV1,
+        mul: PllMul::MUL25, // 16 MHz * 25 = 400 MHz VCO
+        divp: Some(PllDiv::DIV2),
+        divq: Some(PllDiv::DIV2),
+        divr: Some(PllDiv::DIV2), // 400 / 2 = 200 MHz -> SDMMC kernel
+    });
+    config.rcc.mux.sdmmcsel = Sdmmcsel::PLL2_R;
 
     config
 }

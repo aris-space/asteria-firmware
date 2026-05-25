@@ -14,7 +14,8 @@ impl SdCard {
             SDMMC1 => sdmmc::InterruptHandler<peripherals::SDMMC1>;
         });
 
-        // PD6 enables the card supply (assumed active-high); hold it high.
+        // SD_VDD comes from a TPS22918 load switch with an active-high enable
+        // (100k pulldown, so off at reset). Hold PD6 high to keep the card powered.
         let power = Output::new(self.power, Level::High, Speed::Low);
         // PD3 is card-detect; polarity is board-specific, so it is read-only here.
         let detect = Input::new(self.detect, Pull::Up);

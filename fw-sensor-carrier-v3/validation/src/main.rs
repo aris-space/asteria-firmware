@@ -19,22 +19,7 @@ use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
-    let mut clock_config = clocks::clocks_config();
-    {
-        // The default SDMMC kernel clock (PLL1_Q) is 240 MHz here, over the ~200 MHz
-        // max, so give it a dedicated 200 MHz PLL2_R. The firmware will need this too.
-        use embassy_stm32::rcc::{Pll, PllDiv, PllMul, PllPreDiv, PllSource, mux};
-        clock_config.rcc.pll2 = Some(Pll {
-            source: PllSource::HSE,
-            prediv: PllPreDiv::DIV1,
-            mul: PllMul::MUL25, // 16 MHz * 25 = 400 MHz VCO
-            divp: Some(PllDiv::DIV2),
-            divq: Some(PllDiv::DIV2),
-            divr: Some(PllDiv::DIV2), // 400 / 2 = 200 MHz -> SDMMC kernel
-        });
-        clock_config.rcc.mux.sdmmcsel = mux::Sdmmcsel::PLL2_R;
-    }
-    let p = embassy_stm32::init(clock_config);
+    let p = embassy_stm32::init(clocks::clocks_config());
 
     let r = resources::split(p);
 
@@ -78,11 +63,14 @@ async fn main(_spawner: Spawner) -> ! {
     };
     println!("{}", verdict);
 
-    // Announce the core verdict before the SD card, whose init can stall and must
-    // not swallow the LED/buzzer result.
+    // Announce the core verdict before the SD card. The idiomatic SDMMC init
+    // busy-waits on the command path (a timeout can't cancel a synchronous poll),
+    // so a missing or bad card can stall here and must not swallow the LED/buzzer
+    // result.
     checks::announce(&mut green, &mut yellow, &mut red, &mut buzzer, all_passed).await;
 
-    // SD runs last; if it fails, downgrade the verdict to red. Bounded, can't hang.
+    // SD runs last; on a clean failure flip the board to red. A wholly
+    // unresponsive card may stall this step, but the core verdict is already out.
     let (sdmmc, sd_detect, sd_power) = r.sd_card.setup();
     if !checks::sd_card(sdmmc, sd_detect, sd_power).await && all_passed {
         green.set_low();

@@ -2,7 +2,8 @@ use defmt::{error, info};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::mode::Async;
-use embassy_stm32::time::Hertz;
+use embassy_stm32::sdmmc::sd::{Addressable, CmdBlock, DataBlock, StorageDevice};
+use embassy_stm32::time::{Hertz, mhz};
 use embassy_stm32::usart::UartRx;
 use embassy_time::{Delay, Duration, Timer, with_timeout};
 use embedded_hal_async::i2c::I2c;
@@ -414,97 +415,56 @@ pub fn flash(mut flash: BoardFlash) -> bool {
     }
 }
 
-/// Validate the SD card at the register level (embassy's H723 SDMMC driver can
-/// hang): CMD0 -> CMD8 -> ACMD41 power-up. Bounded, so it cannot hang.
-pub async fn sd_card(_sdmmc: Sd, detect: Input<'static>, _power: Output<'static>) -> bool {
-    /// Issue one SDMMC command with bounded polling. Returns the short response,
-    /// or `None` on timeout.
-    fn sd_cmd(index: u8, arg: u32, expect_response: bool) -> Option<u32> {
-        use embassy_stm32::pac::SDMMC1;
-
-        SDMMC1.icr().write(|w| {
-            w.set_cmdsentc(true);
-            w.set_cmdrendc(true);
-            w.set_ccrcfailc(true);
-            w.set_ctimeoutc(true);
-        });
-        // Wait (bounded) for the command path state machine to be idle.
-        for _ in 0..100_000u32 {
-            if !SDMMC1.star().read().cpsmact() {
-                break;
-            }
-        }
-
-        SDMMC1.argr().write(|w| w.set_cmdarg(arg));
-        SDMMC1.cmdr().write(|w| {
-            w.set_cmdindex(index);
-            w.set_waitresp(if expect_response { 1 } else { 0 }); // 1 = short response
-            w.set_cpsmen(true);
-        });
-
-        for _ in 0..5_000_000u32 {
-            let s = SDMMC1.star().read();
-            if s.ctimeout() {
-                return None;
-            }
-            if expect_response {
-                // R3 (ACMD41) carries no CRC, so an expected CCRCFAIL is success.
-                if s.cmdrend() || s.ccrcfail() {
-                    return Some(SDMMC1.respr(0).read().cardstatus());
-                }
-            } else if s.cmdsent() {
-                return Some(0);
-            }
-        }
-        None
-    }
-
+/// Bring the SD card up the way the real firmware will: initialise it over SDMMC,
+/// then read block 0 back. Both calls are bounded by a timeout, so a missing or
+/// dead card fails the check rather than stalling the run.
+///
+/// TODO: also exercise card-detect (PD3) and the SD_VDD switch (PD6) once their
+/// polarities are confirmed on hardware, so a card that is absent, or present but
+/// unpowered, is told apart from a card that simply failed to initialise.
+pub async fn sd_card(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>) -> bool {
     info!(
-        "sd: detect={} pwr_en(PD6)={}",
-        if detect.is_high() { "high" } else { "low" },
-        (embassy_stm32::pac::GPIOD.idr().read().0 >> 6) & 1
+        "sd: detect = {}",
+        if detect.is_high() { "high" } else { "low" }
     );
 
-    // SD_VDD (PD6) was enabled in setup(); let it settle before talking.
+    // SD_VDD (PD6) was switched on in setup(); let the rail settle before talking.
     Timer::after(Duration::from_millis(250)).await;
 
-    use embassy_stm32::pac::SDMMC1;
-    SDMMC1.clkcr().write(|w| {
-        w.set_clkdiv(250); // ~init speed; the card responds fine at this rate
-        w.set_pwrsav(false);
-    });
-    SDMMC1.power().modify(|w| w.set_pwrctrl(0b11)); // power on
-    Timer::after(Duration::from_millis(10)).await;
-
-    // CMD0: go idle (no response).
-    sd_cmd(0, 0, false);
-    Timer::after(Duration::from_millis(2)).await;
-
-    // CMD8: voltage 2.7-3.6 V + check pattern 0xAA. A response means a v2 card is
-    // present and powered.
-    sd_cmd(8, 0x1AA, true);
-    if SDMMC1.star().read().0 & 0x40 == 0 {
-        error!("sd: no CMD8 response (card unpowered / not seated?)");
-        return false;
-    }
-
-    // ACMD41 (CMD55 then ACMD41) until the card reports power-up complete.
-    for _ in 0..500 {
-        sd_cmd(55, 0, true); // CMD55, RCA = 0
-        // HCS + full 2.7-3.6 V window; OCR bit 31 = power-up done.
-        match sd_cmd(41, 0x40FF_8000, true) {
-            Some(ocr) if ocr & 0x8000_0000 != 0 => {
-                info!("sd: OK (card powered up)");
-                return true;
-            }
-            Some(_) => {}
-            None => break,
+    let mut cmd_block = CmdBlock::new();
+    let mut card = match with_timeout(
+        Duration::from_secs(2),
+        StorageDevice::new_sd_card(&mut sdmmc, &mut cmd_block, mhz(25)),
+    )
+    .await
+    {
+        Ok(Ok(card)) => card,
+        Ok(Err(e)) => {
+            error!("sd: init failed: {}", e);
+            return false;
         }
-        Timer::after(Duration::from_millis(4)).await;
-    }
+        Err(_) => {
+            error!("sd: init timed out (card seated / powered?)");
+            return false;
+        }
+    };
+    info!("sd: init OK ({} MiB)", card.card().size() / (1024 * 1024));
 
-    error!("sd: ACMD41 never completed power-up (SD_VDD not coming up?)");
-    false
+    let mut block = DataBlock::new();
+    match with_timeout(Duration::from_secs(2), card.read_block(0, &mut block)).await {
+        Ok(Ok(())) => {
+            info!("sd: OK (read block 0)");
+            true
+        }
+        Ok(Err(e)) => {
+            error!("sd: read of block 0 failed: {}", e);
+            false
+        }
+        Err(_) => {
+            error!("sd: read of block 0 timed out");
+            false
+        }
+    }
 }
 
 /// Announce the verdict: all LEDs lit after a rising chime on success, solid red
