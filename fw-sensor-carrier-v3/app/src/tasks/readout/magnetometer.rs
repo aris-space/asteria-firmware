@@ -114,17 +114,17 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
             match self.sensor.magnetic_field().await {
                 Ok(field) => {
                     errors = 0;
-                    let (x_nt, y_nt, z_nt) = field.xyz_nt();
+                    let (x, y, z) = field.xyz_unscaled();
                     let raw = RawMagSample {
                         src: self.id,
                         ts: Instant::now(),
-                        x: x_nt as f32,
-                        y: y_nt as f32,
-                        z: z_nt as f32,
+                        x,
+                        y,
+                        z,
                     };
                     signals::submit_raw_mag_sample(raw);
                     signals::submit_mag_sample(calibration::mag::apply_calibration(raw));
-                    trace!("{} x={} y={} z={} nT", self.id, raw.x, raw.y, raw.z);
+                    trace!("{} x={} y={} z={} LSB", self.id, raw.x, raw.y, raw.z);
                 }
                 Err(e) => {
                     warn!("{} read error: {:?}", self.id, Debug2Format(&e));

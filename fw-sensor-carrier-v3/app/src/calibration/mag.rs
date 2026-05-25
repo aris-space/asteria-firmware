@@ -11,13 +11,13 @@ use serde::{Deserialize, Serialize};
 use super::Name;
 use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MAGNETOMETER_COUNT, MagnetometerId};
 use crate::signals::RAW_MAG_CHANNELS;
-use crate::storage::{self, Storage};
+use crate::storage::Storage;
 use crate::types::{MagSample, RawMagSample};
 
 pub fn apply_calibration(raw: RawMagSample) -> MagSample {
     let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].correction;
-    let board = sensor_to_board(Vector3::new(raw.x, raw.y, raw.z));
-    let corrected = cal.correct_board_field(board);
+    let board = sensor_to_board([raw.x, raw.y, raw.z]).map(|c| c as f32 * LSB_TO_NT);
+    let corrected = cal.correct_board_field(Vector3::from(board));
     MagSample {
         src: raw.src,
         ts: raw.ts - DELAY,
@@ -41,18 +41,14 @@ pub fn applied() -> [StoredCal; MAGNETOMETER_COUNT] {
 
 pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT] {
     [
-        storage.load::<StoredCal>(&KEYS[0]).await,
-        storage.load::<StoredCal>(&KEYS[1]).await,
+        storage.load::<StoredCal>(&MAG_BUS_1.key()).await,
+        storage.load::<StoredCal>(&MAG_BUS_2.key()).await,
     ]
 }
 
 /// Live per-sensor cal, written once at startup; a reset reloads and applies it.
 static CAL: OnceLock<[StoredCal; MAGNETOMETER_COUNT]> = OnceLock::new();
 
-const KEYS: [storage::Key; MAGNETOMETER_COUNT] = [
-    storage::key(MAG_BUS_1.name()),
-    storage::key(MAG_BUS_2.name()),
-];
 const DEFAULTS: [StoredCal; MAGNETOMETER_COUNT] = [StoredCal::DEFAULT; MAGNETOMETER_COUNT];
 
 /// How long ago (relative to read-completion time) the physical
@@ -60,7 +56,7 @@ const DEFAULTS: [StoredCal; MAGNETOMETER_COUNT] = [StoredCal::DEFAULT; MAGNETOME
 const DELAY: Duration = Duration::from_millis(0);
 
 async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
-    match storage.load::<StoredCal>(&KEYS[id.index()]).await {
+    match storage.load::<StoredCal>(&id.key()).await {
         Some(cal) => {
             info!("{}: cal \"{}\" loaded from flash", id, cal.name.as_str());
             cal
@@ -72,9 +68,9 @@ async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
     }
 }
 
-// deci-uT keeps the ~50 uT field well inside i16; results scale back to nT.
-const NT_TO_DECI_UT: f32 = 1e-2;
-const DECI_UT_TO_NT: f32 = 100.0;
+// The LSM303AGR reports 150 nT per count; the solver fits in native counts and
+// results scale back to nT.
+const LSB_TO_NT: f32 = 150.0;
 
 /// What's persisted per sensor: the applied correction plus metadata about the
 /// fit that produced it, so a stored cal can be inspected later (`cal show`).
@@ -155,7 +151,7 @@ impl Correction {
 
     fn from_solver(hard_iron: [f32; 3], soft_iron: [[f32; 3]; 3]) -> Self {
         Self {
-            hard_iron: hard_iron.map(|h| h * DECI_UT_TO_NT),
+            hard_iron: hard_iron.map(|h| h * LSB_TO_NT),
             soft_iron: [
                 soft_iron[0][0],
                 soft_iron[0][1],
@@ -234,8 +230,12 @@ impl MagCal {
             let remaining = deadline - Instant::now();
             let next = select(sub_0.next_message_pure(), sub_1.next_message_pure());
             match with_timeout(remaining, next).await {
-                Ok(Either::First(s)) => self.solvers[0].push_sample(to_board_counts(s)),
-                Ok(Either::Second(s)) => self.solvers[1].push_sample(to_board_counts(s)),
+                Ok(Either::First(s)) => {
+                    self.solvers[0].push_sample(sensor_to_board([s.x, s.y, s.z]))
+                }
+                Ok(Either::Second(s)) => {
+                    self.solvers[1].push_sample(sensor_to_board([s.x, s.y, s.z]))
+                }
                 Err(_) => break,
             }
         }
@@ -275,7 +275,7 @@ impl MagCal {
             }
         };
 
-        let field_nt = cal.field_strength * DECI_UT_TO_NT;
+        let field_nt = cal.field_strength * LSB_TO_NT;
         info!(
             "{}: fit {} B={=f32} nT err={=f32} %",
             id,
@@ -304,7 +304,7 @@ impl MagCal {
             correction,
         };
         let record = StoredCal::from_fit(Name::new(name), &fit, samples);
-        let outcome = if storage.store(&KEYS[id.index()], &record).await {
+        let outcome = if storage.store(&id.key(), &record).await {
             CalOutcome::Stored(fit)
         } else {
             CalOutcome::StoreFailed(fit)
@@ -377,13 +377,8 @@ impl fmt::Display for CalReport {
     }
 }
 
-/// Sensor-to-board axis remap on this board: negate all three axes.
-fn sensor_to_board(v: Vector3<f32>) -> Vector3<f32> {
-    -v
-}
-
-/// Raw sample to the solver's board-frame deci-uT counts: negate all axes
-/// (sensor-to-board) and scale nT to deci-uT to keep the field inside `i16`.
-fn to_board_counts(s: RawMagSample) -> [i16; 3] {
-    [s.x, s.y, s.z].map(|v| (-v * NT_TO_DECI_UT) as i16)
+/// Sensor-to-board axis remap on this board: negate all three axes, in the
+/// magnetometer's native counts (so the cal solver fits at full resolution).
+fn sensor_to_board(counts: [i16; 3]) -> [i16; 3] {
+    counts.map(i16::saturating_neg)
 }

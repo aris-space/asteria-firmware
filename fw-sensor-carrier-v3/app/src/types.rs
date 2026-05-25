@@ -80,16 +80,17 @@ pub struct RawGnssSample {
     pub pvt: Pvt,
 }
 
-/// Raw magnetometer sample, sensor frame, nT. The driver applies the
-/// counts -> nT scale; we apply axis remap and iron correction in
+/// Raw magnetometer sample, sensor frame, native LSM303AGR counts (i16 LSB).
+/// The cal solver fits these counts directly; conversion to physical units (nT)
+/// happens at the calibration boundary in
 /// `crate::calibration::mag::apply_calibration`.
 #[derive(Clone, Copy, Debug)]
 pub struct RawMagSample {
     pub src: MagnetometerId,
     pub ts: Instant,
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+    pub x: i16,
+    pub y: i16,
+    pub z: i16,
 }
 
 /// Calibrated magnetometer sample, board frame, nT.

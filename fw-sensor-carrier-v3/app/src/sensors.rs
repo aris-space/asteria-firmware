@@ -26,6 +26,12 @@ macro_rules! define_sensor_family {
                     _ => "<unknown>",
                 }
             }
+
+            /// This id's flash storage key, derived from its [`name`](Self::name).
+            #[allow(dead_code)]
+            pub const fn key(self) -> crate::storage::Key {
+                crate::storage::key(self.name())
+            }
         }
 
         impl core::fmt::Debug for $name {

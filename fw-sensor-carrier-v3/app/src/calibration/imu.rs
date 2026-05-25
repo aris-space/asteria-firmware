@@ -11,7 +11,7 @@ use super::Name;
 use super::imu_fit::{Estimator, Fit};
 use crate::sensors::{IMU_0, IMU_1, IMU_COUNT, ImuId};
 use crate::signals::RAW_IMU_CHANNELS;
-use crate::storage::{self, Storage};
+use crate::storage::Storage;
 use crate::types::{ImuSample, RawImuSample};
 
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
@@ -48,15 +48,14 @@ pub fn applied() -> [StoredCal; IMU_COUNT] {
 
 pub async fn stored(storage: &Storage) -> [Option<StoredCal>; IMU_COUNT] {
     [
-        storage.load::<StoredCal>(&KEYS[0]).await,
-        storage.load::<StoredCal>(&KEYS[1]).await,
+        storage.load::<StoredCal>(&IMU_0.key()).await,
+        storage.load::<StoredCal>(&IMU_1.key()).await,
     ]
 }
 
 /// Live per-IMU cal, written once at startup; a reset reloads and applies it.
 static CAL: OnceLock<[StoredCal; IMU_COUNT]> = OnceLock::new();
 
-const KEYS: [storage::Key; IMU_COUNT] = [storage::key(IMU_0.name()), storage::key(IMU_1.name())];
 const DEFAULTS: [StoredCal; IMU_COUNT] = [StoredCal::DEFAULT; IMU_COUNT];
 
 /// How long ago (relative to read-completion time) the physical
@@ -64,13 +63,13 @@ const DEFAULTS: [StoredCal; IMU_COUNT] = [StoredCal::DEFAULT; IMU_COUNT];
 const DELAY: Duration = Duration::from_millis(0);
 
 async fn load_one(storage: &Storage, id: ImuId) -> StoredCal {
-    match storage.load::<StoredCal>(&KEYS[id.index()]).await {
+    match storage.load::<StoredCal>(&id.key()).await {
         Some(cal) => {
             info!("{}: cal \"{}\" loaded from flash", id, cal.name.as_str());
             cal
         }
         None => {
-            info!("{}: no cal in flash, using identity (default)", id);
+            warn!("{}: no cal in flash, using identity (default)", id);
             StoredCal::DEFAULT
         }
     }
@@ -266,8 +265,8 @@ impl ImuCal {
                 Correction::from_parts(fit.rotation.rotation, bias[1]),
             ),
         ];
-        let stored =
-            storage.store(&KEYS[0], &cal[0]).await && storage.store(&KEYS[1], &cal[1]).await;
+        let stored = storage.store(&IMU_0.key(), &cal[0]).await
+            && storage.store(&IMU_1.key(), &cal[1]).await;
         info!(
             "imu cal \"{}\" done: misalign {=f32} deg, {=usize} pairs, stored {=bool}",
             name, fit.rotation.misalign_deg, fit.pairs, stored
