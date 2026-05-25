@@ -1,0 +1,19 @@
+# Inherits rustflags, target, and DEFMT_LOG from ../.cargo/config.toml.
+# Adds a runner so `cargo run` flashes and streams defmt over RTT via probe-rs.
+[target.thumbv7em-none-eabihf]
+runner = [
+    "probe-rs",
+    "run",
+    "--chip",
+    "STM32H723ZG",
+    #"--no-catch-hardfault",
+    #"--no-catch-reset",
+    #"--chip-erase",
+    "--log-format",
+    "{t} {L:severity} {s}",
+]
+
+# Show app logs at info, plus embassy's internal SDMMC trace, to debug the SD
+# init. Overrides the inherited DEFMT_LOG=trace so SPI/I2C/DMA don't flood.
+[env]
+DEFMT_LOG = "info,embassy_stm32::sdmmc=trace"

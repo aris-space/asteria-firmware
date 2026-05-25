@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["app"]
+members = ["app", "validation"]
 
 [patch.crates-io]
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }

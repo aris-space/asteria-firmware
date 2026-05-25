@@ -1,0 +1,52 @@
+[package]
+name = "fw-sensor-carrier-v3-validation"
+version = "0.1.0"
+edition = "2024"
+authors = ["Louis Schell <louis.schell1@gmx.de>"]
+
+[dependencies]
+# cortex-m setup
+cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+
+# Embassy stuff
+embassy-stm32 = { version = "*", features = [
+    "stm32h723zg",
+    "single-bank",
+    "time-driver-any",
+    "memory-x",
+    "unstable-pac",
+    "exti",
+    "defmt",           # enables embassy's internal trace/debug logs (e.g. SDMMC)
+] }
+embassy-time = { version = "*", features = ["tick-hz-32_768", "defmt-timestamp-uptime-us"] }
+embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread"] }
+embassy-sync = "*"
+embassy-embedded-hal = "*"
+
+assign-resources = "0.5.0"
+static_cell = "2.1.1"
+
+# Sensor drivers (same versions/features as the firmware app)
+ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
+lsm6dso32 = { path = "../../crates/devices/lsm6dso32", features = ["defmt-03"] }
+lsm303agr = { version = "1.1.0", features = ["async"] }
+sht4x = { version = "0.2.0", features = ["embedded-hal-async", "defmt"] }
+ublox = { version = "0.4.5", default-features = false }
+
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+embedded-hal-bus = { version = "0.3.0", features = ["async"] }
+embedded-io-async = { version = "0.7.0", default-features = false, features = ["defmt"] }
+
+defmt = { version = "1.0.1" }
+defmt-rtt = "1"
+
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+heapless = "0.9.2"
+
+[[bin]]
+name = "fw-sensor-carrier-v3-validation"
+test = false
+doctest = false
+bench = false
