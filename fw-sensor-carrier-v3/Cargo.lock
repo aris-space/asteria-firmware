@@ -1015,7 +1015,6 @@ dependencies = [
 name = "fw-sensor-carrier-v3-validation"
 version = "0.1.0"
 dependencies = [
- "assign-resources",
  "cortex-m",
  "cortex-m-rt",
  "defmt 1.0.1",

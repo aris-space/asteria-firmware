@@ -6,10 +6,14 @@ use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
 use super::{Bus1, Bus2};
+#[cfg(feature = "bdma-bus2")]
 use crate::bounce_i2c::BounceI2c;
 
 pub type SharedI2c = embassy_stm32::i2c::I2c<'static, Async, I2cMaster>;
 pub type SharedI2cBus = &'static Mutex<NoopRawMutex, SharedI2c>;
+/// With `bdma-bus2`, bus2 is I2C4 whose BDMA can only reach SRAM4, so it is staged
+/// through [`BounceI2c`]; see its docs.
+#[cfg(feature = "bdma-bus2")]
 pub type SharedBounceBus = &'static Mutex<NoopRawMutex, BounceI2c<SharedI2c>>;
 
 fn config() -> i2c::Config {
@@ -20,7 +24,10 @@ fn config() -> i2c::Config {
 }
 
 static SHARED_I2C_BUS_1: StaticCell<Mutex<NoopRawMutex, SharedI2c>> = StaticCell::new();
+#[cfg(feature = "bdma-bus2")]
 static SHARED_I2C_BUS_2: StaticCell<Mutex<NoopRawMutex, BounceI2c<SharedI2c>>> = StaticCell::new();
+#[cfg(not(feature = "bdma-bus2"))]
+static SHARED_I2C_BUS_2: StaticCell<Mutex<NoopRawMutex, SharedI2c>> = StaticCell::new();
 
 impl Bus1 {
     pub fn setup(self) -> SharedI2cBus {
@@ -44,6 +51,9 @@ impl Bus1 {
     }
 }
 
+// With `bdma-bus2`: I2C4 (D3 domain), BDMA-served, staged through SRAM4 by
+// BounceI2c. Without it: the hardware-bridged I2C2 on general DMA, used directly.
+#[cfg(feature = "bdma-bus2")]
 impl Bus2 {
     pub fn setup(self) -> SharedBounceBus {
         bind_interrupts!(struct Bus2Irqs {
@@ -63,5 +73,28 @@ impl Bus2 {
             config(),
         );
         SHARED_I2C_BUS_2.init(Mutex::new(BounceI2c::new(i2c)))
+    }
+}
+
+#[cfg(not(feature = "bdma-bus2"))]
+impl Bus2 {
+    pub fn setup(self) -> SharedI2cBus {
+        bind_interrupts!(struct Bus2Irqs {
+            I2C2_EV => i2c::EventInterruptHandler<peripherals::I2C2>;
+            I2C2_ER => i2c::ErrorInterruptHandler<peripherals::I2C2>;
+            DMA2_STREAM0 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH0>;
+            DMA2_STREAM1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA2_CH1>;
+        });
+
+        let i2c = i2c::I2c::new(
+            self.periph,
+            self.scl,
+            self.sda,
+            self.tx_dma,
+            self.rx_dma,
+            Bus2Irqs,
+            config(),
+        );
+        SHARED_I2C_BUS_2.init(Mutex::new(i2c))
     }
 }

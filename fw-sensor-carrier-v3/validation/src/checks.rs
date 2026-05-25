@@ -516,7 +516,7 @@ pub async fn sd_card(_sdmmc: Sd, detect: Input<'static>, _power: Output<'static>
     false
 }
 
-/// Announce the verdict: solid green after a rising chime on success, solid red
+/// Announce the verdict: all LEDs lit after a rising chime on success, solid red
 /// after a low warning tone on failure.
 pub async fn announce(
     green: &mut Output<'static>,
@@ -535,6 +535,8 @@ pub async fn announce(
             Timer::after(Duration::from_millis(40)).await;
         }
         green.set_high();
+        yellow.set_high();
+        red.set_high();
     } else {
         for freq in [400u32, 300] {
             beep(buzzer, freq, 250).await;

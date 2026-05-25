@@ -7,6 +7,8 @@ use embassy_executor::Spawner;
 use defmt_rtt as _;
 use panic_probe as _;
 
+mod assign_resources;
+#[cfg(feature = "bdma-bus2")]
 mod bounce_i2c;
 mod checks;
 mod resources;
@@ -101,6 +103,7 @@ async fn main(_spawner: Spawner) -> ! {
     let (sdmmc, sd_detect, sd_power) = r.sd_card.setup();
     if !checks::sd_card(sdmmc, sd_detect, sd_power).await && all_passed {
         green.set_low();
+        yellow.set_low();
         red.set_high();
     }
 

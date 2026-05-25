@@ -16,13 +16,11 @@ use embedded_hal_async::i2c::{ErrorType, I2c};
 /// bytes; 64 is comfortable headroom.
 const BOUNCE_LEN: usize = 64;
 
-/// The bounce buffer, placed in SRAM4 by the linker (see `build.rs` / `memory.x`).
-/// Its contents are scratch, so the section is left uninitialised.
+/// Bounce buffer placed in SRAM4 by the linker (see `build.rs`).
 #[unsafe(link_section = ".sram4")]
 static mut BUFFER: [u8; BOUNCE_LEN] = [0; BOUNCE_LEN];
 
-/// Guards [`BUFFER`] so it is lent out exactly once. Lives in normal RAM so it is
-/// zero-initialised at reset (the SRAM4 section is not).
+/// Guards the SRAM4 buffer so it is lent out exactly once.
 static TAKEN: AtomicBool = AtomicBool::new(false);
 
 /// Wraps an I2C bus whose DMA is BDMA, staging transfers through SRAM4.
@@ -39,8 +37,7 @@ impl<I> BounceI2c<I> {
             !TAKEN.swap(true, Ordering::AcqRel),
             "BounceI2c: the SRAM4 bounce buffer is already in use"
         );
-        // SAFETY: TAKEN guarantees this &mut is unique, and BUFFER lives in SRAM4
-        // where BDMA can reach it.
+        // SAFETY: TAKEN guarantees this &mut is unique; BUFFER lives in SRAM4.
         let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUFFER) };
         Self { inner, buf }
     }

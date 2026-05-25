@@ -23,7 +23,6 @@ embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-t
 embassy-sync = "*"
 embassy-embedded-hal = "*"
 
-assign-resources = "0.5.0"
 static_cell = "2.1.1"
 
 # Sensor drivers (same versions/features as the firmware app)
@@ -44,6 +43,12 @@ defmt-rtt = "1"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 heapless = "0.9.2"
 libm = "0.2"
+
+[features]
+# Sensor block 2 is on I2C4 (D3 domain, BDMA) and staged through SRAM4. Disable
+# to fall back to the hardware-bridged I2C2 path (no BDMA, no SRAM4).
+default = ["bdma-bus2"]
+bdma-bus2 = []
 
 [[bin]]
 name = "fw-sensor-carrier-v3-validation"

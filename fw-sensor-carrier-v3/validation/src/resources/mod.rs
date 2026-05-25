@@ -1,5 +1,6 @@
-use assign_resources::assign_resources;
 use embassy_stm32::{Peri, Peripherals, peripherals};
+
+use crate::assign_resources;
 
 pub mod buses;
 pub mod buzzer;
@@ -66,12 +67,23 @@ assign_resources! {
         tx_dma: DMA2_CH2,
         rx_dma: DMA2_CH7,
     }
+    // Sensor block 2. With `bdma-bus2` it is I2C4 (BDMA, staged through SRAM4);
+    // without it, the hardware-bridged I2C2 on general DMA.
+    #[cfg(feature = "bdma-bus2")]
     bus2: Bus2 {
         periph: I2C4,
         scl: PF14,
         sda: PF15,
         tx_dma: BDMA_CH0,
         rx_dma: BDMA_CH1,
+    }
+    #[cfg(not(feature = "bdma-bus2"))]
+    bus2: Bus2 {
+        periph: I2C2,
+        scl: PB10,
+        sda: PB11,
+        tx_dma: DMA2_CH0,
+        rx_dma: DMA2_CH1,
     }
     flash: Flash {
         periph: OCTOSPI1,
