@@ -58,6 +58,7 @@ One I2C device per bus: bus1 = I2C5, bus2 = I2C4.
 
 ## Features
 
-- **`use-i2c4`** (planned, not yet wired): bus2 runs on I2C4, which can only DMA
-  via BDMA, and BDMA reaches SRAM4 only. This feature will gate the SRAM4 bounce
-  buffer that stages those transfers.
+- **`use-i2c4`** (default on): bus2 (sensor block 2) runs on I2C4. I2C4 can only
+  DMA via BDMA, and BDMA reaches SRAM4 only, so transfers are staged through an
+  SRAM4 bounce buffer. Disable with `--no-default-features` to fall back to the
+  hardware-bridged I2C2 path (no BDMA, no SRAM4).

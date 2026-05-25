@@ -17,7 +17,7 @@ fn main() {
     // .bss): cortex-m-rt folds `INSERT AFTER .bss` sections into its .bss-zeroing
     // by extending __ebss past them, which for a RAM_D3 section would make startup
     // zero all of memory. .uninit is past every RAM bound symbol.
-    if env::var_os("CARGO_FEATURE_BDMA_BUS2").is_some() {
+    if env::var_os("CARGO_FEATURE_USE_I2C4").is_some() {
         fs::write(
             out.join("sram4.x"),
             "SECTIONS {\n  .sram4 (NOLOAD) : ALIGN(4) {\n    *(.sram4 .sram4.*)\n  } > RAM_D3\n} INSERT AFTER .uninit;\n",

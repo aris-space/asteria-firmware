@@ -47,8 +47,8 @@ libm = "0.2"
 [features]
 # Sensor block 2 is on I2C4 (D3 domain, BDMA) and staged through SRAM4. Disable
 # to fall back to the hardware-bridged I2C2 path (no BDMA, no SRAM4).
-default = ["bdma-bus2"]
-bdma-bus2 = []
+default = ["use-i2c4"]
+use-i2c4 = []
 
 [[bin]]
 name = "fw-sensor-carrier-v3-validation"

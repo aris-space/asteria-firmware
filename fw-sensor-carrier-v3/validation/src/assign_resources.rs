@@ -1,10 +1,6 @@
-//! Vendored from the `assign-resources` crate, patched so group-level attributes
-//! (`$outer`, e.g. `#[cfg(...)]`) and field-level attributes (`$inner`) propagate
-//! to *every* generated site: the `AssignedResources` field and the
-//! `split_resources!` assignment, not just the group struct definition. That lets
-//! a single resource group be `#[cfg]`-gated (e.g. swap bus2 between I2C4 and I2C2
-//! by feature). The upstream macro only applied them to the struct definition,
-//! which left the field/split references dangling under `#[cfg]`.
+//! Vendored from the `assign-resources` crate, patched to propagate attributes
+//! (e.g. `#[cfg]`) to every generated site so a single resource group can be
+//! feature-gated. Upstream applies them only to the group struct definition.
 
 #[macro_export]
 macro_rules! assign_resources {

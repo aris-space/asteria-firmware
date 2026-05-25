@@ -6,14 +6,14 @@ use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
 use super::{Bus1, Bus2};
-#[cfg(feature = "bdma-bus2")]
+#[cfg(feature = "use-i2c4")]
 use crate::bounce_i2c::BounceI2c;
 
 pub type SharedI2c = embassy_stm32::i2c::I2c<'static, Async, I2cMaster>;
 pub type SharedI2cBus = &'static Mutex<NoopRawMutex, SharedI2c>;
-/// With `bdma-bus2`, bus2 is I2C4 whose BDMA can only reach SRAM4, so it is staged
+/// With `use-i2c4`, bus2 is I2C4 whose BDMA can only reach SRAM4, so it is staged
 /// through [`BounceI2c`]; see its docs.
-#[cfg(feature = "bdma-bus2")]
+#[cfg(feature = "use-i2c4")]
 pub type SharedBounceBus = &'static Mutex<NoopRawMutex, BounceI2c<SharedI2c>>;
 
 fn config() -> i2c::Config {
@@ -24,9 +24,9 @@ fn config() -> i2c::Config {
 }
 
 static SHARED_I2C_BUS_1: StaticCell<Mutex<NoopRawMutex, SharedI2c>> = StaticCell::new();
-#[cfg(feature = "bdma-bus2")]
+#[cfg(feature = "use-i2c4")]
 static SHARED_I2C_BUS_2: StaticCell<Mutex<NoopRawMutex, BounceI2c<SharedI2c>>> = StaticCell::new();
-#[cfg(not(feature = "bdma-bus2"))]
+#[cfg(not(feature = "use-i2c4"))]
 static SHARED_I2C_BUS_2: StaticCell<Mutex<NoopRawMutex, SharedI2c>> = StaticCell::new();
 
 impl Bus1 {
@@ -51,9 +51,9 @@ impl Bus1 {
     }
 }
 
-// With `bdma-bus2`: I2C4 (D3 domain), BDMA-served, staged through SRAM4 by
+// With `use-i2c4`: I2C4 (D3 domain), BDMA-served, staged through SRAM4 by
 // BounceI2c. Without it: the hardware-bridged I2C2 on general DMA, used directly.
-#[cfg(feature = "bdma-bus2")]
+#[cfg(feature = "use-i2c4")]
 impl Bus2 {
     pub fn setup(self) -> SharedBounceBus {
         bind_interrupts!(struct Bus2Irqs {
@@ -76,7 +76,7 @@ impl Bus2 {
     }
 }
 
-#[cfg(not(feature = "bdma-bus2"))]
+#[cfg(not(feature = "use-i2c4"))]
 impl Bus2 {
     pub fn setup(self) -> SharedI2cBus {
         bind_interrupts!(struct Bus2Irqs {

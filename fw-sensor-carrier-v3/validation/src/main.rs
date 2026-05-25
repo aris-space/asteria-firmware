@@ -8,7 +8,7 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 mod assign_resources;
-#[cfg(feature = "bdma-bus2")]
+#[cfg(feature = "use-i2c4")]
 mod bounce_i2c;
 mod checks;
 mod resources;

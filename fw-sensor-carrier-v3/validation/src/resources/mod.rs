@@ -67,9 +67,9 @@ assign_resources! {
         tx_dma: DMA2_CH2,
         rx_dma: DMA2_CH7,
     }
-    // Sensor block 2. With `bdma-bus2` it is I2C4 (BDMA, staged through SRAM4);
+    // Sensor block 2. With `use-i2c4` it is I2C4 (BDMA, staged through SRAM4);
     // without it, the hardware-bridged I2C2 on general DMA.
-    #[cfg(feature = "bdma-bus2")]
+    #[cfg(feature = "use-i2c4")]
     bus2: Bus2 {
         periph: I2C4,
         scl: PF14,
@@ -77,7 +77,7 @@ assign_resources! {
         tx_dma: BDMA_CH0,
         rx_dma: BDMA_CH1,
     }
-    #[cfg(not(feature = "bdma-bus2"))]
+    #[cfg(not(feature = "use-i2c4"))]
     bus2: Bus2 {
         periph: I2C2,
         scl: PB10,
