@@ -30,7 +30,7 @@ async fn usb_logger_task(driver: UsbDriver) {
     let mut config = Config::new(0xc0de, 0xcafe);
     config.manufacturer = Some("Asteria");
     config.product = Some("Sensor Board Validation");
-    config.serial_number = Some("sensor-board");
+    config.serial_number = Some("sensorboard");
     config.max_power = 100;
     config.max_packet_size_0 = 64;
 

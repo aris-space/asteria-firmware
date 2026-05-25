@@ -1,10 +1,11 @@
-# sensor-carrier-v3 hardware validation
+# Sensor Board hardware validation
 
-Standalone bring-up firmware for a freshly assembled sensor-carrier-v3 board. It
-exercises every sensor and indicator and reports one pass/fail verdict, to catch
+This piece of firmware is used to validate the hardware of a fully assembled sensor board without having to debug any overhead complexity resulting from using the actual sensor board firmware.
+
+This firmware exercises every sensor and indicator and reports one pass/fail verdict, to catch
 dead parts, swapped buses, and wiring mistakes before the real firmware runs.
 
-This is a best-effort smoke test, not exhaustive: it confirms each part responds
+This is a best-effort smoke test, and by no means exhaustive: it confirms each part responds
 and reads without error, and prints the readings for the operator to eyeball. It
 does not range-check the values or test calibration, accuracy, or every failure
 mode, so a pass means "nothing obviously broken," not "fully qualified."
@@ -32,29 +33,43 @@ mode, so a pass means "nothing obviously broken," not "fully qualified."
 
 ## Run
 
-1. Make sure the two GNSS modules are installed on the back of the board.
-2. Power the board (via usb-c, the backplane or a backplane-adapter)
-3. Set the board flat on the bench and **leave it alone** for the whole run. The
-   readings aren't range-checked, but a still board prints clean ~1 g, near-zero
-   rotation values that are easy to eyeball.
-4. Attach a debug probe and, from this directory, run:
-   ```
-   cargo run --release
-   ```
-   This flashes the STM32H723ZG and streams defmt over RTT (see `.cargo/config.toml`).
-5. Watch for the verdict:
-   - **Console:** per-sensor readings, then `CORE CHECKS PASSED` / `SOME CHECKS FAILED`; failures name the sensor and reason.
-   - **USB-C:** the same lines are mirrored over the USB-C port as a CDC-ACM serial device, so a probe is not required to read the result. It enumerates as "Asteria Sensor Carrier v3 Validation" (serial `scv3val`), so on macOS the port is `/dev/tty.usbmodemscv3val1`; connect with e.g. `screen /dev/tty.usbmodemscv3val1 115200` (the baud rate is ignored). Early lines are buffered, so the full run still appears if you connect a little late.
-   - **Board:** rising chime + all LEDs lit = pass, low tone + solid red = fail.
+1. Install the two GNSS modules on the back of the board.
+2. Power the board (USB-C, the backplane, or a backplane adapter).
+3. Set it flat on the bench and **leave it alone** for the whole run. The readings
+   aren't range-checked, but a still board prints clean ~1 g and near-zero rotation
+   that are easy to eyeball.
+4. With a debug probe attached, run `cargo run --release` from this directory. It
+   flashes the STM32H723ZG and streams the log over RTT (see `.cargo/config.toml`).
 
-One thing to note: the magnetometer prints raw |B| (hard-iron uncorrected), which
-can sit well off the ~48 uT Earth field. That is expected and not a failure here;
-the board still needs calibration before the field reading means anything.
+## Reading the result
 
-## Features
+The verdict comes out three ways:
 
-- **`use-i2c4`** (default off): by default bus2 (sensor block 2) uses the
-  hardware-bridged I2C2 path (no BDMA, no SRAM4). Enable with `--features use-i2c4`
-  to instead run bus2 on I2C4, which can only DMA via BDMA (SRAM4 only), so
-  transfers are staged through an SRAM4 bounce buffer. Boards with the red bridge
-  installed, or v4 boards, should stay on the default I2C2 path.
+- **Board:** rising chime + all LEDs lit = pass; low tone + solid red = fail.
+- **RTT console:** the `cargo run` terminal prints each sensor's reading, then
+  `CORE CHECKS PASSED` / `SOME CHECKS FAILED` (failures name the sensor and reason).
+- **USB-C serial:** the same lines mirrored over the USB-C port, so you can read
+  them without a debug probe (see [Reading over USB-C](#reading-over-usb-c)).
+
+## Reading over USB-C
+
+Plug into the USB-C port; the board shows up as a USB CDC-ACM serial device named
+"Asteria Sensor Board Validation" (serial `sensorboard`). List the serial ports and
+pick the one that matches:
+
+```
+ls /dev/tty.usbmodem*   # macOS
+ls /dev/ttyACM*         # Linux
+```
+
+Then open that port with any serial console clients. Really any works (picocom, minicom, screen, cu), but [`tio`](https://github.com/tio/tio) is nice because it handles disconnects/reconnects gracefully.
+
+```
+tio <the port from above>
+```
+
+Early lines are buffered, so the whole run still shows if you connect a little late.
+
+## Note on the magnetometer
+
+It prints raw |B| (hard-iron uncorrected), which can sit well off the ~48 uT Earth field. That is expected and not a failure here. It's primarily an indicator of how much calibration the board needs.

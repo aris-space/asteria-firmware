@@ -12,8 +12,8 @@ pub type SharedI2cBus = &'static Mutex<NoopRawMutex, SharedI2c>;
 
 fn config() -> i2c::Config {
     let mut config = i2c::Config::default();
-    config.frequency = embassy_stm32::time::khz(100);
-    config.timeout = embassy_time::Duration::from_millis(50);
+    config.frequency = embassy_stm32::time::khz(400);
+    config.timeout = embassy_time::Duration::from_millis(1000);
     config
 }
 
