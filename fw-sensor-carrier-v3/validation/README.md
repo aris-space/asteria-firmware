@@ -20,8 +20,6 @@ not "fully qualified."
 - **Flash** (W25Q256JV, OCTOSPI): manufacturer + device ID
 - **SD card** (SDMMC): register-level CMD0 / CMD8 / ACMD41 power-up
 
-One I2C device per bus: bus1 = I2C5, bus2 = I2C4.
-
 ## What it does NOT check
 
 - **GNSS antennas / fix:** it never waits for a fix, so a bad antenna passes as long as the receiver talks.
@@ -29,36 +27,33 @@ One I2C device per bus: bus1 = I2C5, bus2 = I2C4.
 - **USB-C:** not exercised at all.
 - **Reset button:** not exercised.
 - **CAN and backplane comms:** not exercised.
-- **SD card** is optional: it runs after the core verdict and only drops the verdict to red, so a board with no card still passes the core checks.
+- **SD read/write:** only that a card powers up, not reads or writes. It runs after the core verdict, so the printed result excludes it, but a missing or failed card still turns the board LED red.
 
 ## Run
 
-1. Set the board flat on the bench and **leave it alone** for the whole run. The
+1. Make sure the two GNSS modules are installed on the back of the board.
+2. Power the board (via usb-c, the backplane or a backplane-adapter)
+2. Set the board flat on the bench and **leave it alone** for the whole run. The
    IMU check expects ~1 g and near-zero rotation, so touching or tilting it fails
    the range check.
-2. Make sure the two GNSS modules are installed on the back of the board.
 3. Attach a debug probe and, from this directory, run:
    ```
    cargo run --release
    ```
    This flashes the STM32H723ZG and streams defmt over RTT (see `.cargo/config.toml`).
-4. Watch the console log and the board's LEDs/buzzer for the verdict (below).
+4. Watch for the verdict:
+   - **Console:** per-sensor readings, then `CORE CHECKS PASSED` / `SOME CHECKS FAILED`; failures name the sensor and reason.
+   - **Board:** rising chime + all LEDs lit = pass, low tone + solid red = fail.
 
-## Result
-
-- **Console:** per-sensor readings, then `CORE CHECKS PASSED` / `SOME CHECKS FAILED`;
-  failures name the sensor and reason.
-- **Board:** rising chime + all LEDs lit = pass, low tone + solid red = fail.
-
-## Watch out for
-
-- Magnetometer bounds are wide (raw |B|, hard-iron uncorrected): catches dead/railed, not exact field.
-- SD card runs last because embassy's H723 SDMMC driver can hang; it falls back to bounded register-level polling. A missing/unseated card fails CMD8.
-- `main` moves the SDMMC kernel clock to PLL2_R (200 MHz); the default 240 MHz hangs init. The real firmware will need the same.
+One thing to note: the magnetometer bounds are wide (raw |B|, hard-iron
+uncorrected), so they catch a dead or railed part, not the exact field. If |B| is
+still out of range, there is likely a hard-iron bias and the board will definitely
+need calibration.
 
 ## Features
 
-- **`use-i2c4`** (default on): bus2 (sensor block 2) runs on I2C4. I2C4 can only
-  DMA via BDMA, and BDMA reaches SRAM4 only, so transfers are staged through an
-  SRAM4 bounce buffer. Disable with `--no-default-features` to fall back to the
-  hardware-bridged I2C2 path (no BDMA, no SRAM4).
+- **`use-i2c4`** (default off): by default bus2 (sensor block 2) uses the
+  hardware-bridged I2C2 path (no BDMA, no SRAM4). Enable with `--features use-i2c4`
+  to instead run bus2 on I2C4, which can only DMA via BDMA (SRAM4 only), so
+  transfers are staged through an SRAM4 bounce buffer. Boards with the red bridge
+  installed, or v4 boards, should stay on the default I2C2 path.

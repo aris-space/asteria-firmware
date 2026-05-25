@@ -45,9 +45,9 @@ heapless = "0.9.2"
 libm = "0.2"
 
 [features]
-# Sensor block 2 is on I2C4 (D3 domain, BDMA) and staged through SRAM4. Disable
-# to fall back to the hardware-bridged I2C2 path (no BDMA, no SRAM4).
-default = ["use-i2c4"]
+default = []
+# Enable to put sensor block 2 on I2C4 (D3 domain, BDMA) staged through SRAM4.
+# Off (default) uses the hardware-bridged I2C2 path (no BDMA, no SRAM4).
 use-i2c4 = []
 
 [[bin]]
