@@ -38,10 +38,10 @@ This is a best-effort smoke test, not a full qualification. It confirms that eac
 
 ## CPU frequency boost option byte
 
-The 544 MHz core clock needs the **CPUFREQ_BOOST** option byte set, once per board. If a fresh board panics in `embassy_stm32::init()` at startup, that's why. Set it with STM32CubeProgrammer (probe attached):
+The 544 MHz core clock needs the **CPU_FREQ_BOOST** option byte set, once per board. If a fresh board panics in `embassy_stm32::init()` at startup, that's why. Set it with STM32CubeProgrammer (probe attached):
 
 ```
-STM32_Programmer_CLI -c port=SWD -ob CPUFREQ_BOOST=1
+STM32_Programmer_CLI -c port=SWD -ob CPU_FREQ_BOOST=1
 ```
 
 ## Reading the result
