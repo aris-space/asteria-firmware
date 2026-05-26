@@ -22,10 +22,10 @@ pub const SECTOR_SIZE: u32 = 4096;
 pub const CAPACITY: u32 = 32 * 1024 * 1024;
 
 /// Mfr + device id a healthy W25Q256JV returns to the 0x90 command: Winbond
-/// (0xEF) and device id 0x18. Read over the addressed path, which clocks
+/// (0xEF) and device id 0x20. Read over the addressed path, which clocks
 /// cleanly. A reading of all-zeros or all-ones means the chip isn't answering
 /// (wiring, power, or clock).
-pub const EXPECTED_MFR_DEVICE_ID: [u8; 2] = [0xEF, 0x18];
+pub const EXPECTED_MFR_DEVICE_ID: [u8; 2] = [0xEF, 0x20];
 
 mod cmd {
     pub const WRITE_ENABLE: u8 = 0x06;
