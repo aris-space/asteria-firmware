@@ -26,7 +26,7 @@ embassy-embedded-hal = "*"
 embassy-usb = { version = "*", features = ["defmt"] }
 embassy-futures = "*"
 # CDC-ACM serial logger over USB-C; mirrors the defmt output via the `log` facade.
-embassy-usb-logger = "0.6.0"
+embassy-usb-logger = "*"
 log = "0.4"
 
 static_cell = "2.1.1"

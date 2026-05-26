@@ -11,6 +11,7 @@ embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6
 embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
 embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
 embassy-usb-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
+embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
 # Unify block-device-driver with the git embedded-fatfs stack so embassy's SDMMC
 # StorageDevice BlockDevice impl satisfies block-device-adapters' BufStream bound.
 block-device-driver = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc" }
