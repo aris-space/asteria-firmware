@@ -36,6 +36,14 @@ This is a best-effort smoke test, not a full qualification. It confirms that eac
 3. Set it flat on the bench and **leave it alone** for the whole run. The readings aren't range-checked, but a still board prints clean ~1 g and near-zero rotation that are easy to eyeball.
 4. With a debug probe attached, run `cargo run --release` from this directory. It flashes the STM32H723ZG and streams the log over RTT (see `.cargo/config.toml`).
 
+## CPU frequency boost option byte
+
+The 544 MHz core clock needs the **CPUFREQ_BOOST** option byte set, once per board. If a fresh board panics in `embassy_stm32::init()` at startup, that's why. Set it with STM32CubeProgrammer (probe attached):
+
+```
+STM32_Programmer_CLI -c port=SWD -ob CPUFREQ_BOOST=1
+```
+
 ## Reading the result
 
 The verdict comes out three ways:

@@ -67,7 +67,9 @@ pub fn cpu_freq_boost() -> bool {
         info!("cpu_freq_boost: option byte set");
         true
     } else {
-        error!("cpu_freq_boost: option byte NOT set (core capped at 520 MHz)");
+        error!(
+            "cpu_freq_boost: option byte NOT set; the >520 MHz config needs it. Set CPUFREQ_BOOST per the README"
+        );
         false
     }
 }
