@@ -21,7 +21,9 @@ use sht4x::{Precision, Sht4xAsync};
 use ublox::{FixedLinearBuffer, PacketRef, Parser};
 
 use crate::resources::buzzer::BuzzerPwm;
-use crate::resources::flash::{BoardFlash, W25Q01JV_DEVICE_ID, WINBOND_MANUFACTURER_ID};
+use crate::resources::flash::{
+    BoardFlash, W25Q_IM_MEMORY_TYPE, W25Q01JV_CAPACITY, WINBOND_MANUFACTURER_ID,
+};
 use crate::resources::sd::Sd;
 use crate::resources::sensors::SpiDevice;
 use crate::support::{SAMPLES, median};
@@ -442,34 +444,34 @@ pub async fn gnss(mut rx: UartRx<'static, Async>, label: &str) -> bool {
     true
 }
 
-/// Confirm the W25Q01JV over OCTOSPI: read its manufacturer + device ID, then
-/// enable quad mode and read a span over all four IO lines, comparing it against a
-/// single-line read of the same span to exercise IO2/IO3.
+/// Confirm the W25Q01JV over OCTOSPI: read its 3-byte JEDEC ID, then enable quad
+/// mode and read a span over all four IO lines, comparing it against a single-line
+/// read of the same span to exercise IO2/IO3.
 pub fn flash(mut flash: BoardFlash) -> bool {
-    let id = flash.read_id();
-    info!(
-        "flash: manufacturer 0x{:02x}, device 0x{:02x}",
-        id.manufacturer, id.device
-    );
-
-    if id.manufacturer != WINBOND_MANUFACTURER_ID || id.device != W25Q01JV_DEVICE_ID {
+    let id = flash.read_jedec_id();
+    if id.manufacturer != WINBOND_MANUFACTURER_ID
+        || id.memory_type != W25Q_IM_MEMORY_TYPE
+        || id.capacity != W25Q01JV_CAPACITY
+    {
         // 0x00 = line stayed low (chip not driving); 0xff = idle high / floating.
         error!(
-            "flash: unexpected ID (mfr 0x{:02x} dev 0x{:02x}, expected 0xEF 0x20)",
-            id.manufacturer, id.device
+            "flash: unexpected JEDEC ID (0x{:02x} 0x{:02x} 0x{:02x}, expected 0xEF 0x70 0x21)",
+            id.manufacturer, id.memory_type, id.capacity
         );
         return false;
     }
-    info!("flash: OK (Winbond W25Q01JV)");
+    info!(
+        "flash: Winbond W25Q01JV-IM, 1Gbit DTR (JEDEC 0x{:02x} 0x{:02x} 0x{:02x})",
+        id.manufacturer, id.memory_type, id.capacity
+    );
 
     if !flash.enable_quad() {
         error!("flash: could not set quad-enable (QE) bit");
         return false;
     }
 
-    // A single-line and a quad read of the same span must agree. On erased flash
-    // (all 0xff) this still catches an IO2/IO3 line stuck low or shorted; varied
-    // contents catch a stuck-high or swapped line too.
+    // A single-line and a quad read of the same span must agree; even on erased
+    // flash (all 0xff) this catches an IO2/IO3 line stuck low, shorted, or swapped.
     let mut single = [0u8; 32];
     let mut quad = [0u8; 32];
     flash.read_data(0x00_0000, &mut single);

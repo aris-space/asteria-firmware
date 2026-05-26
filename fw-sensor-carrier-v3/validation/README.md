@@ -16,7 +16,7 @@ This is a best-effort smoke test, not a full qualification. It confirms that eac
 - **2x magnetometer** (LSM303AGR, I2C): WHO_AM_I, then |B|
 - **2x humidity/temp** (SHT4x, I2C): serial number, then RH/temp
 - **2x GNSS** (u-blox, UART): link up, valid UBX packets, UBX-NAV-STATUS present
-- **Flash** (W25Q01JV, OCTOSPI quad): manufacturer + device ID, then a quad readback compared against a single-line read to exercise IO2/IO3 (sets the QE bit, a one-time persistent write)
+- **Flash** (W25Q01JV, OCTOSPI quad): JEDEC ID, then a quad readback compared against a single-line read to exercise IO2/IO3 (sets the QE bit, a one-time persistent write)
 - **SD card** (SDMMC + FAT): initialise the card, then write HELLO_WORLD.txt to the first FAT partition and read it back
 
 ## What it does NOT check

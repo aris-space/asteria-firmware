@@ -1,7 +1,6 @@
-//! On-board W25Q01JV NOR flash on OCTOSPI1, brought up over quad SPI. IO2 (/WP)
-//! and IO3 (/HOLD) are OCTOSPI data lines; external 10k pull-ups (R49/R50) hold
-//! them high through the single-line phases (ID read, QE-enable) before the Quad
-//! Enable bit is set. Mirrors the firmware's flash bring-up.
+//! On-board W25Q01JV NOR flash on OCTOSPI1, over quad SPI. IO2 (/WP) and IO3
+//! (/HOLD) double as data lines; external pull-ups (R49/R50) keep them high during
+//! the single-line phases until Quad Enable is set. Mirrors the firmware bring-up.
 
 use embassy_stm32::mode::Blocking;
 use embassy_stm32::ospi::{
@@ -14,10 +13,14 @@ use super::Flash;
 /// JEDEC manufacturer byte a healthy W25Q01JV returns: Winbond.
 pub const WINBOND_MANUFACTURER_ID: u8 = 0xEF;
 
-/// Device ID this board's W25Q01JV returns to the 0x90 command.
-pub const W25Q01JV_DEVICE_ID: u8 = 0x20;
+/// JEDEC memory-type byte for the W25Q *IM (DTR) variants; the non-DTR IQ parts
+/// report 0x40 instead.
+pub const W25Q_IM_MEMORY_TYPE: u8 = 0x70;
 
-const READ_MANUFACTURER_DEVICE_ID: u8 = 0x90;
+/// JEDEC capacity byte for the 1Gbit W25Q01JV.
+pub const W25Q01JV_CAPACITY: u8 = 0x21;
+
+const READ_JEDEC_ID: u8 = 0x9F;
 const WRITE_ENABLE: u8 = 0x06;
 const READ_STATUS_1: u8 = 0x05;
 const READ_STATUS_2: u8 = 0x35;
@@ -30,10 +33,11 @@ const STATUS_2_QE: u8 = 0x02;
 /// Write In Progress (S0), in status register 1.
 const STATUS_1_WIP: u8 = 0x01;
 
-/// Manufacturer and device bytes read from the flash.
-pub struct FlashId {
+/// JEDEC ID bytes read from the flash.
+pub struct JedecId {
     pub manufacturer: u8,
-    pub device: u8,
+    pub memory_type: u8,
+    pub capacity: u8,
 }
 
 pub struct BoardFlash {
@@ -41,26 +45,22 @@ pub struct BoardFlash {
 }
 
 impl BoardFlash {
-    /// Read manufacturer + device ID via 0x90. Its 24-bit address phase warms up
-    /// read sampling so both bytes latch; the address-less 0x9F read garbles
-    /// everything past byte 0.
-    pub fn read_id(&mut self) -> FlashId {
-        let mut buf = [0u8; 2];
+    /// Read the 3-byte JEDEC ID (0x9F): manufacturer, memory type, capacity.
+    pub fn read_jedec_id(&mut self) -> JedecId {
+        let mut buf = [0u8; 3];
         let _ = self.ospi.blocking_read(
             &mut buf,
             TransferConfig {
                 iwidth: OspiWidth::SING,
-                instruction: Some(READ_MANUFACTURER_DEVICE_ID as u32),
-                adwidth: OspiWidth::SING,
-                address: Some(0x00_0000), // returns manufacturer then device
-                adsize: AddressSize::_24bit,
+                instruction: Some(READ_JEDEC_ID as u32),
                 dwidth: OspiWidth::SING,
                 ..Default::default()
             },
         );
-        FlashId {
+        JedecId {
             manufacturer: buf[0],
-            device: buf[1],
+            memory_type: buf[1],
+            capacity: buf[2],
         }
     }
 
@@ -81,9 +81,10 @@ impl BoardFlash {
                 ..Default::default()
             },
         );
-        // The status-register write is non-volatile; spin until WIP clears (each
-        // status read is itself a SPI transaction, so this paces the poll).
-        for _ in 0..100_000 {
+        // Wait for the non-volatile status write to finish (WIP clears). Each poll is
+        // a SPI read so it self-paces; the bound is a timeout against a wedged bit.
+        const WIP_POLL_LIMIT: u32 = 100_000;
+        for _ in 0..WIP_POLL_LIMIT {
             if self.read_status(READ_STATUS_1) & STATUS_1_WIP == 0 {
                 return self.read_status(READ_STATUS_2) & STATUS_2_QE != 0;
             }
@@ -151,20 +152,15 @@ impl BoardFlash {
 fn config() -> OspiConfig {
     OspiConfig {
         device_size: MemorySize::_128MiB,
-        // hclk3 (272 MHz) / 8 = 34 MHz: conservative for bring-up.
+        // PRESCALER divides the kernel clock by value+1, so 7 = /8:
+        // hclk3 (272 MHz) / 8 = 34 MHz, conservative for bring-up.
         clock_prescaler: 7,
-        // Sample MISO half a clock late so the flash output (delayed by the round
-        // trip through the series resistors) is settled when latched; without it
-        // reads past the first byte garble.
-        sample_shifting: true,
         ..Default::default()
     }
 }
 
 impl Flash {
     pub fn setup(self) -> BoardFlash {
-        // IO2 (/WP) and IO3 (/HOLD) become OCTOSPI data lines; external pull-ups
-        // hold them high during the single-line phases before QE is set.
         let ospi = Ospi::new_blocking_quadspi(
             self.periph,
             self.sck,
