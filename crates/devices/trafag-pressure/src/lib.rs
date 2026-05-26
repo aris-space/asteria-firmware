@@ -3,7 +3,7 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 pub mod pressures;
-use crate::pressures::{TrafagPSens, VOLTAGE_RANGE};
+use crate::pressures::{OVERFLOW_THRESHOLD_V, TrafagPSens, UNDERFLOW_THRESHOLD_V, VOLTAGE_RANGE};
 use embassy_stm32::adc::{
     Adc, AdcChannel, AdcConfig, AnyAdcChannel, Instance, RxDma, SampleTime, SpecialConverter,
     Temperature, VrefInt,
@@ -19,6 +19,8 @@ use embedded_utils::info;
 const VREFBUF_CALIB: f32 = 3.0;
 
 const ADC_CALIBRATION_SAMPLES: u64 = 50;
+const ADC_MAX_RAW: u16 = 4095;
+const ADC_SATURATION_RAW: u16 = ADC_MAX_RAW - 4;
 
 pub struct ADCPressure<'a, ADC: Instance<Regs = embassy_stm32::pac::adc::Adc>, DMA_CH: RxDma<ADC>> {
     adc: Adc<'a, ADC>,
@@ -107,7 +109,17 @@ where
             irq,
         )
         .await;
-        let voltage = (raw as i16 as f32) * self.vref_calib / 4095.0;
+        let voltage = raw as f32 * self.vref_calib / ADC_MAX_RAW as f32;
+
+        if raw >= ADC_SATURATION_RAW {
+            return f32::NAN;
+        }
+        if voltage <= UNDERFLOW_THRESHOLD_V {
+            return f32::NEG_INFINITY;
+        }
+        if voltage >= OVERFLOW_THRESHOLD_V {
+            return f32::INFINITY;
+        }
 
         self.sensor.si_range[0]
             + (self.sensor.si_range[1] - self.sensor.si_range[0])
@@ -140,7 +152,7 @@ pub fn config_vref_buf() {
     let csr = VREFBUF.csr();
 
     csr.modify(|csr| {
-        csr.set_vrs(Vrs::VREF0);
+        csr.set_vrs(Vrs::VREF2);
 
         csr.set_envr(true);
         csr.set_hiz(Hiz::CONNECTED);
