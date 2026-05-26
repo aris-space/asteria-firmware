@@ -1,14 +1,12 @@
 # Sensor Board hardware validation
 
-This piece of firmware is used to validate the hardware of a fully assembled sensor board without having to debug any overhead complexity resulting from using the actual sensor board firmware.
+This firmware validates a fully assembled sensor board with a minimal test program, avoiding the overhead of the full flight firmware.
 
-This firmware exercises every sensor and indicator and reports one pass/fail verdict, to catch
-dead parts, swapped buses, and wiring mistakes before the real firmware runs.
+It is also a bring-up sandbox for the clock tree, bus speeds, and peripheral setup. The goal is to prove that the low-level configuration is sound in isolation before reusing it in the more complex flight firmware. Ideally, the clock config and resource map here will later be shared with that firmware instead of duplicated (see the TODOs in `clocks.rs` and `resources/mod.rs`).
 
-This is a best-effort smoke test, and by no means exhaustive: it confirms each part responds
-and reads without error, and prints the readings for the operator to eyeball. It
-does not range-check the values or test calibration, accuracy, or every failure
-mode, so a pass means "nothing obviously broken," not "fully qualified."
+The firmware exercises every sensor and indicator, then reports a single pass/fail verdict to catch dead parts, swapped buses, and wiring mistakes early.
+
+This is a best-effort smoke test, not a full qualification. It confirms that each checked part responds and can be read without obvious errors, and prints the readings for the operator to inspect. It does not range-check values or test calibration, accuracy, or every failure mode, so a pass means "nothing obviously broken," not "fully qualified."
 
 ## What it checks
 
@@ -69,7 +67,3 @@ tio <the port from above>
 ```
 
 Early lines are buffered, so the whole run still shows if you connect a little late.
-
-## Note on the magnetometer
-
-It prints raw |B| (hard-iron uncorrected), which can sit well off the ~48 uT Earth field. That is expected and not a failure here. It's primarily an indicator of how much calibration the board needs.
