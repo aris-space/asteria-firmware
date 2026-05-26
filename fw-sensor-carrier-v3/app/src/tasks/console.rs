@@ -163,13 +163,11 @@ async fn console_task(mut class: Class, storage: &'static Storage) -> ! {
         else {
             continue;
         };
-        loop {
-            match editor.readline(PROMPT, &mut io).await {
-                // `line` borrows the editor, not `io`, so handler output can keep
-                // flowing through `io` while the parsed command is in hand.
-                Ok(line) => handle_line(&mut io, line, storage).await,
-                Err(_) => break, // host disconnected or terminal error
-            }
+        // `line` borrows the editor, not `io`, so handler output can keep flowing
+        // through `io` while the parsed command is in hand. A read error means the
+        // host disconnected or the terminal failed; drop back to wait_connection.
+        while let Ok(line) = editor.readline(PROMPT, &mut io).await {
+            handle_line(&mut io, line, storage).await;
         }
     }
 }
@@ -438,9 +436,9 @@ async fn flash_erase(class: &mut ConsoleIo<'_>, storage: &Storage) {
 fn write_bytes(out: &mut impl fmt::Write, bytes: u32) -> fmt::Result {
     const KIB: u32 = 1024;
     const MIB: u32 = 1024 * KIB;
-    if bytes % MIB == 0 {
+    if bytes.is_multiple_of(MIB) {
         write!(out, "{} MiB", bytes / MIB)
-    } else if bytes % KIB == 0 {
+    } else if bytes.is_multiple_of(KIB) {
         write!(out, "{} KiB", bytes / KIB)
     } else {
         write!(out, "{} B", bytes)

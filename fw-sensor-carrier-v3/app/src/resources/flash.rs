@@ -172,7 +172,7 @@ impl NorFlash for BoardFlash {
     const ERASE_SIZE: usize = SECTOR_SIZE as usize;
 
     async fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
-        if from % SECTOR_SIZE != 0 || to % SECTOR_SIZE != 0 {
+        if !from.is_multiple_of(SECTOR_SIZE) || !to.is_multiple_of(SECTOR_SIZE) {
             return Err(FlashError::NotAligned);
         }
         if to > CAPACITY || from > to {
