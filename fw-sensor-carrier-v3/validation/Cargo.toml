@@ -1,5 +1,5 @@
 [package]
-name = "fw-sensor-carrier-v3-validation"
+name = "sensor-board-validation"
 version = "0.1.0"
 edition = "2024"
 authors = ["Louis Schell <louis.schell1@gmx.de>"]
@@ -56,7 +56,7 @@ block-device-adapters = { git = "https://github.com/MabezDev/embedded-fatfs", re
 embedded-partitions = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc", version = "0.1.0" }
 
 [[bin]]
-name = "fw-sensor-carrier-v3-validation"
+name = "sensor-board-validation"
 test = false
 doctest = false
 bench = false

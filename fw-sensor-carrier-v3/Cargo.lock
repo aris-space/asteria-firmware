@@ -1035,41 +1035,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fw-sensor-carrier-v3-validation"
-version = "0.1.0"
-dependencies = [
- "block-device-adapters",
- "cortex-m",
- "cortex-m-rt",
- "defmt 1.0.1",
- "defmt-rtt",
- "embassy-embedded-hal",
- "embassy-executor",
- "embassy-futures",
- "embassy-stm32",
- "embassy-sync",
- "embassy-time",
- "embassy-usb",
- "embassy-usb-logger",
- "embedded-fatfs",
- "embedded-hal 1.0.0",
- "embedded-hal-async",
- "embedded-hal-bus",
- "embedded-io-async 0.7.0",
- "embedded-partitions",
- "heapless 0.9.2",
- "libm",
- "log",
- "lsm303agr",
- "lsm6dso32",
- "ms5607",
- "panic-probe",
- "sht4x",
- "static_cell",
- "ublox",
-]
-
-[[package]]
 name = "generator"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1961,6 +1926,41 @@ checksum = "640a03c95c176226cf159ae2727f7fe3245546022639d61459af46d2878aec06"
 dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+]
+
+[[package]]
+name = "sensor-board-validation"
+version = "0.1.0"
+dependencies = [
+ "block-device-adapters",
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt 1.0.1",
+ "defmt-rtt",
+ "embassy-embedded-hal",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-stm32",
+ "embassy-sync",
+ "embassy-time",
+ "embassy-usb",
+ "embassy-usb-logger",
+ "embedded-fatfs",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "embedded-hal-bus",
+ "embedded-io-async 0.7.0",
+ "embedded-partitions",
+ "heapless 0.9.2",
+ "libm",
+ "log",
+ "lsm303agr",
+ "lsm6dso32",
+ "ms5607",
+ "panic-probe",
+ "sht4x",
+ "static_cell",
+ "ublox",
 ]
 
 [[package]]
