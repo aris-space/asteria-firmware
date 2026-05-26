@@ -21,7 +21,7 @@ use sht4x::{Precision, Sht4xAsync};
 use ublox::{FixedLinearBuffer, PacketRef, Parser};
 
 use crate::resources::buzzer::BuzzerPwm;
-use crate::resources::flash::{BoardFlash, W25Q256JV_DEVICE_ID, WINBOND_MANUFACTURER_ID};
+use crate::resources::flash::{BoardFlash, W25Q01JV_DEVICE_ID, WINBOND_MANUFACTURER_ID};
 use crate::resources::sd::Sd;
 use crate::resources::sensors::SpiDevice;
 use crate::support::{SAMPLES, median};
@@ -223,8 +223,8 @@ pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &st
     int1_ok
 }
 
-/// Init the MS5607 (it has no WHO_AM_I, so we instead reads and verify its factory PROM),
-/// then take one pressure/temperature measurement.
+/// Init the MS5607 (no WHO_AM_I, so init reads and verifies its factory PROM
+/// instead), then take one pressure/temperature measurement.
 pub async fn barometer<I: I2c>(i2c: I, label: &str) -> bool {
     let sensor = Ms5607::new(i2c, false);
 
@@ -442,8 +442,9 @@ pub async fn gnss(mut rx: UartRx<'static, Async>, label: &str) -> bool {
     true
 }
 
-/// Read the flash manufacturer + device ID over OCTOSPI and confirm it is the
-/// expected Winbond W25Q256JV.
+/// Confirm the W25Q01JV over OCTOSPI: read its manufacturer + device ID, then
+/// enable quad mode and read a span over all four IO lines, comparing it against a
+/// single-line read of the same span to exercise IO2/IO3.
 pub fn flash(mut flash: BoardFlash) -> bool {
     let id = flash.read_id();
     info!(
@@ -451,15 +452,33 @@ pub fn flash(mut flash: BoardFlash) -> bool {
         id.manufacturer, id.device
     );
 
-    if id.manufacturer == WINBOND_MANUFACTURER_ID && id.device == W25Q256JV_DEVICE_ID {
-        info!("flash: OK (Winbond W25Q256JV)");
-        true
-    } else {
+    if id.manufacturer != WINBOND_MANUFACTURER_ID || id.device != W25Q01JV_DEVICE_ID {
         // 0x00 = line stayed low (chip not driving); 0xff = idle high / floating.
         error!(
             "flash: unexpected ID (mfr 0x{:02x} dev 0x{:02x}, expected 0xEF 0x20)",
             id.manufacturer, id.device
         );
+        return false;
+    }
+    info!("flash: OK (Winbond W25Q01JV)");
+
+    if !flash.enable_quad() {
+        error!("flash: could not set quad-enable (QE) bit");
+        return false;
+    }
+
+    // A single-line and a quad read of the same span must agree. On erased flash
+    // (all 0xff) this still catches an IO2/IO3 line stuck low or shorted; varied
+    // contents catch a stuck-high or swapped line too.
+    let mut single = [0u8; 32];
+    let mut quad = [0u8; 32];
+    flash.read_data(0x00_0000, &mut single);
+    flash.quad_read(0x00_0000, &mut quad);
+    if single == quad {
+        info!("flash: quad read matches single-line read (IO2/IO3 OK)");
+        true
+    } else {
+        error!("flash: quad vs single-line readback mismatch (IO2/IO3 wiring?)");
         false
     }
 }

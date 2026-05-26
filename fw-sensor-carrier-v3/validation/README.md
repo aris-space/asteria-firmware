@@ -16,7 +16,7 @@ This is a best-effort smoke test, not a full qualification. It confirms that eac
 - **2x magnetometer** (LSM303AGR, I2C): WHO_AM_I, then |B|
 - **2x humidity/temp** (SHT4x, I2C): serial number, then RH/temp
 - **2x GNSS** (u-blox, UART): link up, valid UBX packets, UBX-NAV-STATUS present
-- **Flash** (W25Q256JV, OCTOSPI): manufacturer + device ID
+- **Flash** (W25Q01JV, OCTOSPI quad): manufacturer + device ID, then a quad readback compared against a single-line read to exercise IO2/IO3 (sets the QE bit, a one-time persistent write)
 - **SD card** (SDMMC + FAT): initialise the card, then write HELLO_WORLD.txt to the first FAT partition and read it back
 
 ## What it does NOT check
@@ -33,27 +33,20 @@ This is a best-effort smoke test, not a full qualification. It confirms that eac
 
 1. Install the two GNSS modules on the back of the board.
 2. Power the board (USB-C, the backplane, or a backplane adapter).
-3. Set it flat on the bench and **leave it alone** for the whole run. The readings
-   aren't range-checked, but a still board prints clean ~1 g and near-zero rotation
-   that are easy to eyeball.
-4. With a debug probe attached, run `cargo run --release` from this directory. It
-   flashes the STM32H723ZG and streams the log over RTT (see `.cargo/config.toml`).
+3. Set it flat on the bench and **leave it alone** for the whole run. The readings aren't range-checked, but a still board prints clean ~1 g and near-zero rotation that are easy to eyeball.
+4. With a debug probe attached, run `cargo run --release` from this directory. It flashes the STM32H723ZG and streams the log over RTT (see `.cargo/config.toml`).
 
 ## Reading the result
 
 The verdict comes out three ways:
 
 - **Board:** rising chime + all LEDs lit = pass; low tone + solid red = fail.
-- **RTT console:** the `cargo run` terminal prints each sensor's reading, then
-  `CORE CHECKS PASSED` / `SOME CHECKS FAILED` (failures name the sensor and reason).
-- **USB-C serial:** the same lines mirrored over the USB-C port, so you can read
-  them without a debug probe (see [Reading over USB-C](#reading-over-usb-c)).
+- **RTT console:** the `cargo run` terminal prints each sensor's reading, then `CORE CHECKS PASSED` / `SOME CHECKS FAILED` (failures name the sensor and reason).
+- **USB-C serial:** the same lines mirrored over the USB-C port, so you can read them without a debug probe (see [Reading over USB-C](#reading-over-usb-c)).
 
 ## Reading over USB-C
 
-Plug into the USB-C port; the board shows up as a USB CDC-ACM serial device named
-"Asteria Sensor Board Validation" (serial `sensorboard`). List the serial ports and
-pick the one that matches:
+Plug into the USB-C port; the board shows up as a USB CDC-ACM serial device named "Asteria Sensor Board Validation" (serial `sensorboard`). List the serial ports and pick the one that matches:
 
 ```
 ls /dev/tty.usbmodem*   # macOS
