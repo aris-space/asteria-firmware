@@ -77,6 +77,8 @@ async fn main(spawner: Spawner) -> ! {
 
     let mut all_passed = true;
 
+    all_passed &= checks::cpu_freq_boost();
+
     let (imu1_spi, imu1_int1) = r.imu1.setup();
     all_passed &= checks::imu(imu1_spi, imu1_int1, "imu1").await;
     let (imu2_spi, imu2_int1) = r.imu2.setup();

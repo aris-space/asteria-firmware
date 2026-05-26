@@ -57,6 +57,19 @@ pub async fn leds_and_buzzer(
     }
 }
 
+/// Confirm the CPU_FREQ_BOOST option byte is set. It is read-only from firmware
+/// (programmed via the debug probe) and is what lets the H723 core run above
+/// 520 MHz at VOS0, which the 544 MHz clock config here depends on.
+pub fn cpu_freq_boost() -> bool {
+    if embassy_stm32::pac::SYSCFG.ur18().read().cpu_freq_boost() {
+        info!("cpu_freq_boost: option byte set");
+        true
+    } else {
+        error!("cpu_freq_boost: option byte NOT set (core capped at 520 MHz)");
+        false
+    }
+}
+
 /// Validate an LSM6DSO32: WHO_AM_I over SPI, then configure it, confirm the
 /// data-ready interrupt toggles INT1, and read one accel/gyro/temperature sample.
 pub async fn imu(spi: SpiDevice, mut int1: ExtiInput<'static, Async>, label: &str) -> bool {
