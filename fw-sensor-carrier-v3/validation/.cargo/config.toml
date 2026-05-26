@@ -1,19 +1,17 @@
-# Inherits rustflags, target, and DEFMT_LOG from ../.cargo/config.toml.
-# Adds a runner so `cargo run` flashes and streams defmt over RTT via probe-rs.
+# Adds defmt.x + a probe-rs runner; rest inherited from ../.cargo/config.toml.
 [target.thumbv7em-none-eabihf]
+rustflags = ["-C", "link-arg=-Tdefmt.x"]
 runner = [
     "probe-rs",
     "run",
     "--chip",
     "STM32H723ZG",
-    #"--no-catch-hardfault",
-    #"--no-catch-reset",
-    #"--chip-erase",
+    #"--no-catch-hardfault", # if the validation script faults, then we want to see it
+    #"--no-catch-reset", # if the validation script resets, then we want to see it
+    #"--chip-erase", # currently just faster to erase the written sections.
     "--log-format",
     "{t} {L:severity} {s}",
 ]
 
-# App logs at info. Overrides the inherited DEFMT_LOG=trace so embassy's internal
-# SPI/I2C/DMA trace doesn't flood the output.
 [env]
-DEFMT_LOG = "info"
+DEFMT_LOG = "debug"
