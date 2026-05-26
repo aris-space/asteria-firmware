@@ -8,19 +8,25 @@ use crate::types::{ImuSample, RawImuSample};
 const DELAY: Duration = Duration::from_millis(0);
 
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
+    let [ax, ay, az] = sensor_to_board([raw.accel.x, raw.accel.y, raw.accel.z]);
+    let [gx, gy, gz] = sensor_to_board([raw.gyro.x, raw.gyro.y, raw.gyro.z]);
     ImuSample {
         src: raw.src,
         ts: raw.ts - DELAY,
-        // Sensor-to-board axis remap for the LSM6DSO32 on this board: negate x and z.
         accel: Acceleration {
-            x: -raw.accel.x,
-            y: raw.accel.y,
-            z: -raw.accel.z,
+            x: ax,
+            y: ay,
+            z: az,
         },
         gyro: AngularRate {
-            x: -raw.gyro.x,
-            y: raw.gyro.y,
-            z: -raw.gyro.z,
+            x: gx,
+            y: gy,
+            z: gz,
         },
     }
+}
+
+/// Sensor-to-board axis remap for the LSM6DSO32 on this board: negate x and z.
+fn sensor_to_board([x, y, z]: [f32; 3]) -> [f32; 3] {
+    [-x, y, -z]
 }
