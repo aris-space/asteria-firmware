@@ -207,7 +207,7 @@ dependencies = [
 [[package]]
 name = "block-device-adapters"
 version = "0.2.0"
-source = "git+https://github.com/MabezDev/embedded-fatfs#518528cc111fcf65c48abbdeb80735a38eada112"
+source = "git+https://github.com/MabezDev/embedded-fatfs?rev=518528cc#518528cc111fcf65c48abbdeb80735a38eada112"
 dependencies = [
  "aligned",
  "block-device-driver",
@@ -217,7 +217,7 @@ dependencies = [
 [[package]]
 name = "block-device-driver"
 version = "0.2.0"
-source = "git+https://github.com/MabezDev/embedded-fatfs#518528cc111fcf65c48abbdeb80735a38eada112"
+source = "git+https://github.com/MabezDev/embedded-fatfs?rev=518528cc#518528cc111fcf65c48abbdeb80735a38eada112"
 dependencies = [
  "aligned",
 ]
@@ -789,7 +789,7 @@ dependencies = [
 [[package]]
 name = "embedded-fatfs"
 version = "0.1.0"
-source = "git+https://github.com/MabezDev/embedded-fatfs#518528cc111fcf65c48abbdeb80735a38eada112"
+source = "git+https://github.com/MabezDev/embedded-fatfs?rev=518528cc#518528cc111fcf65c48abbdeb80735a38eada112"
 dependencies = [
  "bitflags 1.3.2",
  "embedded-io-async 0.7.0",
@@ -885,7 +885,7 @@ dependencies = [
 [[package]]
 name = "embedded-partitions"
 version = "0.1.0"
-source = "git+https://github.com/MabezDev/embedded-fatfs#518528cc111fcf65c48abbdeb80735a38eada112"
+source = "git+https://github.com/MabezDev/embedded-fatfs?rev=518528cc#518528cc111fcf65c48abbdeb80735a38eada112"
 dependencies = [
  "block-device-adapters",
  "embedded-io-async 0.7.0",

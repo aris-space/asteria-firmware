@@ -49,11 +49,11 @@ defmt-rtt = "1"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 heapless = "0.9.2"
 libm = "0.2"
-embedded-fatfs = { git = "https://github.com/MabezDev/embedded-fatfs", version = "0.1.0", default-features = false, features = [
+embedded-fatfs = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc", version = "0.1.0", default-features = false, features = [
     "lfn",
 ] }
-block-device-adapters = { git = "https://github.com/MabezDev/embedded-fatfs", version = "0.2.0" }
-embedded-partitions = { git = "https://github.com/MabezDev/embedded-fatfs", version = "0.1.0" }
+block-device-adapters = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc", version = "0.2.0" }
+embedded-partitions = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc", version = "0.1.0" }
 
 [[bin]]
 name = "fw-sensor-carrier-v3-validation"
