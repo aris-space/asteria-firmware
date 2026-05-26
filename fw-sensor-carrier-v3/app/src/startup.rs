@@ -42,7 +42,6 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let flash = resources.flash.setup();
     let storage = storage::Storage::init(flash);
     calibration::mag::load(storage).await;
-    calibration::imu::load(storage).await;
 
     let gps1_data = resources.gps1_uart.setup();
     let (_gps1_tx, gps1_rx) = gps1_data.split();

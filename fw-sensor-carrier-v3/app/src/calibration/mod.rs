@@ -1,8 +1,9 @@
 //! Per-sensor calibration. Every submodule exposes `apply_calibration`, which
 //! turns a raw sample into a calibrated one using values it loads internally.
-//! `baro`/`dht`/`gnss` only apply a fixed read-latency offset; `mag`/`imu` are
-//! flash-backed: they `load` a stored cal at boot and expose caller-driven
-//! calibration state that measures and persists a new one.
+//! `baro`/`dht`/`gnss`/`imu` only apply a fixed read-latency offset (the `imu`
+//! also applies a fixed sensor-to-board axis remap); `mag` is flash-backed: it
+//! `load`s a stored cal at boot and exposes caller-driven calibration state that
+//! measures and persists a new one.
 
 use core::fmt;
 
@@ -12,7 +13,6 @@ pub mod baro;
 pub mod dht;
 pub mod gnss;
 pub mod imu;
-mod imu_fit;
 pub mod mag;
 
 /// Fixed-capacity, zero-padded user label persisted with a flash-backed cal.

@@ -255,7 +255,6 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                     accel,
                     gyro,
                 };
-                signals::submit_raw_imu_sample(raw);
                 let _ = samples.push(calibration::imu::apply_calibration(raw));
             }
 

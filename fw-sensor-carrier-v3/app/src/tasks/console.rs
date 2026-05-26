@@ -13,10 +13,10 @@ use heapless::String;
 use noline::builder::EditorBuilder;
 use static_cell::StaticCell;
 
-use crate::calibration::{Name, imu, mag};
+use crate::calibration::{Name, mag};
 use crate::resources::flash;
 use crate::resources::usb::UsbDriver;
-use crate::sensors::{ImuId, MagnetometerId};
+use crate::sensors::MagnetometerId;
 use crate::storage::{self, Storage};
 
 type Class = CdcAcmClass<'static, UsbDriver>;
@@ -103,7 +103,6 @@ impl Write for ConsoleIo<'_> {
 const PROMPT: &str = "asteria> ";
 const HELP: &str = r"commands:
   cal mag <name>     run magnetometer calibration (label required)
-  cal imu <name>     estimate the two IMUs' difference (rotation + gyro bias)
   cal show           show stored calibrations
   flash info         show chip id and status register
   flash test         erase/write/read-back a scratch sector
@@ -197,15 +196,8 @@ async fn cmd_cal(
 ) {
     match args.next() {
         Some("mag") => cmd_cal_mag(class, args, storage).await,
-        Some("imu") => cmd_cal_imu(class, args, storage).await,
         Some("show") => cal_show(class, storage).await,
-        _ => {
-            say(
-                class,
-                paint!(red, "usage: cal <mag <name>|imu <name>|show>\n"),
-            )
-            .await
-        }
+        _ => say(class, paint!(red, "usage: cal <mag <name>|show>\n")).await,
     }
 }
 
@@ -243,81 +235,14 @@ async fn cmd_cal_mag(
     report_outcome(class, stored).await;
 }
 
-async fn cmd_cal_imu(
-    class: &mut ConsoleIo<'_>,
-    args: &mut SplitAsciiWhitespace<'_>,
-    storage: &Storage,
-) {
-    let Some(name) = cal_name_or_report(class, args, paint!(red, "usage: cal imu <name>\n")).await
-    else {
-        return;
-    };
-    say(
-        class,
-        "imu cal: rest the board still in several distinct orientations\n(its 6 faces work well); each capture takes the gyro bias too.\n",
-    )
-    .await;
-    let mut cal = imu::ImuCal::new(name);
-    loop {
-        match cal.advance(storage).await {
-            imu::Stage::Prompt { pose } => {
-                let mut s: String<96> = String::new();
-                let _ = write!(
-                    s,
-                    "\npose {}/{}: rest it on a new face/edge, then press any key...\n",
-                    pose + 1,
-                    imu::POSES
-                );
-                say(class, &s).await;
-                // Block until a byte arrives from the terminal (any key).
-                let mut key = [0u8; 1];
-                let _ = class.read(&mut key).await;
-                say(class, "  capturing...\n").await;
-            }
-            imu::Stage::Captured { pose, counts } => {
-                let mut s: String<96> = String::new();
-                let _ = writeln!(
-                    s,
-                    "  pose {}/{} captured (imu0={} imu1={} still samples)",
-                    pose + 1,
-                    imu::POSES,
-                    counts[0],
-                    counts[1]
-                );
-                say(class, &s).await;
-            }
-            imu::Stage::Done(report) => {
-                let mut s: String<1024> = String::new();
-                let _ = writeln!(s, "{report}");
-                say(class, &s).await;
-                report_outcome(class, report.stored()).await;
-                break;
-            }
-        }
-    }
-}
-
 async fn cal_show(class: &mut ConsoleIo<'_>, storage: &Storage) {
     show_mag_cals(class, storage).await;
-    show_imu_cals(class, storage).await;
 }
 
 async fn show_mag_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
     let applied = mag::applied();
     let stored = mag::stored(storage).await;
     for id in MagnetometerId::ALL {
-        let i = id.index();
-        let pending = stored[i]
-            .filter(|st| st.differs_from(&applied[i]))
-            .map(|st| st.name);
-        show_cal_slot(class, id.name(), applied[i], pending).await;
-    }
-}
-
-async fn show_imu_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    let applied = imu::applied();
-    let stored = imu::stored(storage).await;
-    for id in ImuId::ALL {
         let i = id.index();
         let pending = stored[i]
             .filter(|st| st.differs_from(&applied[i]))
@@ -474,13 +399,9 @@ async fn flash_test(class: &mut ConsoleIo<'_>, storage: &Storage) {
 }
 
 async fn flash_list(class: &mut ConsoleIo<'_>) {
-    let keys = MagnetometerId::ALL
-        .into_iter()
-        .map(|id| id.name())
-        .chain(ImuId::ALL.into_iter().map(|id| id.name()));
-    for key in keys {
+    for id in MagnetometerId::ALL {
         let mut s: String<24> = String::new();
-        let _ = writeln!(s, "{key}");
+        let _ = writeln!(s, "{}", id.name());
         say(class, &s).await;
     }
 }
