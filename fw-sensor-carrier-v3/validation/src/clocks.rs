@@ -3,9 +3,7 @@
 // crate instead of being copied here.
 
 pub fn clocks_config() -> embassy_stm32::Config {
-    use embassy_stm32::rcc::mux::{
-        I2c4sel, I2c1235sel, Saisel, Sdmmcsel, Usart16910sel, Usart234578sel, Usbsel,
-    };
+    use embassy_stm32::rcc::mux::{I2c4sel, I2c1235sel, Saisel, Sdmmcsel, Usbsel};
     use embassy_stm32::rcc::{
         AHBPrescaler, APBPrescaler, Hse, HseMode, Hsi48Config, Pll, PllDiv, PllMul, PllPreDiv,
         PllSource, Sysclk, VoltageScale,
@@ -20,7 +18,7 @@ pub fn clocks_config() -> embassy_stm32::Config {
         mode: HseMode::Oscillator,
     });
 
-    config.rcc.voltage_scale = VoltageScale::Scale0; // GO Insanely FAST.
+    config.rcc.voltage_scale = VoltageScale::Scale0; // VOS0: top scale, needed for 544 MHz SYSCLK.
 
     // PLL1: VCO = 16 MHz * 34 = 544 MHz. Needs the cpu_freq_boost option byte set
     // (else embassy caps VOS0 at 520 and init() panics). 544 is the integer max under
@@ -61,10 +59,6 @@ pub fn clocks_config() -> embassy_stm32::Config {
     config.rcc.mux.spi123sel = Saisel::PLL1_Q; // 136 MHz for SPI1/2/3
     config.rcc.mux.i2c1235sel = I2c1235sel::PLL3_R; // 120 MHz for I2C1/2/3/5
     config.rcc.mux.i2c4sel = I2c4sel::PLL3_R; // 120 MHz for I2C4
-
-    // (optional, handy defaults)
-    config.rcc.mux.usart16910sel = Usart16910sel::PCLK2;
-    config.rcc.mux.usart234578sel = Usart234578sel::PCLK1;
 
     // SDMMC kernel: a dedicated 200 MHz PLL2_R (the SDMMC max) for the fastest card
     // clock. TODO: we'll need to implement this in the firmware too...
