@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["app"]
+members = ["app", "validation"]
 
 [patch.crates-io]
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
@@ -11,6 +11,13 @@ embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6
 embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
 embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
 embassy-usb-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
+embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy.git", rev = "cf6a6cd" }
+# block-device-driver defines the BlockDevice trait. embassy-stm32 impls it on its SDMMC
+# StorageDevice via a crates.io dep on block-device-driver, while the git embedded-fatfs
+# stack (block-device-adapters' BufStream) uses the copy from its own repo. Two sources
+# would be two distinct BlockDevice traits, so redirect the crates.io copy to the git one.
+block-device-driver = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc" }
+#postcard-rpc = { git = "https://github.com/aris-space/postcard-rpc.git", rev = "af9991e" }
 
 [profile.dev]
 debug = 2
