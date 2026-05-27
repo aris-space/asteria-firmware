@@ -1,14 +1,15 @@
 #![no_std]
 #![no_main]
 mod build_info;
-mod can_impl;
+mod can_io;
 mod drivers;
 mod filters;
 mod sensors;
 mod util;
 
-use crate::drivers::environmental::{ENVIRONMENTAL_DRIVER_PUBSUB, ENVIRONMENTAL_DRIVER_WATCH};
-use crate::drivers::inertial::{ORIENTATION_PUBSUB, ORIENTATION_WATCH};
+use crate::can_io::OUTPUTS;
+use crate::drivers::environmental::ENVIRONMENTAL_DRIVER_PUBSUB;
+use crate::drivers::inertial::ORIENTATION_PUBSUB;
 use crate::drivers::magnetic_field::{MAGNETIC_FIELD_PUBSUB, MAGNETIC_FIELD_WATCH};
 use crate::drivers::{environmental, inertial, magnetic_field};
 use crate::sensors::barometer::barometer_task;
@@ -17,9 +18,10 @@ use crate::sensors::gnss::gnss_task;
 use crate::sensors::imu::imu_task;
 use crate::sensors::magnetometer::magnetometer_task;
 use crate::sensors::{SHARED_BUS1, SHARED_BUS2, SensorId};
+use can_utils::broadcast::Broadcast;
 use core::future::pending;
 use drivers::pressure;
-use drivers::pressure::{PRESSURE_DRIVER_PUBSUB, PRESSURE_DRIVER_WATCH};
+use drivers::pressure::PRESSURE_DRIVER_PUBSUB;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_executor::Spawner;
 use embassy_stm32::exti::ExtiInput;
@@ -255,7 +257,7 @@ async fn main(spawner: Spawner) -> ! {
     // --- Pressure ---
     let pressure_driver = pressure::PressureDriver::new(
         PRESSURE_DRIVER_PUBSUB.immediate_publisher(),
-        PRESSURE_DRIVER_WATCH.sender(),
+        OUTPUTS.pressure.sender(),
     );
     pressure::PRESSURE_DRIVER
         .init(pressure_driver)
@@ -266,7 +268,7 @@ async fn main(spawner: Spawner) -> ! {
     // --- Environmental ---
     let environmental_driver = environmental::EnvironmentalDriver::new(
         ENVIRONMENTAL_DRIVER_PUBSUB.immediate_publisher(),
-        ENVIRONMENTAL_DRIVER_WATCH.sender(),
+        OUTPUTS.environmental.sender(),
     );
     environmental::ENVIRONMENTAL_DRIVER
         .init(environmental_driver)
@@ -288,9 +290,9 @@ async fn main(spawner: Spawner) -> ! {
     // --- Orientation ---
     let orientation_driver = inertial::InertialDriver::new(
         ORIENTATION_PUBSUB.immediate_publisher(),
-        ORIENTATION_WATCH.sender(),
+        OUTPUTS.orientation.sender(),
         inertial::INERTIAL_PUBSUB.immediate_publisher(),
-        inertial::INERTIAL_WATCH.sender(),
+        OUTPUTS.inertial.sender(),
         MAGNETIC_FIELD_WATCH
             .receiver()
             .expect("Failed to create magnetometer watch."),
@@ -304,9 +306,9 @@ async fn main(spawner: Spawner) -> ! {
     // --- Position ---
     let position_driver = drivers::position_velocity::PositionVelocityTimeDriver::new(
         drivers::position_velocity::POSITION_PUBSUB.immediate_publisher(),
-        drivers::position_velocity::POSITION_WATCH.sender(),
+        OUTPUTS.position.sender(),
         drivers::position_velocity::VELOCITY_PUBSUB.immediate_publisher(),
-        drivers::position_velocity::VELOCITY_WATCH.sender(),
+        OUTPUTS.velocity.sender(),
     );
     drivers::position_velocity::POSITION_VELOCITY_TIME_DRIVER
         .init(position_driver)
@@ -405,12 +407,28 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(blink(led_yellow).expect("Error spawning blinking task."));
 
     // setup CAN on FDCAN3 PF6/PF7 and start the loops
-    let can = can_impl::setup_can(p.FDCAN3, p.PF6, p.PF7, Irqs); // TX=PF7, RX=PF6
+    let can = can_utils::setup::setup_can(
+        p.FDCAN3,
+        p.PF6, // RX
+        p.PF7, // TX
+        Irqs,
+        <can_io::ReceivedMessage as data_core::can::hal::CanDecode>::SUPPORTED_IDS,
+    );
     let (tx, rx, _options) = can.split();
+    let tx = can_utils::setup::make_multiplexable(tx);
 
-    spawner.spawn(can_impl::can_rx_task(rx).expect("Failed to spawn CAN RX task."));
+    spawner.spawn(can_io::can_rx_task(rx).expect("Failed to spawn CAN RX task."));
+    spawner.spawn(
+        can_io::magnetic_field_publisher().expect("Failed to spawn magnetic field publisher task."),
+    );
+    spawner.spawn(can_io::status_publisher().expect("Failed to spawn status publisher task."));
+    spawner
+        .spawn(can_io::build_info_publisher().expect("Failed to spawn build info publisher task."));
+    spawner.spawn(can_io::stale_data_monitor().expect("Failed to spawn stale data monitor task."));
 
-    can_impl::spawn_can_tx_tasks(tx, spawner).await;
+    OUTPUTS
+        .start_broadcasting(spawner, tx)
+        .expect("Failed to start CAN broadcasting.");
 
     #[allow(unreachable_code)]
     loop {

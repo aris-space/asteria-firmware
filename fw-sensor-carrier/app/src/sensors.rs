@@ -73,11 +73,11 @@ pub enum SensorStatus {
     Active,
 }
 
-impl From<SensorStatus> for hermes_can::messages::board_status::SensorStatus {
+impl From<SensorStatus> for datatypes::status::SensorStatus {
     fn from(value: SensorStatus) -> Self {
         match value {
-            SensorStatus::Inactive => hermes_can::messages::board_status::SensorStatus::Offline,
-            SensorStatus::Active => hermes_can::messages::board_status::SensorStatus::Online,
+            SensorStatus::Inactive => datatypes::status::SensorStatus::Offline,
+            SensorStatus::Active => datatypes::status::SensorStatus::Online,
         }
     }
 }

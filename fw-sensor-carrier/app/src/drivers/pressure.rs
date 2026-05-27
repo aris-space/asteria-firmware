@@ -4,14 +4,13 @@ use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMu
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel};
-use embassy_sync::watch::{Sender, Watch};
+use embassy_sync::watch::Sender;
 
 pub const CAP: usize = 10;
 pub const PUB: usize = 1;
 pub const SUB: usize = 2;
 pub const WATCH: usize = 3;
 
-pub static PRESSURE_DRIVER_WATCH: Watch<ThreadModeRawMutex, PressureEstimate, WATCH> = Watch::new();
 pub static PRESSURE_DRIVER_PUBSUB: PubSubChannel<
     ThreadModeRawMutex,
     PressureEstimate,

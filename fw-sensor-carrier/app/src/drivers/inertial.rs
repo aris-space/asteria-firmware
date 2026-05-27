@@ -2,16 +2,16 @@ use crate::drivers::magnetic_field;
 use crate::drivers::magnetic_field::MagMeasurement;
 use crate::sensors::SensorId;
 use crate::sensors::imu::{IMU_ODR_HZ, IMU_TARGET_DT};
+use dp_sensor_carrier::ImuData;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel};
 use embassy_sync::watch;
-use embassy_sync::watch::{Sender, Watch};
+use embassy_sync::watch::Sender;
 use embassy_time::{Duration, Instant};
 use embedded_utils::ExtendTime;
 use embedded_utils::fmt::*;
-use hermes_can::messages::sensor_data::ImuData;
 use imu_fusion::{Fusion, FusionAhrsSettings, FusionVector};
 use lsm6dso32::{Acceleration, AngularRate};
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
@@ -21,7 +21,6 @@ pub const PUB: usize = 0;
 pub const SUB: usize = 2;
 pub const WATCH: usize = 3;
 
-pub static ORIENTATION_WATCH: Watch<ThreadModeRawMutex, UnitQuaternion<f32>, WATCH> = Watch::new();
 pub static ORIENTATION_PUBSUB: PubSubChannel<
     ThreadModeRawMutex,
     UnitQuaternion<f32>,
@@ -29,8 +28,6 @@ pub static ORIENTATION_PUBSUB: PubSubChannel<
     SUB,
     PUB,
 > = PubSubChannel::new();
-
-pub static INERTIAL_WATCH: Watch<ThreadModeRawMutex, ImuData, WATCH> = Watch::new();
 
 pub static INERTIAL_PUBSUB: PubSubChannel<ThreadModeRawMutex, ImuData, CAP, SUB, PUB> =
     PubSubChannel::new();
