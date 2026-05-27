@@ -1,4 +1,4 @@
-//! Persistent key/value storage on the on-board W25Q256JV (SPI2) via
+//! Persistent key/value storage on the on-board W25Q01JV (OCTOSPI1) via
 //! `sequential-storage`'s map. Keys are short ASCII names ([`key`]); values
 //! are postcard-encoded. The config region backs the map; the rest stays free
 //! for future data logging.
@@ -12,7 +12,7 @@ use static_cell::StaticCell;
 
 use embedded_storage_async::nor_flash::{NorFlash, ReadNorFlash};
 
-use crate::resources::flash::{BoardFlash, SECTOR_SIZE};
+use crate::resources::flash::{BoardFlash, JedecId, SECTOR_SIZE};
 
 pub const CONFIG_OFFSET: u32 = 0;
 pub const CONFIG_LEN: u32 = 64 * 1024;
@@ -118,10 +118,10 @@ impl Storage {
         }
     }
 
-    /// Read the flash chip's mfr + device id (for diagnostics).
-    pub async fn read_mfr_device_id(&self) -> [u8; 2] {
+    /// Read the flash chip's 3-byte JEDEC id (for diagnostics).
+    pub async fn read_jedec_id(&self) -> JedecId {
         let mut map = self.map.lock().await;
-        map.flash().read_mfr_device_id()
+        map.flash().read_jedec_id()
     }
 
     /// Read flash status register 1 (for diagnostics).

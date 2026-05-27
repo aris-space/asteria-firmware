@@ -359,22 +359,29 @@ async fn cmd_flash(
 }
 
 async fn flash_info(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    let id = storage.read_mfr_device_id().await;
+    let id = storage.read_jedec_id().await;
     let status = storage.status().await;
     let mut s: String<192> = String::new();
-    write_flash_identity(&mut s, id, status);
+    write_flash_identity(&mut s, &id, status);
     say(class, &s).await;
 }
 
-fn write_flash_identity(out: &mut impl fmt::Write, id: [u8; 2], status: u8) {
-    let detected = if id == flash::EXPECTED_MFR_DEVICE_ID {
-        "W25Q256JV"
-    } else if id[0] == flash::EXPECTED_MFR_DEVICE_ID[0] {
-        "Winbond, unexpected device id"
+fn write_flash_identity(out: &mut impl fmt::Write, id: &flash::JedecId, status: u8) {
+    let detected = if id.manufacturer == flash::WINBOND_MANUFACTURER_ID
+        && id.memory_type == flash::W25Q_IM_MEMORY_TYPE
+        && id.capacity == flash::W25Q01JV_CAPACITY
+    {
+        "W25Q01JV"
+    } else if id.manufacturer == flash::WINBOND_MANUFACTURER_ID {
+        "Winbond, unexpected JEDEC id"
     } else {
         "UNKNOWN (check wiring/power)"
     };
-    let _ = writeln!(out, "mfr/device: {:02x} {:02x}", id[0], id[1]);
+    let _ = writeln!(
+        out,
+        "jedec id:   {:02x} {:02x} {:02x}",
+        id.manufacturer, id.memory_type, id.capacity
+    );
     let _ = writeln!(out, "detected:   {detected}");
     let _ = writeln!(out, "status reg: {:#04x} (wip={})", status, status & 1);
     let _ = write!(out, "capacity:   ");
