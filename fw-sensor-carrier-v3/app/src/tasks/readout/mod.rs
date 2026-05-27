@@ -18,7 +18,10 @@ pub mod magnetometer;
 /// `Inactive` and retries init.
 pub const MAX_CONSECUTIVE_ERRORS: u8 = 10;
 
-const BASE_BACKOFF_MS: u64 = 100;
+// A failed init attempt busy-blocks the shared executor for the I2C timeout
+// (embassy's async I2C doesn't yield while the bus is wedged), so a dead bus must
+// back off hard to avoid starving the healthy buses.
+const BASE_BACKOFF_MS: u64 = 500;
 const MAX_BACKOFF_MS: u64 = 5000;
 
 /// Exponential backoff for sensor init retries. Saturates at `MAX_BACKOFF_MS`.
