@@ -226,10 +226,10 @@ impl MagCal {
     pub async fn collect_tick(&mut self) {
         let mut sub_0 = RAW_MAG_CHANNELS[MAG_BUS_1.index()]
             .subscriber()
-            .expect("mag cal: raw mag 0 subscribe failed");
+            .expect("too many subs on RAW_MAG_CHANNELS; increase SUBS");
         let mut sub_1 = RAW_MAG_CHANNELS[MAG_BUS_2.index()]
             .subscriber()
-            .expect("mag cal: raw mag 1 subscribe failed");
+            .expect("too many subs on RAW_MAG_CHANNELS; increase SUBS");
         let deadline = Instant::now() + TICK;
         while Instant::now() < deadline {
             let remaining = deadline - Instant::now();
