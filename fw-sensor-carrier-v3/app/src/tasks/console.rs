@@ -105,7 +105,6 @@ const HELP: &str = r"commands:
   cal mag <name>     run magnetometer calibration (label required)
   cal show           show stored calibrations
   flash info         show chip id and status register
-  flash test         erase/write/read-back a scratch sector
   flash list         list the keys you can clear
   flash clear <key>  clear a key (needs --yes)
   flash erase        wipe all stored config (needs --yes)
@@ -163,13 +162,11 @@ async fn console_task(mut class: Class, storage: &'static Storage) -> ! {
         else {
             continue;
         };
-        loop {
-            match editor.readline(PROMPT, &mut io).await {
-                // `line` borrows the editor, not `io`, so handler output can keep
-                // flowing through `io` while the parsed command is in hand.
-                Ok(line) => handle_line(&mut io, line, storage).await,
-                Err(_) => break, // host disconnected or terminal error
-            }
+        // `line` borrows the editor, not `io`, so handler output can keep flowing
+        // through `io` while the parsed command is in hand. A read error means the
+        // host disconnected or the terminal failed; drop back to wait_connection.
+        while let Ok(line) = editor.readline(PROMPT, &mut io).await {
+            handle_line(&mut io, line, storage).await;
         }
     }
 }
@@ -323,7 +320,6 @@ async fn cmd_flash(
 ) {
     match args.next() {
         Some("info") => flash_info(class, storage).await,
-        Some("test") => flash_test(class, storage).await,
         Some("list") => flash_list(class).await,
         Some("clear") => match args.next() {
             Some(name) if args.next() == Some("--yes") => flash_clear(class, storage, name).await,
@@ -361,22 +357,29 @@ async fn cmd_flash(
 }
 
 async fn flash_info(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    let id = storage.read_mfr_device_id().await;
+    let id = storage.read_jedec_id().await;
     let status = storage.status().await;
     let mut s: String<192> = String::new();
-    write_flash_identity(&mut s, id, status);
+    write_flash_identity(&mut s, &id, status);
     say(class, &s).await;
 }
 
-fn write_flash_identity(out: &mut impl fmt::Write, id: [u8; 2], status: u8) {
-    let detected = if id == flash::EXPECTED_MFR_DEVICE_ID {
-        "W25Q256JV"
-    } else if id[0] == flash::EXPECTED_MFR_DEVICE_ID[0] {
-        "Winbond, unexpected device id"
+fn write_flash_identity(out: &mut impl fmt::Write, id: &flash::JedecId, status: u8) {
+    let detected = if id.manufacturer == flash::WINBOND_MANUFACTURER_ID
+        && id.memory_type == flash::W25Q_IM_MEMORY_TYPE
+        && id.capacity == flash::W25Q01JV_CAPACITY
+    {
+        "W25Q01JV"
+    } else if id.manufacturer == flash::WINBOND_MANUFACTURER_ID {
+        "Winbond, unexpected JEDEC id"
     } else {
         "UNKNOWN (check wiring/power)"
     };
-    let _ = writeln!(out, "mfr/device: {:02x} {:02x}", id[0], id[1]);
+    let _ = writeln!(
+        out,
+        "jedec id:   {:02x} {:02x} {:02x}",
+        id.manufacturer, id.memory_type, id.capacity
+    );
     let _ = writeln!(out, "detected:   {detected}");
     let _ = writeln!(out, "status reg: {:#04x} (wip={})", status, status & 1);
     let _ = write!(out, "capacity:   ");
@@ -384,18 +387,6 @@ fn write_flash_identity(out: &mut impl fmt::Write, id: [u8; 2], status: u8) {
     let _ = write!(out, ", config region ");
     let _ = write_bytes(out, storage::CONFIG_LEN);
     let _ = writeln!(out);
-}
-
-async fn flash_test(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    say(class, "flash self-test (scratch sector)...\n").await;
-    match storage.self_test().await {
-        Ok(()) => say(class, paint!(green, "self-test passed\n")).await,
-        Err(e) => {
-            let mut s: String<48> = String::new();
-            let _ = writeln!(s, paint!(red, "self-test FAILED: {}"), e);
-            say(class, &s).await;
-        }
-    }
 }
 
 async fn flash_list(class: &mut ConsoleIo<'_>) {
@@ -438,9 +429,9 @@ async fn flash_erase(class: &mut ConsoleIo<'_>, storage: &Storage) {
 fn write_bytes(out: &mut impl fmt::Write, bytes: u32) -> fmt::Result {
     const KIB: u32 = 1024;
     const MIB: u32 = 1024 * KIB;
-    if bytes % MIB == 0 {
+    if bytes.is_multiple_of(MIB) {
         write!(out, "{} MiB", bytes / MIB)
-    } else if bytes % KIB == 0 {
+    } else if bytes.is_multiple_of(KIB) {
         write!(out, "{} KiB", bytes / KIB)
     } else {
         write!(out, "{} B", bytes)

@@ -1,4 +1,4 @@
-//! Persistent key/value storage on the on-board W25Q256JV (SPI2) via
+//! Persistent key/value storage on the on-board W25Q01JV (OCTOSPI1) via
 //! `sequential-storage`'s map. Keys are short ASCII names ([`key`]); values
 //! are postcard-encoded. The config region backs the map; the rest stays free
 //! for future data logging.
@@ -10,9 +10,7 @@ use sequential_storage::map::{MapConfig, MapStorage};
 use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 
-use embedded_storage_async::nor_flash::{NorFlash, ReadNorFlash};
-
-use crate::resources::flash::{BoardFlash, SECTOR_SIZE};
+use crate::resources::flash::{BoardFlash, JedecId};
 
 pub const CONFIG_OFFSET: u32 = 0;
 pub const CONFIG_LEN: u32 = 64 * 1024;
@@ -118,51 +116,15 @@ impl Storage {
         }
     }
 
-    /// Read the flash chip's mfr + device id (for diagnostics).
-    pub async fn read_mfr_device_id(&self) -> [u8; 2] {
+    /// Read the flash chip's 3-byte JEDEC id (for diagnostics).
+    pub async fn read_jedec_id(&self) -> JedecId {
         let mut map = self.map.lock().await;
-        map.flash().read_mfr_device_id()
+        map.flash().read_jedec_id()
     }
 
     /// Read flash status register 1 (for diagnostics).
     pub async fn status(&self) -> u8 {
         let mut map = self.map.lock().await;
         map.flash().status()
-    }
-
-    /// Erase, program, and read back a scratch sector just past the config
-    /// region to prove the flash round-trips. Leaves the scratch sector erased.
-    /// Wears one sector per call, so this is a manual command, not a boot check.
-    pub async fn self_test(&self) -> Result<(), &'static str> {
-        const SCRATCH: u32 = CONFIG_OFFSET + CONFIG_LEN;
-        let mut map = self.map.lock().await;
-        let flash = map.flash();
-
-        let mut pattern = [0u8; 32];
-        for (i, b) in pattern.iter_mut().enumerate() {
-            *b = (i as u8) ^ 0xa5;
-        }
-
-        flash
-            .erase(SCRATCH, SCRATCH + SECTOR_SIZE)
-            .await
-            .map_err(|_| "erase failed")?;
-        flash
-            .write(SCRATCH, &pattern)
-            .await
-            .map_err(|_| "write failed")?;
-        let mut readback = [0u8; 32];
-        flash
-            .read(SCRATCH, &mut readback)
-            .await
-            .map_err(|_| "read failed")?;
-        if readback != pattern {
-            return Err("verify mismatch");
-        }
-        flash
-            .erase(SCRATCH, SCRATCH + SECTOR_SIZE)
-            .await
-            .map_err(|_| "cleanup erase failed")?;
-        Ok(())
     }
 }
