@@ -209,7 +209,7 @@ impl<'a> InertialDriver<'a> {
         // we need to convert accel to m/s^2, angular velocity stays in deg/s
         let body_accel_scaled = body_accel_raw * STANDARD_G;
 
-        // we need to rotate from body into inertial frame. the quaternion is a passive rotation.
+        // we need to rotate from body into inertial frame. orientation maps body -> NED.
         let inertial_accel = orientation.transform_vector(&body_accel_scaled);
         let inertial_gyro = orientation.transform_vector(&body_angular_velocity);
 
