@@ -10,9 +10,7 @@ use sequential_storage::map::{MapConfig, MapStorage};
 use serde::{Deserialize, Serialize};
 use static_cell::StaticCell;
 
-use embedded_storage_async::nor_flash::{NorFlash, ReadNorFlash};
-
-use crate::resources::flash::{BoardFlash, JedecId, SECTOR_SIZE};
+use crate::resources::flash::{BoardFlash, JedecId};
 
 pub const CONFIG_OFFSET: u32 = 0;
 pub const CONFIG_LEN: u32 = 64 * 1024;
@@ -128,41 +126,5 @@ impl Storage {
     pub async fn status(&self) -> u8 {
         let mut map = self.map.lock().await;
         map.flash().status()
-    }
-
-    /// Erase, program, and read back a scratch sector just past the config
-    /// region to prove the flash round-trips. Leaves the scratch sector erased.
-    /// Wears one sector per call, so this is a manual command, not a boot check.
-    pub async fn self_test(&self) -> Result<(), &'static str> {
-        const SCRATCH: u32 = CONFIG_OFFSET + CONFIG_LEN;
-        let mut map = self.map.lock().await;
-        let flash = map.flash();
-
-        let mut pattern = [0u8; 32];
-        for (i, b) in pattern.iter_mut().enumerate() {
-            *b = (i as u8) ^ 0xa5;
-        }
-
-        flash
-            .erase(SCRATCH, SCRATCH + SECTOR_SIZE)
-            .await
-            .map_err(|_| "erase failed")?;
-        flash
-            .write(SCRATCH, &pattern)
-            .await
-            .map_err(|_| "write failed")?;
-        let mut readback = [0u8; 32];
-        flash
-            .read(SCRATCH, &mut readback)
-            .await
-            .map_err(|_| "read failed")?;
-        if readback != pattern {
-            return Err("verify mismatch");
-        }
-        flash
-            .erase(SCRATCH, SCRATCH + SECTOR_SIZE)
-            .await
-            .map_err(|_| "cleanup erase failed")?;
-        Ok(())
     }
 }

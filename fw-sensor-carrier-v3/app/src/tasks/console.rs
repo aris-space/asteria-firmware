@@ -105,7 +105,6 @@ const HELP: &str = r"commands:
   cal mag <name>     run magnetometer calibration (label required)
   cal show           show stored calibrations
   flash info         show chip id and status register
-  flash test         erase/write/read-back a scratch sector
   flash list         list the keys you can clear
   flash clear <key>  clear a key (needs --yes)
   flash erase        wipe all stored config (needs --yes)
@@ -321,7 +320,6 @@ async fn cmd_flash(
 ) {
     match args.next() {
         Some("info") => flash_info(class, storage).await,
-        Some("test") => flash_test(class, storage).await,
         Some("list") => flash_list(class).await,
         Some("clear") => match args.next() {
             Some(name) if args.next() == Some("--yes") => flash_clear(class, storage, name).await,
@@ -389,18 +387,6 @@ fn write_flash_identity(out: &mut impl fmt::Write, id: &flash::JedecId, status: 
     let _ = write!(out, ", config region ");
     let _ = write_bytes(out, storage::CONFIG_LEN);
     let _ = writeln!(out);
-}
-
-async fn flash_test(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    say(class, "flash self-test (scratch sector)...\n").await;
-    match storage.self_test().await {
-        Ok(()) => say(class, paint!(green, "self-test passed\n")).await,
-        Err(e) => {
-            let mut s: String<48> = String::new();
-            let _ = writeln!(s, paint!(red, "self-test FAILED: {}"), e);
-            say(class, &s).await;
-        }
-    }
 }
 
 async fn flash_list(class: &mut ConsoleIo<'_>) {
