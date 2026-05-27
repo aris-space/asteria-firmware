@@ -21,15 +21,16 @@ pub const PAGE_SIZE: u32 = 256;
 pub const SECTOR_SIZE: u32 = 4096;
 pub const CAPACITY: u32 = 32 * 1024 * 1024;
 
-/// JEDEC ID a healthy W25Q256JV returns: Winbond (0xEF), SPI memory (0x40),
-/// 256 Mbit (0x19). A reading of all-zeros or all-ones means the chip isn't
-/// answering (wiring, power, or clock).
-pub const EXPECTED_JEDEC_ID: [u8; 3] = [0xEF, 0x40, 0x19];
+/// Mfr + device id a healthy W25Q256JV returns to the 0x90 command: Winbond
+/// (0xEF) and device id 0x18. Read over the addressed path, which clocks
+/// cleanly. A reading of all-zeros or all-ones means the chip isn't answering
+/// (wiring, power, or clock).
+pub const EXPECTED_MFR_DEVICE_ID: [u8; 2] = [0xEF, 0x18];
 
 mod cmd {
     pub const WRITE_ENABLE: u8 = 0x06;
     pub const READ_STATUS_1: u8 = 0x05;
-    pub const READ_JEDEC_ID: u8 = 0x9F;
+    pub const READ_MFR_DEVICE_ID: u8 = 0x90;
     pub const READ_DATA: u8 = 0x03;
     pub const PAGE_PROGRAM: u8 = 0x02;
     pub const SECTOR_ERASE_4K: u8 = 0x20;
@@ -71,7 +72,7 @@ fn cmd_only(instruction: u8) -> TransferConfig {
     }
 }
 
-/// Single-line transfer: instruction then read data, no address (JEDEC ID, status).
+/// Single-line transfer: instruction then read data, no address (status register).
 fn cmd_read(instruction: u8) -> TransferConfig {
     TransferConfig {
         iwidth: OspiWidth::SING,
@@ -99,12 +100,15 @@ fn cmd_addr(instruction: u8, address: u32, with_data: bool) -> TransferConfig {
 }
 
 impl BoardFlash {
-    /// Read the 3-byte JEDEC ID. All-zeros/all-ones means the chip isn't responding.
-    pub fn jedec_id(&mut self) -> [u8; 3] {
-        let mut id = [0u8; 3];
+    /// Read Winbond mfr + device id via the 0x90 command. It carries a 24-bit
+    /// address, so it rides the addressed read path that clocks cleanly (unlike
+    /// the instruction-only 0x9F JEDEC read). Returns `[mfr, device]`;
+    /// all-zeros/all-ones means the chip isn't responding.
+    pub fn read_mfr_device_id(&mut self) -> [u8; 2] {
+        let mut id = [0u8; 2];
         let _ = self
             .ospi
-            .blocking_read(&mut id, cmd_read(cmd::READ_JEDEC_ID));
+            .blocking_read(&mut id, cmd_addr(cmd::READ_MFR_DEVICE_ID, 0x000000, true));
         id
     }
 
@@ -249,18 +253,30 @@ impl Flash {
             _wp: wp,
         };
 
-        // The 0x9F read's continuation bytes mis-clock on this OSPI path (an
-        // instruction-only-then-data read with no address phase), so only the
-        // manufacturer byte is trustworthy. Addressed reads/writes are clean
-        // (see `flash test`), so use byte 0 just as a "chip present" probe.
-        let id = flash.jedec_id();
-        if id[0] == EXPECTED_JEDEC_ID[0] {
-            defmt::info!("flash: Winbond present (mfr {=u8:#04x})", id[0]);
+        // Probe over the 0x90 (addressed) read: the instruction-only 0x9F JEDEC
+        // read mis-clocks its continuation bytes on this OSPI, so those bytes
+        // can't be trusted. The mfr byte governs present/absent; the device byte
+        // refines it to the expected part.
+        let id = flash.read_mfr_device_id();
+        if id == EXPECTED_MFR_DEVICE_ID {
+            defmt::info!(
+                "flash: W25Q256JV present (id {=u8:#04x} {=u8:#04x})",
+                id[0],
+                id[1]
+            );
+        } else if id[0] == EXPECTED_MFR_DEVICE_ID[0] {
+            defmt::warn!(
+                "flash: Winbond present, unexpected device id ({=u8:#04x} {=u8:#04x}, expected {=u8:#04x} {=u8:#04x})",
+                id[0],
+                id[1],
+                EXPECTED_MFR_DEVICE_ID[0],
+                EXPECTED_MFR_DEVICE_ID[1]
+            );
         } else {
             defmt::error!(
-                "flash: not responding (mfr {=u8:#04x}, expected {=u8:#04x})",
+                "flash: not responding (id {=u8:#04x} {=u8:#04x})",
                 id[0],
-                EXPECTED_JEDEC_ID[0]
+                id[1]
             );
         }
 
