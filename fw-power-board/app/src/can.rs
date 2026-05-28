@@ -3,12 +3,13 @@ use can_utils::rxtx::TypedCanTransmit;
 use core::sync::atomic::Ordering;
 use datatypes::status::{BoardId, BuildInformationCommon, StatusCommonMessage};
 use datatypes::units::RailStatus;
-use dp_backplane::Message;
+use dp_backplane::{ActivePowerSource, Message};
 use embassy_stm32::can::CanTx;
+use embassy_stm32::gpio::{Input, Level, Output};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::watch::Watch;
-use embassy_time::{Duration, Instant, Ticker, with_timeout};
+use embassy_time::{Duration, Instant, Ticker, Timer, with_timeout};
 use embedded_utils::ERROR_COUNT;
 use embedded_utils::fmt::{error, trace};
 
@@ -36,13 +37,48 @@ pub struct Outputs {
         max_freq_hz = 0.2
     )]
     pub build_info: Watch<CriticalSectionRawMutex, BuildInformationCommon, 1>,
+    #[broadcast(
+        map = "Message::ActivePowerSource(#value)",
+        min_freq_hz = 1.0,
+        max_freq_hz = 1.0
+    )]
+    pub active_power_source: Watch<CriticalSectionRawMutex, ActivePowerSource, 1>,
 }
 
 pub static OUTPUTS: Outputs = Outputs {
     rail_5v: Watch::new(),
     rail_24v: Watch::new(),
     build_info: Watch::new(),
+    active_power_source: Watch::new(),
 };
+
+#[embassy_executor::task]
+pub async fn active_power_source_task(
+    bat_p: Input<'static>,
+    ext_p: Input<'static>,
+    mut led_bat_p: Output<'static>,
+    mut led_ext_p: Output<'static>,
+) {
+    let active_power_sender = OUTPUTS.active_power_source.sender();
+
+    loop {
+        let bat_level = bat_p.get_level();
+        let ext_level = ext_p.get_level();
+        led_bat_p.set_level(bat_level);
+        led_ext_p.set_level(ext_level);
+
+        let active_source = if ext_level == Level::High {
+            ActivePowerSource::External
+        } else if bat_level == Level::High {
+            ActivePowerSource::Battery
+        } else {
+            ActivePowerSource::None
+        };
+        active_power_sender.send(active_source);
+
+        Timer::after(Duration::from_millis(100)).await;
+    }
+}
 
 #[embassy_executor::task]
 pub async fn can_board_status_task(
