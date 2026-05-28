@@ -7,11 +7,10 @@ mod build_info;
 mod buzzer;
 mod can;
 mod can_io;
-mod power_indicators;
 mod sensor_readout;
 mod unix_time;
 
-use crate::can::{OUTPUTS, THIS_BOARD_ID, can_board_status_task};
+use crate::can::{OUTPUTS, THIS_BOARD_ID, active_power_source_task, can_board_status_task};
 use crate::can_io::ReceivedMessage;
 use crate::unix_time::init_utc_clock;
 use board::{INA232_I2C_ADDR, Irqs};
@@ -120,9 +119,9 @@ async fn main(spawner: Spawner) -> ! {
     // Spawn activity LED
     spawner.spawn(blink::blink(led_yellow).expect("Failed to spawn blink task"));
 
-    // Spawn power rail indicator LED task
+    // Spawn active power source + indicator task
     spawner.spawn(
-        power_indicators::power_indicators(bat_p, ext_p, led_bat_p, led_ext_p)
+        active_power_source_task(bat_p, ext_p, led_bat_p, led_ext_p)
             .expect("Failed to spawn power rail indicator task"),
     );
 
