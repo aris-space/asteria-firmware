@@ -94,7 +94,7 @@ pub async fn can_board_status_task(
         let mut tx = can_tx.lock().await;
         match with_timeout(CAN_SEND_TIMEOUT, tx.transmit(msg)).await {
             Ok(Ok(())) => {
-                trace!("sent backplane status");
+                trace!("sent Backplane status");
             }
             Ok(Err(err)) => {
                 error!("CAN TX error: {:?}", err);

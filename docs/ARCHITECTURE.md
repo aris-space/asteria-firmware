@@ -23,7 +23,7 @@ MCU families in use:
 | `fw-fuel-control-board` | `STM32G473RCTx` | `STM32_Programmer_CLI` + `probe-rs attach` |
 | `fw-lox-valve-control-board` | `STM32G4A1KETx` | `probe-rs run` |
 | `fw-oxidizer-control-board` | `STM32G473RCTx` | `STM32_Programmer_CLI` + `probe-rs attach` |
-| `fw-power-board` | `STM32G473RCTx` | `probe-rs run` |
+| `fw-backplane` | `STM32G473RCTx` | `probe-rs run` |
 | `fw-recovery-board` | `STM32G473RCTx` | `probe-rs run` |
 | `fw-sensor-carrier` | `STM32H723ZG` | `STM32_Programmer_CLI` + `probe-rs attach` |
 | `fw-test-board` | `STM32G473RCTx` | `probe-rs run` |
