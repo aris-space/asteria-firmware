@@ -133,7 +133,7 @@ impl<'a> DPR<'a> {
             }
         }
 
-        info!("[DPR] State: {}, Pressure {}", self.loop_state, self.pressure);
+        info!("[DPR] State: {}; [DPR] Pin State: {}", self.loop_state, self.valve_pin.get_output_level());
         Timer::after(RELAXED_TICK_DURATION).await;
     }
 
