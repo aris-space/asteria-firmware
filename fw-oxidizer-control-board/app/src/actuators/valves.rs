@@ -18,10 +18,10 @@ async fn valve_task_impl(
     loop {
         let state = watch.changed().await;
         match state {
-            NormallyOpenValve::Open => {
+            NormallyOpenValve::Closed => {
                 valve.set_high();
             }
-            NormallyOpenValve::Closed => {
+            NormallyOpenValve::Open => {
                 valve.set_low();
             }
         }
