@@ -21,27 +21,27 @@ pub struct BoardState {
     // Pressure sensors
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::OxidizerTankPressureSensor1(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub oxidizer_tank_pressure_sensor_1: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::OxidizerTankPressureSensor2(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub oxidizer_tank_pressure_sensor_2: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::OxidizerTankDifferentialPressure(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub oxidizer_tank_differential_pressure: Watch<ThreadModeRawMutex, BarG, 5>,
     // DPR
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::OxidizerDprValveState(#value)",
-        min_freq_hz = 5.0,
-        max_freq_hz = 5.0
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
     )]
     #[collector(
         pattern = "crate::can_impl::ReceivedMessage::OxidizerDprValveControlFC(#value) | crate::can_impl::ReceivedMessage::OxidizerDprValveControlRFS(#value)"
@@ -50,8 +50,8 @@ pub struct BoardState {
     // Valves
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::OxidizerVentValveState(#value)",
-        min_freq_hz = 5.0,
-        max_freq_hz = 5.0
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
     )]
     #[collector(
         pattern = "crate::can_impl::ReceivedMessage::OxidizerVentValveControlFC(#value) | crate::can_impl::ReceivedMessage::OxidizerVentValveControlRFS(#value)"
@@ -59,15 +59,15 @@ pub struct BoardState {
     pub oxidizer_vent_control: Watch<ThreadModeRawMutex, NormallyClosedValve, 5>,
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::BoardStatus(#value)",
-        min_freq_hz = 1.0,
-        max_freq_hz = 1.0
+        min_freq_hz = 0.8,
+        max_freq_hz = 1.2
     )]
     pub board_status:
         Watch<ThreadModeRawMutex, dp_oxidizer_control_board::OxidizerControlBoardStatus, 5>,
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::BuildInfo(#value)",
-        min_freq_hz = 0.2,
-        max_freq_hz = 0.2
+        min_freq_hz = 0.15,
+        max_freq_hz = 0.25
     )]
     pub build_info: Watch<ThreadModeRawMutex, BuildInformationCommon, 5>,
     // Board state

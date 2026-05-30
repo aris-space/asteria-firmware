@@ -20,33 +20,33 @@ pub struct BoardState {
     // Pressure sensors
     #[broadcast(
         map = "dp_fuel_control_board::Message::PressurizationLinePressure(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub pressurization_pressure: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
         map = "dp_fuel_control_board::Message::FuelTankPressureSensor1(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub fuel_tank_pressure_sensor_1: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
         map = "dp_fuel_control_board::Message::FuelTankPressureSensor2(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub fuel_tank_pressure_sensor_2: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
         map = "dp_fuel_control_board::Message::FuelTankPressureFiltered(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub fuel_tank_pressure_filtered: Watch<ThreadModeRawMutex, BarG, 5>,
     // DPR
     #[broadcast(
         map = "dp_fuel_control_board::Message::FuelDprValveState(#value)",
-        min_freq_hz = 5.0,
-        max_freq_hz = 5.0
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
     )]
     #[collector(
         pattern = "crate::can_impl::ReceivedMessage::FuelDprValveControlFC(#value) | crate::can_impl::ReceivedMessage::FuelDprValveControlRFS(#value)"
@@ -55,8 +55,8 @@ pub struct BoardState {
     // Valves
     #[broadcast(
         map = "dp_fuel_control_board::Message::PressurizationVentValveState(#value)",
-        min_freq_hz = 5.0,
-        max_freq_hz = 5.0
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
     )]
     #[collector(
         pattern = "crate::can_impl::ReceivedMessage::PressurizationVentValveControlFC(#value) | crate::can_impl::ReceivedMessage::PressurizationVentValveControlRFS(#value)"
@@ -64,8 +64,8 @@ pub struct BoardState {
     pub pressurization_vent_control: Watch<ThreadModeRawMutex, NormallyOpenValve, 5>,
     #[broadcast(
         map = "dp_fuel_control_board::Message::FuelVentValveState(#value)",
-        min_freq_hz = 5.0,
-        max_freq_hz = 5.0
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
     )]
     #[collector(
         pattern = "crate::can_impl::ReceivedMessage::FuelVentValveControlFC(#value) | crate::can_impl::ReceivedMessage::FuelVentValveControlRFS(#value)"
@@ -73,14 +73,14 @@ pub struct BoardState {
     pub fuel_vent_control: Watch<ThreadModeRawMutex, NormallyOpenValve, 5>,
     #[broadcast(
         map = "dp_fuel_control_board::Message::BoardStatus(#value)",
-        min_freq_hz = 1.0,
-        max_freq_hz = 1.0
+        min_freq_hz = 0.8,
+        max_freq_hz = 1.2
     )]
     pub board_status: Watch<ThreadModeRawMutex, dp_fuel_control_board::FuelControlBoardStatus, 5>,
     #[broadcast(
         map = "dp_fuel_control_board::Message::BuildInfo(#value)",
-        min_freq_hz = 0.2,
-        max_freq_hz = 0.2
+        min_freq_hz = 0.15,
+        max_freq_hz = 0.25
     )]
     pub build_info: Watch<ThreadModeRawMutex, BuildInformationCommon, 5>,
     // Board state

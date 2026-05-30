@@ -20,39 +20,39 @@ pub struct BoardState {
     // Sensors
     #[broadcast(
         map = "dp_engine_control_board::Message::ChamberPressure(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub eng_cc_p: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
         map = "dp_engine_control_board::Message::InjectorFuelPressure(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub fss_inj_p: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
         map = "dp_engine_control_board::Message::InjectorOxidizerPressure(#value)",
-        min_freq_hz = 20.0,
-        max_freq_hz = 20.0
+        min_freq_hz = 15.0,
+        max_freq_hz = 22.0
     )]
     pub oss_inj_p: Watch<ThreadModeRawMutex, BarG, 5>,
     #[broadcast(
         map = "dp_engine_control_board::Message::InjectorFuelTemperature(#value)",
-        min_freq_hz = 10.0,
-        max_freq_hz = 10.0
+        min_freq_hz = 8.0,
+        max_freq_hz = 12.0
     )]
     pub fss_inj_t: Watch<ThreadModeRawMutex, Celsius, 5>,
     #[broadcast(
         map = "dp_engine_control_board::Message::OxidizerTankTemperature(#value)",
-        min_freq_hz = 10.0,
-        max_freq_hz = 10.0
+        min_freq_hz = 8.0,
+        max_freq_hz = 12.0
     )]
     pub oss_tnk_t: Watch<ThreadModeRawMutex, Celsius, 5>,
     // Valves
     #[broadcast(
         map = "dp_engine_control_board::Message::FuelMainValveState(#value)",
-        min_freq_hz = 5.0,
-        max_freq_hz = 5.0
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
     )]
     #[collector(
         pattern = "crate::can_impl::ReceivedMessage::FuelMainValveControlFC(#value) | crate::can_impl::ReceivedMessage::FuelMainValveControlRFS(#value)"
@@ -60,8 +60,8 @@ pub struct BoardState {
     pub fuel_main_control: Watch<ThreadModeRawMutex, NormallyClosedValve, 5>,
     #[broadcast(
         map = "dp_engine_control_board::Message::OxidizerMainValveState(#value)",
-        min_freq_hz = 5.0,
-        max_freq_hz = 5.0
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
     )]
     #[collector(
         pattern = "crate::can_impl::ReceivedMessage::OxidizerMainValveControlFC(#value) | crate::can_impl::ReceivedMessage::OxidizerMainValveControlRFS(#value)"
@@ -70,15 +70,15 @@ pub struct BoardState {
     // Status
     #[broadcast(
         map = "dp_engine_control_board::Message::BoardStatus(#value)",
-        min_freq_hz = 1.0,
-        max_freq_hz = 1.0
+        min_freq_hz = 0.8,
+        max_freq_hz = 1.2
     )]
     pub board_status:
         Watch<ThreadModeRawMutex, dp_engine_control_board::EngineControlBoardStatus, 5>,
     #[broadcast(
         map = "dp_engine_control_board::Message::BuildInfo(#value)",
-        min_freq_hz = 0.2,
-        max_freq_hz = 0.2
+        min_freq_hz = 0.15,
+        max_freq_hz = 0.25
     )]
     pub build_info: Watch<ThreadModeRawMutex, BuildInformationCommon, 5>,
     // Board-local state
