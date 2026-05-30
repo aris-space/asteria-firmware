@@ -13,7 +13,7 @@ const RELAXED_TICK_DURATION: Duration = Duration::from_millis(50);
 const CRITICAL_TICK_DURATION: Duration = Duration::from_millis(1);
 
 pub const GAINS: PIDGain = PIDGain {
-    p: 10.0,
+    p: 16.0,
     i: 0.0,
     d: 0.0,
 };
