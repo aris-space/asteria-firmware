@@ -4,8 +4,8 @@ use_probe_rs := "true"
 
 import '../just/firmware.just'
 
-# Attach to the running firmware and record pressurization pressure to a CSV for 5 minutes.
-record-pressure:
+# Attach to the running firmware and record pressure + DPR state logs to a CSV.
+record:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -13,31 +13,53 @@ record-pressure:
     [[ -n "$elf" ]] || { echo "No built {{bin}} found under target/thumbv7em-none-eabihf." >&2; exit 1; }
 
     out="pressure_$(date +%Y%m%d_%H%M%S).csv"
-    echo "timestamp_s,pressurization_pressure_bar,fuel_tank_pressure_1_bar,fuel_tank_pressure_2_bar" > "$out"
-    echo "Recording pressurization pressure to $out for 5 minutes (Ctrl+C to stop early)..."
+    echo "timestamp_s,event,pressurization_pressure_bar,fuel_tank_pressure_1_bar,fuel_tank_pressure_2_bar,dpr_state,dpr_pin_state" > "$out"
+    echo "Recording pressure and DPR state logs to $out (Ctrl+C to stop)..."
 
     probe-rs attach --chip {{chip}} \
         --no-catch-hardfault \
         --no-catch-reset \
         "$elf" \
-    | grep --line-buffered "Pressurization pressure:" \
     | awk '
         BEGIN { OFS="," }
         {
             ts = $1
-            p0 = p1 = p2 = ""
-            for (i = 1; i <= NF; i++) {
-                if ($i == "pressure:" && p0 == "") {
-                    p0 = $(i+1)
-                } else if ($i == "pressure" && $(i+1) == "1:") {
-                    p1 = $(i+2)
-                } else if ($i == "pressure" && $(i+1) == "2:") {
-                    p2 = $(i+2)
+            gsub(/,/, "", ts)
+
+            if ($0 ~ /Pressurization pressure:/) {
+                p0 = p1 = p2 = ""
+                for (i = 1; i <= NF; i++) {
+                    if ($i == "pressure:" && p0 == "") {
+                        p0 = $(i+1)
+                    } else if ($i == "pressure" && $(i+1) == "1:") {
+                        p1 = $(i+2)
+                    } else if ($i == "pressure" && $(i+1) == "2:") {
+                        p2 = $(i+2)
+                    }
                 }
-            }
-            if (p0 != "" && p1 != "" && p2 != "") {
-                print ts, p0, p1, p2
-                fflush()
+                if (p0 != "" && p1 != "" && p2 != "") {
+                    gsub(/,/, "", p0)
+                    gsub(/,/, "", p1)
+                    gsub(/,/, "", p2)
+                    print ts, "pressure", p0, p1, p2, "", ""
+                    fflush()
+                }
+            } else if ($0 ~ /\[DPR\] State:/) {
+                state = pin = ""
+                for (i = 1; i <= NF; i++) {
+                    if ($i == "State:" && $(i-1) == "Pin") {
+                        pin = $(i+1)
+                    } else if ($i == "State:" && $(i-1) == "[DPR]") {
+                        state = $(i+1)
+                    }
+                }
+                gsub(/;/, "", state)
+                gsub(/,/, "", state)
+                gsub(/,/, "", pin)
+                if (state != "" && pin != "") {
+                    print ts, "dpr", "", "", "", state, pin
+                    fflush()
+                }
             }
         }
     ' >> "$out" || true
