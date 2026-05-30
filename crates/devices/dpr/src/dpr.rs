@@ -16,7 +16,7 @@ const RELAXED_TICK_DURATION: Duration = Duration::from_millis(50);
 const CRITICAL_TICK_DURATION: Duration = Duration::from_millis(1);
 
 pub const GAINS: PIDGain = PIDGain {
-    p: 10.0,
+    p: 16.0,
     i: 0.0,
     d: 0.0,
 };
@@ -121,12 +121,22 @@ impl<'a> DPR<'a> {
     pub async fn step(&mut self) {
         match self.loop_state {
             ActiveNominal => {
-                let elapsed_ms = self.last_time.elapsed().as_millis() as f32;
-                let opening_time = self.pid.update(self.pressure, elapsed_ms);
 
-                self.last_time = Instant::now();
+                if self.pid.max_ms < self.pid.min_ms {
+                    // Testing Opening Times
+                    let opening_time = self.pid.min_ms as u64;
+                    self.actuate_valve(opening_time).await;
 
-                if opening_time > 0 {
+                    self.loop_state = Passive;
+                    self.status_sender.send(self.loop_state);
+                    Timer::after_millis(500).await;
+                    let _ = self.control_receiver.try_changed();
+
+                } else {
+                    // Running Control Loop
+                    let elapsed_ms = self.last_time.elapsed().as_millis() as f32;
+                    self.last_time = Instant::now();
+                    let opening_time = self.pid.update(self.pressure, elapsed_ms);
                     self.actuate_valve(opening_time).await;
                 }
             }
