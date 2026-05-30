@@ -3,7 +3,6 @@ pub fn clocks_config() -> embassy_stm32::Config {
         AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPreDiv, PllQDiv, PllRDiv,
         PllSource, Sysclk,
     };
-    use embassy_stm32::rcc::mux;
     use embassy_stm32::time::Hertz;
 
     let mut config = embassy_stm32::Config::default();
@@ -32,12 +31,6 @@ pub fn clocks_config() -> embassy_stm32::Config {
 
     // recommended when SYSCLK > 150 MHz on G4
     config.rcc.boost = true;
-
-    // The STM32G4 reset value leaves the ADC12/ADC345 kernel clock disabled. Select SYSCLK here;
-    // Embassy's G4 ADC driver then programs the ADC common prescaler from the selected kernel
-    // clock, so 160 MHz SYSCLK becomes 40 MHz.
-    config.rcc.mux.adc12sel = mux::Adcsel::SYS;
-    config.rcc.mux.adc345sel = mux::Adcsel::SYS;
 
     config
 }

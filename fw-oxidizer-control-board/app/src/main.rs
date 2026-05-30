@@ -13,6 +13,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, OutputType, Speed};
 use embassy_stm32::i2c::I2c;
 use embassy_stm32::peripherals::FDCAN1;
+use embassy_stm32::rcc::mux;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, can, dma, i2c, peripherals};
@@ -80,7 +81,9 @@ async fn main(spawner: Spawner) -> ! {
         built_info::TARGET
     );
 
-    let config = clocks_config();
+    let mut config = clocks_config();
+    config.rcc.mux.adc12sel = mux::Adcsel::SYS;
+    config.rcc.mux.adc345sel = mux::Adcsel::SYS;
     let p = embassy_stm32::init(config);
 
     // LEDs

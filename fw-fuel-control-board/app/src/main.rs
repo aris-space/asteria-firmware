@@ -13,6 +13,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, OutputType, Speed};
 use embassy_stm32::i2c::I2c;
 use embassy_stm32::peripherals::FDCAN1;
+use embassy_stm32::rcc::mux;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, can, dma, i2c, peripherals};
@@ -50,7 +51,7 @@ use crate::buzzer::buzzer_task;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
-use trafag_pressure::{config_vref_buf, set_adc_configs};
+use trafag_pressure::config_vref_buf;
 
 bind_interrupts!(struct Irqs {
     I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;
@@ -80,7 +81,8 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     let mut config = clocks_config();
-    set_adc_configs(&mut config);
+    config.rcc.mux.adc12sel = mux::Adcsel::SYS;
+    config.rcc.mux.adc345sel = mux::Adcsel::SYS;
     let p = embassy_stm32::init(config);
 
     // LEDs
