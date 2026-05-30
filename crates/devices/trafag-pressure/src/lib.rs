@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 pub mod pressures;
 use crate::pressures::{OVERFLOW_THRESHOLD_V, TrafagPSens, UNDERFLOW_THRESHOLD_V, VOLTAGE_RANGE};
+use embassy_stm32::Peri;
 use embassy_stm32::adc::{
     Adc, AdcChannel, AdcConfig, AnyAdcChannel, Instance, Rovsm, RxDma, SampleTime,
     SpecialConverter, Temperature, Trovs, VrefInt,
@@ -11,8 +12,6 @@ use embassy_stm32::adc::{
 use embassy_stm32::dma;
 use embassy_stm32::interrupt::typelevel::Binding;
 use embassy_stm32::pac::vrefbuf::vals::{Hiz, Vrs};
-use embassy_stm32::rcc::mux;
-use embassy_stm32::{Config, Peri};
 use embedded_utils::info;
 
 // Voltage the VREFINT reg was calibrated at the factory
@@ -182,9 +181,4 @@ pub fn config_vref_buf() {
         // Wait for the VREFBUF to be ready
         cortex_m::asm::nop();
     }
-}
-
-pub fn set_adc_configs(config: &mut Config) {
-    config.rcc.mux.adc12sel = mux::Adcsel::SYS;
-    config.rcc.mux.adc345sel = mux::Adcsel::SYS;
 }

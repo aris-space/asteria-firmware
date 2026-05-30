@@ -3,6 +3,7 @@ use crate::drivers::pressure::{AnalogPressureDriver, AnalogPressureMeasurementRa
 use crate::sensors::{
     ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES, ENG_CC_P_RANGE, FUE_INJ_P_RANGE, OXD_INJ_P_RANGE,
 };
+use embassy_futures::join::join3;
 use embassy_stm32::Peri;
 use embassy_stm32::adc::AdcChannel;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH4, DMA2_CH2, DMA2_CH3, PB13, PC0, PC1};
@@ -74,10 +75,17 @@ pub async fn engine_pressure_acquisition(pressure_handles: EnginePressureHandles
         (1000.0 / ACQ_PRESSURE_FREQ_HZ) as u64,
     ));
     loop {
+        let (eng_cc_p, oss_inj_p, fss_inj_p) = join3(
+            eng_cc_p_handle.read_pressure(Irqs),
+            oss_inj_p_handle.read_pressure(Irqs),
+            eng_inj_p_handle.read_pressure(Irqs),
+        )
+        .await;
+
         let measurement = AnalogPressureMeasurementRaw {
-            eng_cc_p: eng_cc_p_handle.read_pressure(Irqs).await,
-            oss_inj_p: oss_inj_p_handle.read_pressure(Irqs).await,
-            fss_inj_p: eng_inj_p_handle.read_pressure(Irqs).await,
+            eng_cc_p,
+            oss_inj_p,
+            fss_inj_p,
         };
 
         let filtered = data_publisher.update(measurement);

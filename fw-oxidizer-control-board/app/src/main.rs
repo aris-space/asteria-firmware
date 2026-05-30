@@ -50,7 +50,7 @@ use data_core::can::hal::CanDecode as _;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
-use trafag_pressure::{config_vref_buf, set_adc_configs};
+use trafag_pressure::config_vref_buf;
 
 bind_interrupts!(struct Irqs {
     I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;
@@ -80,8 +80,7 @@ async fn main(spawner: Spawner) -> ! {
         built_info::TARGET
     );
 
-    let mut config = clocks_config();
-    set_adc_configs(&mut config);
+    let config = clocks_config();
     let p = embassy_stm32::init(config);
 
     // LEDs
