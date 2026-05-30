@@ -24,8 +24,3 @@ defmt = [
     "embedded-utils/defmt",
     "embassy-time/defmt",
 ]
-
-[lib]
-test = false
-doctest = false
-bench = false
