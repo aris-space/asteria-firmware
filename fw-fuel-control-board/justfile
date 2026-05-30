@@ -9,8 +9,9 @@ record-pressure:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    elf="$(find "target/thumbv7em-none-eabihf" -type f -name "{{bin}}" -print0 | xargs -0 ls -t 2>/dev/null | head -n1 || true)"
-    [[ -n "$elf" ]] || { echo "No built {{bin}} found under target/thumbv7em-none-eabihf." >&2; exit 1; }
+    target_dir="$(cargo metadata --format-version=1 --no-deps | jq -r '.target_directory')"
+    elf="$(find "$target_dir/{{target}}" -type f -name "{{bin}}" -print0 | xargs -0 ls -t 2>/dev/null | head -n1 || true)"
+    [[ -n "$elf" ]] || { echo "No built {{bin}} found under $target_dir/{{target}}." >&2; exit 1; }
 
     out="pressure_$(date +%Y%m%d_%H%M%S).csv"
     echo "timestamp_s,pressurization_pressure_bar,fuel_tank_pressure_1_bar,fuel_tank_pressure_2_bar" > "$out"
