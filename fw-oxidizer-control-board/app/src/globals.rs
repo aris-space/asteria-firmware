@@ -3,7 +3,7 @@ use crate::drivers::WATCH;
 use crate::drivers::solenoid_detection::SolenoidStates;
 use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
-use datatypes::actuator::{DPRValve, NormallyClosedValve};
+use datatypes::actuator::{DPRValve, NormallyOpenValve};
 use datatypes::status::BuildInformationCommon;
 use datatypes::units::BarG;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
@@ -56,7 +56,7 @@ pub struct BoardState {
     #[collector(
         pattern = "crate::can_impl::ReceivedMessage::OxidizerVentValveControlFC(#value) | crate::can_impl::ReceivedMessage::OxidizerVentValveControlRFS(#value)"
     )]
-    pub oxidizer_vent_control: Watch<ThreadModeRawMutex, NormallyClosedValve, 5>,
+    pub oxidizer_vent_control: Watch<ThreadModeRawMutex, NormallyOpenValve, 5>,
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::BoardStatus(#value)",
         min_freq_hz = 0.8,

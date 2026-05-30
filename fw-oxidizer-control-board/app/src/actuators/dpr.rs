@@ -4,7 +4,6 @@ use crate::actuators::{CYCLE_TIME_MS, KD, KI, KP, SAFETY_LIMIT_BARG};
 use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
 use datatypes::actuator::DPRValve;
-use datatypes::status::ValveState::{Active, Inactive};
 use embassy_stm32::gpio::Output;
 use embassy_time::{Duration, Ticker};
 use embedded_utils::error;
@@ -24,7 +23,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
     let mut error_d = 0.0;
     let mut prev_error_p = 0.0;
 
-    let mut loop_state = Inactive;
+    let mut loop_state = false;
     let mut safety_limit_reached = false;
 
     let mut pressure = 0.0;
@@ -36,10 +35,10 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
             match cfg {
                 DPRValve::Enabled { setpoint: stp } => {
                     setpoint = stp;
-                    loop_state = Active;
+                    loop_state = true;
                 }
                 DPRValve::Disabled => {
-                    loop_state = Inactive;
+                    loop_state = false;
                 }
             }
         }
@@ -56,7 +55,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         // ToDo: implement correctly ask lennard he will yap about it
         if pressure >= SAFETY_LIMIT_BARG {
             error!("[DPR] Pressure limit exceeded with: {} barg", pressure);
-            loop_state = Inactive;
+            loop_state = false;
             safety_limit_reached = true;
             dpr_control_loop_sender.send(DPRValve::Disabled);
 
@@ -67,13 +66,13 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
 
             if safety_limit_reached {
                 safety_limit_reached = false;
-                loop_state = Active;
+                loop_state = true;
                 dpr_control_loop_sender.send(DPRValve::Enabled { setpoint });
             }
         }
 
         // PID Control
-        if loop_state == Active {
+        if loop_state == true {
             error_p = setpoint - pressure;
             error_i += error_p * CYCLE_TIME_MS;
             error_d = (error_p - prev_error_p) / CYCLE_TIME_MS;

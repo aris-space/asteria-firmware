@@ -1,6 +1,6 @@
 use crate::drivers::WATCH;
 use crate::globals::STATE;
-use datatypes::actuator::NormallyClosedValve;
+use datatypes::actuator::NormallyOpenValve;
 use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Receiver;
@@ -13,15 +13,15 @@ pub(crate) async fn valve_task(oxidizer_vent_valve: Output<'static>) {
 
 async fn valve_task_impl(
     mut valve: Output<'static>,
-    mut watch: Receiver<'static, ThreadModeRawMutex, NormallyClosedValve, WATCH>,
+    mut watch: Receiver<'static, ThreadModeRawMutex, NormallyOpenValve, WATCH>,
 ) {
     loop {
         let state = watch.changed().await;
         match state {
-            NormallyClosedValve::Open => {
+            NormallyOpenValve::Open => {
                 valve.set_high();
             }
-            NormallyClosedValve::Closed => {
+            NormallyOpenValve::Closed => {
                 valve.set_low();
             }
         }
