@@ -4,7 +4,8 @@ use_probe_rs := "true"
 
 import '../just/firmware.just'
 
-# Attach to the running firmware and record pressurization pressure to a CSV for 5 minutes.
+# Fuel-only lab helper: attach to running firmware and scrape the debug pressure log
+# from sensors/keller_analog_p.rs into a CSV. Keep this in sync with that log format.
 record-pressure:
     #!/usr/bin/env bash
     set -euo pipefail
