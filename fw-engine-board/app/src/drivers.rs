@@ -1,7 +1,7 @@
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
 
-pub(crate) mod pressure;
+pub(crate) mod analog_pressure;
 pub mod solenoid_detection;
 pub(crate) mod temperature;
 

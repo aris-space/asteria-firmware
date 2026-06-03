@@ -4,14 +4,14 @@ use crate::sensors::{
     ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES, FUEL_TANK_PRESSURE_1_RANGE,
     FUEL_TANK_PRESSURE_2_RANGE, PRESSURIZATION_PRESSURE_RANGE,
 };
+use analog_pressure::ADCPressure;
+use analog_pressure::pressures::TrafagPSens;
 use embassy_futures::join::join3;
 use embassy_stm32::Peri;
 use embassy_stm32::adc::AdcChannel;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH3, DMA1_CH4, DMA2_CH3, PB13, PC0, PC1};
 use embassy_time::{Duration, Ticker};
 use embedded_utils::fmt::info;
-use trafag_pressure::ADCPressure;
-use trafag_pressure::pressures::TrafagPSens;
 
 pub struct FuelPressureHandles {
     pub pressurization_pressure_adc: Peri<'static, ADC1>,

@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod actuators;
 mod build_info;
 mod buzzer;
 mod can_impl;
@@ -8,7 +9,6 @@ mod drivers;
 mod globals;
 pub(crate) mod k23_temperature_control;
 mod sensors;
-mod valves;
 
 use core::future::pending;
 use embassy_executor::Spawner;
@@ -34,6 +34,7 @@ mod built_info {
 #[cfg(feature = "defmt")]
 use {defmt_rtt as _, panic_probe as _};
 
+use crate::actuators::valves::{check_main_arming, valve_task};
 use crate::buzzer::buzzer_task;
 use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
@@ -41,8 +42,8 @@ use crate::globals::STATE;
 use crate::k23_temperature_control::k23_temperature_control;
 use crate::sensors::solenoid_current::solenoid_current_task;
 use crate::sensors::{OXD_RNL_T, OXD_TNK_T};
-use crate::valves::{check_main_arming, valve_task};
 use ads1120_thermocouples::{ADSThermocouples, PGAGain};
+use analog_pressure::config_vref_buf;
 use can_utils::broadcast::Broadcast as _;
 use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode as _;
@@ -60,9 +61,8 @@ use max31889_thermistor::MAX31889;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
+use sensors::keller_analog_p::{EnginePressureHandles, engine_pressure_acquisition};
 use sensors::thermocouples::thermocouple_task;
-use sensors::trafag_p::{EnginePressureHandles, engine_pressure_acquisition};
-use trafag_pressure::config_vref_buf;
 
 bind_interrupts!(struct Irqs {
     I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;

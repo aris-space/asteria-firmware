@@ -1,16 +1,16 @@
 use crate::Irqs;
-use crate::drivers::pressure::{AnalogPressureDriver, AnalogPressureMeasurementRaw};
+use crate::drivers::analog_pressure::{EnginePressureDriver, EnginePressureMeasurementRaw};
 use crate::sensors::{
     ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES, ENG_CC_P_RANGE, FUE_INJ_P_RANGE, OXD_INJ_P_RANGE,
 };
+use analog_pressure::ADCPressure;
+use analog_pressure::pressures::TrafagPSens;
 use embassy_futures::join::join3;
 use embassy_stm32::Peri;
 use embassy_stm32::adc::AdcChannel;
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, DMA1_CH4, DMA2_CH2, DMA2_CH3, PB13, PC0, PC1};
 use embassy_time::{Duration, Ticker};
 use embedded_utils::info;
-use trafag_pressure::ADCPressure;
-use trafag_pressure::pressures::TrafagPSens;
 
 pub struct EnginePressureHandles {
     pub eng_cc_p_adc: Peri<'static, ADC1>,
@@ -26,7 +26,7 @@ pub struct EnginePressureHandles {
 
 #[embassy_executor::task]
 pub async fn engine_pressure_acquisition(pressure_handles: EnginePressureHandles) {
-    let mut data_publisher = AnalogPressureDriver::new();
+    let mut data_publisher = EnginePressureDriver::new();
 
     let mut eng_cc_p_pin = pressure_handles.eng_cc_p_pin;
     let mut eng_inj_p_pin = pressure_handles.eng_inj_p_pin;
@@ -82,7 +82,7 @@ pub async fn engine_pressure_acquisition(pressure_handles: EnginePressureHandles
         )
         .await;
 
-        let measurement = AnalogPressureMeasurementRaw {
+        let measurement = EnginePressureMeasurementRaw {
             eng_cc_p,
             oss_inj_p,
             fss_inj_p,

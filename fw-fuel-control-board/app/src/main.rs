@@ -48,10 +48,10 @@ use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode as _;
 
 use crate::buzzer::buzzer_task;
+use analog_pressure::config_vref_buf;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
-use trafag_pressure::config_vref_buf;
 
 bind_interrupts!(struct Irqs {
     I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;

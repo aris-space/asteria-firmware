@@ -42,6 +42,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "analog-pressure"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "defmt 0.3.100",
+ "embassy-stm32",
+ "embedded-utils",
+]
+
+[[package]]
 name = "as-slice"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -798,6 +808,7 @@ version = "0.2.0"
 dependencies = [
  "ads1120-thermocouples",
  "ads1x1x",
+ "analog-pressure",
  "built",
  "can-utils",
  "cortex-m",
@@ -822,7 +833,6 @@ dependencies = [
  "panic-probe",
  "panic-reset",
  "thermocouple",
- "trafag-pressure",
 ]
 
 [[package]]
@@ -1573,16 +1583,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
-]
-
-[[package]]
-name = "trafag-pressure"
-version = "0.1.0"
-dependencies = [
- "cortex-m",
- "defmt 0.3.100",
- "embassy-stm32",
- "embedded-utils",
 ]
 
 [[package]]

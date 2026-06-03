@@ -7,7 +7,7 @@ authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-
 [dependencies]
 ads1120-thermocouples = { path = "../../crates/devices/ads1120-thermocouples" }
 max31889-thermistor = { path = "../../crates/devices/max31889-thermistor" }
-trafag-pressure = { path = "../../crates/devices/trafag-pressure" }
+analog-pressure = { path = "../../crates/devices/analog-pressure" }
 filters = { path = "../../crates/filters" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 can-utils = { path = "../../crates/can-utils" }
@@ -69,7 +69,7 @@ defmt = [
     "embedded-utils/defmt",
     "max31889-thermistor/defmt-03",
     "ads1120-thermocouples/defmt",
-    "trafag-pressure/defmt",
+    "analog-pressure/defmt",
 ]
 
 [[bin]]

@@ -45,13 +45,13 @@ use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
 use crate::sensors::keller_analog_p::{OxidizerPressureHandles, oxidizer_pressure_acquisition};
 use crate::sensors::solenoid_current::solenoid_current_task;
+use analog_pressure::config_vref_buf;
 use can_utils::broadcast::Broadcast as _;
 use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode as _;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
-use trafag_pressure::config_vref_buf;
 
 bind_interrupts!(struct Irqs {
     I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;

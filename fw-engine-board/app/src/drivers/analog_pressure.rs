@@ -9,21 +9,21 @@ const FILTER_SIGMA: f32 = 9.0;
 
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AnalogPressureMeasurementRaw {
+pub struct EnginePressureMeasurementRaw {
     pub eng_cc_p: f32,
     pub fss_inj_p: f32,
     pub oss_inj_p: f32,
 }
 
-pub struct AnalogPressureDriver {
+pub struct EnginePressureDriver {
     eng_cc_p_avg: GaussianMovingAverage<FILTER_WINDOW>,
     oss_inj_p_avg: GaussianMovingAverage<FILTER_WINDOW>,
     fss_inj_p_avg: GaussianMovingAverage<FILTER_WINDOW>,
 }
 
-impl AnalogPressureDriver {
+impl EnginePressureDriver {
     pub fn new() -> Self {
-        AnalogPressureDriver {
+        EnginePressureDriver {
             eng_cc_p_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
             oss_inj_p_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
             fss_inj_p_avg: GaussianMovingAverage::new(FILTER_SIGMA, FILTER_MEAN),
@@ -32,8 +32,8 @@ impl AnalogPressureDriver {
 
     pub fn update(
         &mut self,
-        mut value: AnalogPressureMeasurementRaw,
-    ) -> AnalogPressureMeasurementRaw {
+        mut value: EnginePressureMeasurementRaw,
+    ) -> EnginePressureMeasurementRaw {
         // Apply filtering to the raw sensor data
         value.eng_cc_p = self.eng_cc_p_avg.update(value.eng_cc_p);
         value.oss_inj_p = self.oss_inj_p_avg.update(value.oss_inj_p);
