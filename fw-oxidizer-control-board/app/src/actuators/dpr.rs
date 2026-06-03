@@ -72,7 +72,7 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         }
 
         // PID Control
-        if loop_state == true {
+        if loop_state {
             error_p = setpoint - pressure;
             error_i += error_p * CYCLE_TIME_MS;
             error_d = (error_p - prev_error_p) / CYCLE_TIME_MS;
