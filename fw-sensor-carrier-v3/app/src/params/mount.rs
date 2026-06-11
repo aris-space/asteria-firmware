@@ -17,6 +17,11 @@ impl ImuMount {
         rotation: [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
     };
 
+    pub const EVALUATION: Self = Self {
+        // Evaluation board mount: chip X/Y swapped and Y inverted relative to body frame
+        rotation: [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+    };
+
     pub fn rotation_matrix(&self) -> Matrix3<f32> {
         let r = &self.rotation;
         Matrix3::new(
@@ -26,8 +31,8 @@ impl ImuMount {
 }
 
 pub static IMU_MOUNTS: [Config<ImuMount, BYTES>; IMU_COUNT] = [
-    Config::new("imu_mount_0", ImuMount::DEFAULT),
-    Config::new("imu_mount_1", ImuMount::DEFAULT),
+    Config::new("imu_mount_0", ImuMount::EVALUATION),
+    Config::new("imu_mount_1", ImuMount::EVALUATION),
 ];
 
 indexed_loaders!(

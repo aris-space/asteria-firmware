@@ -10,9 +10,7 @@
 //! Publishes the latest state snapshot to `signals::STATE_ESTIMATE_WATCH`
 //! after each predict step (correction-only updates also publish).
 
-#[cfg(feature = "profiling")]
-use defmt::info;
-use defmt::{debug, trace, warn};
+use defmt::{debug, info, trace, warn};
 use ekf::measurements::gnss::{GeodeticOrigin, Gnss};
 use ekf::nalgebra::{UnitQuaternion, Vector3};
 use ekf::predictors::imu::{AccelConvention, Imu, ImuNoise};
@@ -21,7 +19,7 @@ use ekf::{
     StateVec,
 };
 use embassy_futures::select::{Either, select};
-use embassy_time::Instant;
+use embassy_time::{Duration, Instant};
 use static_cell::StaticCell;
 use ublox::GpsFix;
 
@@ -102,6 +100,7 @@ pub async fn task() -> ! {
     // params/ once that subsystem is reliable so we don't re-anchor on every
     // boot.
     let mut origin: Option<GeodeticOrigin<f64>> = None;
+    let mut next_pos_log_at: Instant = Instant::from_ticks(0);
 
     #[cfg(feature = "profiling")]
     let predict_stats = profiling::CycleStats::new();
@@ -161,6 +160,14 @@ pub async fn task() -> ! {
                 publisher.send(snapshot(ekf, ts));
                 trace!("ekf: predicted, dt={} us", dt_us);
 
+                if ts >= next_pos_log_at {
+                    info!(
+                        "ekf pos NED (m): n={} e={} d={}",
+                        ekf.state[IDX_N], ekf.state[IDX_E], ekf.state[IDX_D],
+                    );
+                    next_pos_log_at = ts + Duration::from_secs(1);
+                }
+
                 #[cfg(feature = "profiling")]
                 {
                     step_counter = step_counter.wrapping_add(1);
@@ -170,10 +177,16 @@ pub async fn task() -> ! {
                         let hw = profiling::msp_high_water().unwrap_or(0);
                         info!(
                             "ekf profile: predict cycles min={} avg={} max={} (n={}, ~{} us avg, ~{} us max); correct cycles min={} avg={} max={} (n={}, ~{} us avg, ~{} us max); MSP high-water {} bytes",
-                            p_min, p_avg, p_max, p_n,
+                            p_min,
+                            p_avg,
+                            p_max,
+                            p_n,
                             profiling::cycles_to_us(p_avg),
                             profiling::cycles_to_us(p_max),
-                            c_min, c_avg, c_max, c_n,
+                            c_min,
+                            c_avg,
+                            c_max,
+                            c_n,
                             profiling::cycles_to_us(c_avg),
                             profiling::cycles_to_us(c_max),
                             hw,
@@ -215,7 +228,7 @@ pub async fn task() -> ! {
                 let v_acc_m = pvt.vert_accuracy as f64 * 1e-3;
                 let stddev = Vector3::new(h_acc_m, h_acc_m, v_acc_m);
 
-                let measurement = Gnss::<f64>::from_geodetic(lat, lon, alt, origin_ref, stddev);
+                let mut measurement = Gnss::<f64>::from_geodetic(lat, lon, alt, origin_ref, stddev);
 
                 // TODO: out-of-order handling. The GNSS readout backdates each
                 // sample by GNSS_DELAY (~100 ms) but the EKF state represents
@@ -225,7 +238,7 @@ pub async fn task() -> ! {
                 #[cfg(feature = "profiling")]
                 let t0 = profiling::cycle_count();
 
-                ekf.correct(&measurement);
+                ekf.correct(&mut measurement);
 
                 #[cfg(feature = "profiling")]
                 correct_stats.observe(profiling::cycle_count().wrapping_sub(t0));

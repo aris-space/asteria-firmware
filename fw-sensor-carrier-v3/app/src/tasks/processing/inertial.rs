@@ -1,41 +1,39 @@
+use defmt::info;
 use embassy_futures::join::join;
+use embassy_time::Timer;
 use lsm6dso32::types::{Acceleration, AngularRate};
 use nalgebra::{Matrix3, Vector3};
 
 use crate::measurements::{ImuData, ImuSample, Timestamped};
-use crate::params::calibration::{self, ImuCalib};
-use crate::params::mount::{self, ImuMount};
+use crate::params::calibration;
+use crate::params::mount;
 use crate::params::{Config, ConfigSnapshot, ConfigSource};
 use crate::sensors::{IMU_0, IMU_1, ImuId};
 use crate::signals;
 use crate::storage;
 
+/// Delay before the stationary calibration starts, to let the gyro's turn-on
+/// bias transient settle as the die warms up.
+const CAL_WARMUP_SECS: u64 = 30;
+
+/// Samples averaged for the boot-time stationary calibration.
+const CAL_SAMPLES: u32 = 32 * 1024;
+
+/// Expected specific-force reading in the body (NED)
+const EXPECTED_ACCEL_BODY_G: Vector3<f32> = Vector3::new(0.0, 0.0, -1.0);
+
 struct ImuConfig {
     full_rot: Matrix3<f32>,
-    bias: Vector3<f32>,
+    accel_bias: Vector3<f32>,
+    gyro_bias: Vector3<f32>,
 }
 
 impl ImuConfig {
-    fn new(mount: &ImuMount, cal: &ImuCalib) -> Self {
-        let mount = mount.rotation_matrix();
-        if cal.valid {
-            Self {
-                full_rot: cal.fine_rot_matrix() * mount,
-                bias: cal.bias_vector(),
-            }
-        } else {
-            Self {
-                full_rot: mount,
-                bias: Vector3::zeros(),
-            }
-        }
-    }
-
     fn process(&self, sample: &ImuSample) -> ImuSample {
         let a = &sample.data.value.accel;
         let g = &sample.data.value.gyro;
-        let accel = self.full_rot * Vector3::new(a.x, a.y, a.z);
-        let gyro = self.full_rot * (Vector3::new(g.x, g.y, g.z) - self.bias);
+        let accel = self.full_rot * (Vector3::new(a.x, a.y, a.z) - self.accel_bias);
+        let gyro = self.full_rot * (Vector3::new(g.x, g.y, g.z) - self.gyro_bias);
 
         ImuSample {
             sensor_id: sample.sensor_id,
@@ -74,14 +72,53 @@ fn startup_value<T: Clone, const BYTES: usize, const WATCHERS: usize>(
     }
 }
 
-fn config_for(id: ImuId) -> ImuConfig {
-    let mount = startup_value(mount::imu_mount(id));
-    let calib = startup_value(calibration::imu_cal(id));
-    ImuConfig::new(&mount, &calib)
+/// Mount rotation composed with any stored fine-rotation correction. The
+/// runtime stationary cal still owns the bias — only the rotation comes
+/// from storage.
+fn full_rot_for(id: ImuId) -> Matrix3<f32> {
+    let mount = startup_value(mount::imu_mount(id)).rotation_matrix();
+    let cal = startup_value(calibration::imu_cal(id));
+    if cal.valid {
+        cal.fine_rot_matrix() * mount
+    } else {
+        mount
+    }
 }
 
-async fn run(id: ImuId, cfg: &ImuConfig) -> ! {
+async fn run(id: ImuId) -> ! {
     let mut sub = signals::IMU_CHANNELS[id.index()].subscriber().unwrap();
+    let full_rot = full_rot_for(id);
+
+    Timer::after_secs(CAL_WARMUP_SECS).await;
+
+    // Stationary calibration. Assumes the unit is at rest with attitude
+    // identity in NED.
+    let mut accel_sum = Vector3::<f32>::zeros();
+    let mut gyro_sum = Vector3::<f32>::zeros();
+    for _ in 0..CAL_SAMPLES {
+        let sample = sub.next_message_pure().await;
+        let a = &sample.data.value.accel;
+        let g = &sample.data.value.gyro;
+        accel_sum += Vector3::new(a.x, a.y, a.z);
+        gyro_sum += Vector3::new(g.x, g.y, g.z);
+    }
+    let n = CAL_SAMPLES as f32;
+    let expected_accel_raw = full_rot.transpose() * EXPECTED_ACCEL_BODY_G;
+    let cfg = ImuConfig {
+        full_rot,
+        accel_bias: accel_sum / n - expected_accel_raw,
+        gyro_bias: gyro_sum / n,
+    };
+    info!(
+        "IMU {} cal: accel_bias=[{}, {}, {}] g, gyro_bias=[{}, {}, {}] dps",
+        id.index(),
+        cfg.accel_bias.x,
+        cfg.accel_bias.y,
+        cfg.accel_bias.z,
+        cfg.gyro_bias.x,
+        cfg.gyro_bias.y,
+        cfg.gyro_bias.z,
+    );
 
     loop {
         let sample = sub.next_message_pure().await;
@@ -92,10 +129,6 @@ async fn run(id: ImuId, cfg: &ImuConfig) -> ! {
 #[embassy_executor::task]
 pub async fn task() -> ! {
     storage::CONFIG_READY.wait().await;
-
-    let cfg0 = config_for(IMU_0);
-    let cfg1 = config_for(IMU_1);
-
-    join(run(IMU_0, &cfg0), run(IMU_1, &cfg1)).await;
+    join(run(IMU_0), run(IMU_1)).await;
     unreachable!("processing tasks should never end");
 }
