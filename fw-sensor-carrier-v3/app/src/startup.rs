@@ -1,12 +1,13 @@
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::exti::ExtiInput;
-use embassy_stm32::gpio::Output;
+use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
 use embassy_time::Duration;
 
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::flash::BoardFlash;
+use crate::resources::sd::Sd;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
     BAROMETER_0, BAROMETER_1, GNSS_0, GNSS_1, IMU_0, IMU_1, MAGNETOMETER_0, MAGNETOMETER_1,
@@ -25,6 +26,7 @@ pub struct PreparedBoard {
     pub services: ServiceResources,
     pub sensors: SensorResources,
     pub flash: &'static mut BoardFlash,
+    pub sd: (Sd, Input<'static>, Output<'static>),
 }
 
 #[allow(dead_code)]
@@ -62,8 +64,11 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
 
     let flash = resources.flash.setup();
 
+    let sd = resources.sd_card.setup();
+
     PreparedBoard {
         flash,
+        sd,
         services: ServiceResources {
             green_led,
             yellow_led,
@@ -138,4 +143,21 @@ pub fn spawn_tasks(
     // Storage/config init runs on thread-mode so blocking flash I/O never starves readouts.
     thread_spawner
         .spawn(storage::task(board.flash, defmt_consumer).expect("Failed to spawn storage task"));
+
+    // SD logging runs on thread-mode so FAT write latency cannot starve the
+    // interrupt-priority sensor readouts. Producers feed the writer via an
+    // internal channel.
+    let (sdmmc, sd_detect, sd_power) = board.sd;
+    thread_spawner
+        .spawn(tasks::sd::task(sdmmc, sd_detect, sd_power).expect("Failed to spawn SD writer task"));
+    // Only IMU_0 is logged: it drives the EKF, and dropping IMU_1 cuts the SD
+    // record rate by a third (more headroom for card-latency spikes).
+    thread_spawner
+        .spawn(tasks::sd::imu_producer(IMU_0).expect("Failed to spawn SD IMU 0 producer"));
+    thread_spawner
+        .spawn(tasks::sd::gnss_producer(GNSS_0).expect("Failed to spawn SD GNSS 0 producer"));
+    thread_spawner
+        .spawn(tasks::sd::gnss_producer(GNSS_1).expect("Failed to spawn SD GNSS 1 producer"));
+    // EKF state is logged directly from the state-estimation task (every
+    // predict), so there is no Watch-polling producer here.
 }

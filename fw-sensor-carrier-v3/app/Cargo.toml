@@ -7,9 +7,6 @@ authors = ["Louis Schell <louis.schell1@gmx.de>"]
 [features]
 default = ["storage"]
 storage = ["dep:w25q256jv", "dep:littlefs2", "dep:generic-array"]
-# Enables the on-device profiling helpers (DWT cycle timing of EKF predict,
-# MSP stack high-water tracking). See app/src/profiling.rs.
-profiling = []
 
 [dependencies]
 # cortex-m setup
@@ -40,7 +37,10 @@ assign-resources = "0.5.0"
 static_cell = "2.1.1"
 
 # State estimation
-ekf = { path = "../../ba-implementation/ekf", default-features = false, features = ["no_std"] }
+ekf = { path = "../../ba-implementation/ekf", default-features = false, features = [
+    "no_std",
+    "stats",
+] }
 
 # Sensor Drivers
 ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
@@ -60,6 +60,14 @@ embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 embedded-hal-bus = { version = "0.3.0", features = ["async"] }
 embedded-io-async = { version = "0.7.0", default-features = false, features = ["defmt"] }
+
+# SD card: FAT filesystem over the raw-LBA SDMMC block device. Pinned to the
+# same MabezDev revision the validation crate proved out on this board.
+embedded-fatfs = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc", version = "0.1.0", default-features = false, features = [
+    "lfn",
+] }
+block-device-adapters = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc", version = "0.2.0" }
+embedded-partitions = { git = "https://github.com/MabezDev/embedded-fatfs", rev = "518528cc", version = "0.1.0" }
 
 defmt = { version = "1.0.1" }
 defmt-brtt = { version = "0.1.1", default-features = false, features = [

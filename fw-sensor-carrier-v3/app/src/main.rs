@@ -10,14 +10,13 @@ mod built;
 mod macros;
 mod measurements;
 mod params;
-#[cfg(feature = "profiling")]
-mod profiling;
 mod resources;
 mod sensors;
 mod signals;
 mod startup;
 mod storage;
 mod tasks;
+mod timing;
 
 mod clocks {
     include!(concat!(
@@ -35,13 +34,9 @@ async fn main(thread_spawner: Spawner) -> ! {
 
     let p = embassy_stm32::init(clocks::clocks_config());
 
-    #[cfg(feature = "profiling")]
-    {
-        profiling::init_dwt();
-        // SAFETY: called before any tasks are spawned, so MSP is only in use
-        // by this thread.
-        unsafe { profiling::paint_msp() };
-    }
+    // Enable the DWT cycle counter — used for the per-step predict/correct
+    // durations logged to the SD card.
+    timing::init_dwt();
 
     let board = startup::prepare(resources::split(p));
     let level_0_spawner = interrupt_executor!(TIM2, P6);

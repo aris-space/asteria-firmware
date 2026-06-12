@@ -10,7 +10,9 @@
 //! Publishes the latest state snapshot to `signals::STATE_ESTIMATE_WATCH`
 //! after each predict step (correction-only updates also publish).
 
-use defmt::{debug, info, trace, warn};
+use defmt::{info, warn};
+use ekf::adaptive_measurement::{ExponentialDecay, Window};
+use ekf::measurements::AdaptiveGnss;
 use ekf::measurements::gnss::{GeodeticOrigin, Gnss};
 use ekf::nalgebra::{UnitQuaternion, Vector3};
 use ekf::predictors::imu::{AccelConvention, Imu, ImuNoise};
@@ -24,10 +26,10 @@ use static_cell::StaticCell;
 use ublox::GpsFix;
 
 use crate::measurements::StateEstimate;
-#[cfg(feature = "profiling")]
-use crate::profiling;
 use crate::sensors::{GNSS_0, GnssId, IMU_0, ImuId};
 use crate::signals;
+use crate::tasks::sd::{self, GnssCorr};
+use crate::timing;
 
 /// Convert accelerometer reading (g) to m/s².
 const G_TO_MPS2: f64 = 9.81;
@@ -48,6 +50,83 @@ const PRIMARY_GNSS: GnssId = GNSS_0;
 /// Reject GNSS fixes below this satellite count. Tuneable; 5 keeps us above
 /// the bare 4-satellite minimum for a 3D fix and rejects glitches at startup.
 const MIN_SATELLITES_FOR_FIX: u8 = 5;
+
+/// How GNSS measurements are folded into the EKF. Only the selected
+/// [`GNSS_MODE`] is active; the others are compile-time alternatives.
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GnssMode {
+    /// Fixed measurement noise taken from the receiver's reported accuracy.
+    Fixed,
+    /// Adaptive `R` from a sliding window of recent residuals.
+    AdaptiveWindow,
+    /// Adaptive `R` from an exponentially-weighted moving average of residuals.
+    AdaptiveEma,
+}
+
+/// Selected GNSS correction mode. Change to switch strategy.
+const GNSS_MODE: GnssMode = GnssMode::Fixed;
+/// Window length (number of fixes) for [`GnssMode::AdaptiveWindow`].
+const GNSS_ADAPT_WINDOW: usize = 20;
+/// Smoothing factor for [`GnssMode::AdaptiveEma`] (0..1; higher = faster).
+const GNSS_ADAPT_ALPHA: f64 = 0.1;
+/// Initial / fallback 1-sigma per horizontal axis [m] for adaptive modes,
+/// used until the estimator has enough data. Vertical uses 2x.
+const GNSS_ADAPT_INIT_STDDEV: f64 = 5.0;
+/// Initial variance seed [m²] for the EMA strategy.
+const GNSS_ADAPT_INIT_VAR: f64 = 25.0;
+
+/// Holds the active GNSS corrector. The adaptive variants carry per-axis
+/// estimator state that must persist across fixes, so the object lives for the
+/// whole task rather than being rebuilt per correction. Only the variant for
+/// the selected [`GNSS_MODE`] is constructed.
+#[allow(dead_code)]
+enum GnssCorrector {
+    Fixed,
+    Window(AdaptiveGnss<Window<f64, GNSS_ADAPT_WINDOW>, f64>),
+    Ema(AdaptiveGnss<ExponentialDecay<f64>, f64>),
+}
+
+impl GnssCorrector {
+    fn new() -> Self {
+        let init_stddev = Vector3::new(
+            GNSS_ADAPT_INIT_STDDEV,
+            GNSS_ADAPT_INIT_STDDEV,
+            GNSS_ADAPT_INIT_STDDEV * 2.0,
+        );
+        match GNSS_MODE {
+            GnssMode::Fixed => GnssCorrector::Fixed,
+            GnssMode::AdaptiveWindow => GnssCorrector::Window(AdaptiveGnss::<
+                Window<f64, GNSS_ADAPT_WINDOW>,
+                f64,
+            >::from_ned(
+                Vector3::zeros(), init_stddev
+            )),
+            GnssMode::AdaptiveEma => {
+                GnssCorrector::Ema(AdaptiveGnss::<ExponentialDecay<f64>, f64>::from_ned_ema(
+                    Vector3::zeros(),
+                    init_stddev,
+                    GNSS_ADAPT_ALPHA,
+                    GNSS_ADAPT_INIT_VAR,
+                ))
+            }
+        }
+    }
+}
+
+/// Build a log/diagnostics record from a corrected `Gnss` measurement's stats.
+fn gnss_corr_record(ts: Instant, gnss: &Gnss<f64>, adapted: Option<[Option<f64>; 3]>) -> GnssCorr {
+    let f = |o: Option<f64>| o.map(|v| v as f32).unwrap_or(f32::NAN);
+    let triple = |a: [Option<f64>; 3]| [f(a[0]), f(a[1]), f(a[2])];
+    GnssCorr {
+        ts_us: ts.as_micros(),
+        residual: triple(gnss.residuals),
+        innovation_cov: triple(gnss.innovation_covariances),
+        adapted_var: adapted.map(triple).unwrap_or([f32::NAN; 3]),
+        // Filled in by the caller once the correct step has been timed.
+        correct_us: f32::NAN,
+    }
+}
 
 static EKF_CELL: StaticCell<Ekf<f64>> = StaticCell::new();
 
@@ -102,15 +181,9 @@ pub async fn task() -> ! {
     let mut origin: Option<GeodeticOrigin<f64>> = None;
     let mut next_pos_log_at: Instant = Instant::from_ticks(0);
 
-    #[cfg(feature = "profiling")]
-    let predict_stats = profiling::CycleStats::new();
-    #[cfg(feature = "profiling")]
-    let correct_stats = profiling::CycleStats::new();
-    /// Log timing + stack stats every N predicts (~833 Hz → ~1.2 s at 1024).
-    #[cfg(feature = "profiling")]
-    const LOG_EVERY: u32 = 1024;
-    #[cfg(feature = "profiling")]
-    let mut step_counter: u32 = 0;
+    // Active GNSS corrector. Adaptive variants accumulate per-axis noise
+    // estimates across fixes, so this is created once and reused.
+    let mut gnss_corrector = GnssCorrector::new();
 
     loop {
         match select(imu_sub.next_message_pure(), gnss_sub.next_message_pure()).await {
@@ -149,16 +222,16 @@ pub async fn task() -> ! {
                     ImuNoise::new(ACCEL_STDDEV_MPS2, GYRO_STDDEV_RADPS),
                 );
 
-                #[cfg(feature = "profiling")]
-                let t0 = profiling::cycle_count();
-
+                let t0 = timing::cycle_count();
                 ekf.predict(&mut imu, dt);
+                let predict_cycles = timing::cycle_count().wrapping_sub(t0);
 
-                #[cfg(feature = "profiling")]
-                predict_stats.observe(profiling::cycle_count().wrapping_sub(t0));
-
-                publisher.send(snapshot(ekf, ts));
-                trace!("ekf: predicted, dt={} us", dt_us);
+                let snap = snapshot(ekf, ts);
+                publisher.send(snap);
+                // Log every predict to the SD card (the STATE_ESTIMATE_WATCH is
+                // lossy/latest-only, so logging straight from here is the only
+                // way to capture each one), tagged with the predict duration.
+                sd::log_ekf_state(snap, timing::cycles_to_us_f32(predict_cycles));
 
                 if ts >= next_pos_log_at {
                     info!(
@@ -166,32 +239,6 @@ pub async fn task() -> ! {
                         ekf.state[IDX_N], ekf.state[IDX_E], ekf.state[IDX_D],
                     );
                     next_pos_log_at = ts + Duration::from_secs(1);
-                }
-
-                #[cfg(feature = "profiling")]
-                {
-                    step_counter = step_counter.wrapping_add(1);
-                    if step_counter % LOG_EVERY == 0 {
-                        let (p_min, p_avg, p_max, p_n) = predict_stats.snapshot_and_reset();
-                        let (c_min, c_avg, c_max, c_n) = correct_stats.snapshot_and_reset();
-                        let hw = profiling::msp_high_water().unwrap_or(0);
-                        info!(
-                            "ekf profile: predict cycles min={} avg={} max={} (n={}, ~{} us avg, ~{} us max); correct cycles min={} avg={} max={} (n={}, ~{} us avg, ~{} us max); MSP high-water {} bytes",
-                            p_min,
-                            p_avg,
-                            p_max,
-                            p_n,
-                            profiling::cycles_to_us(p_avg),
-                            profiling::cycles_to_us(p_max),
-                            c_min,
-                            c_avg,
-                            c_max,
-                            c_n,
-                            profiling::cycles_to_us(c_avg),
-                            profiling::cycles_to_us(c_max),
-                            hw,
-                        );
-                    }
                 }
             }
 
@@ -211,43 +258,61 @@ pub async fn task() -> ! {
                 let lon = pvt.lon_deg;
 
                 // Anchor the NED frame on the first qualifying fix.
-                let origin_ref = origin.get_or_insert_with(|| {
-                    debug!(
-                        "ekf: anchoring NED origin at lat={}, lon={}, alt_ellipsoid={}",
-                        lat, lon, alt,
-                    );
-                    GeodeticOrigin {
-                        lat_deg: lat,
-                        lon_deg: lon,
-                        alt_m: alt,
-                    }
+                let origin_ref = origin.get_or_insert_with(|| GeodeticOrigin {
+                    lat_deg: lat,
+                    lon_deg: lon,
+                    alt_m: alt,
                 });
 
                 // ublox accuracies are 1-sigma in millimetres. Convert to metres.
                 let h_acc_m = pvt.horiz_accuracy as f64 * 1e-3;
                 let v_acc_m = pvt.vert_accuracy as f64 * 1e-3;
                 let stddev = Vector3::new(h_acc_m, h_acc_m, v_acc_m);
-
-                let mut measurement = Gnss::<f64>::from_geodetic(lat, lon, alt, origin_ref, stddev);
+                let ts = sample.data.ts;
 
                 // TODO: out-of-order handling. The GNSS readout backdates each
                 // sample by GNSS_DELAY (~100 ms) but the EKF state represents
                 // "now". For milestone 1 we fold the correction into the
                 // current state and accept the resulting position bias
                 // (~v*0.1, e.g. 5 m at 50 m/s).
-                #[cfg(feature = "profiling")]
-                let t0 = profiling::cycle_count();
+                // Apply the correction with the selected corrector, then pull
+                // out the residual / innovation-covariance stats it recorded.
+                // The correct step is timed tightly (excludes the geodetic→NED
+                // conversion done by from/set_geodetic).
+                let (mut corr, correct_cycles) = match &mut gnss_corrector {
+                    GnssCorrector::Fixed => {
+                        let mut m = Gnss::<f64>::from_geodetic(lat, lon, alt, origin_ref, stddev);
+                        let t0 = timing::cycle_count();
+                        ekf.correct(&mut m);
+                        let cyc = timing::cycle_count().wrapping_sub(t0);
+                        (gnss_corr_record(ts, &m, None), cyc)
+                    }
+                    GnssCorrector::Window(m) => {
+                        m.set_geodetic(lat, lon, alt, origin_ref);
+                        let t0 = timing::cycle_count();
+                        ekf.correct(m);
+                        let cyc = timing::cycle_count().wrapping_sub(t0);
+                        (
+                            gnss_corr_record(ts, m.gnss(), Some(m.current_variances())),
+                            cyc,
+                        )
+                    }
+                    GnssCorrector::Ema(m) => {
+                        m.set_geodetic(lat, lon, alt, origin_ref);
+                        let t0 = timing::cycle_count();
+                        ekf.correct(m);
+                        let cyc = timing::cycle_count().wrapping_sub(t0);
+                        (
+                            gnss_corr_record(ts, m.gnss(), Some(m.current_variances())),
+                            cyc,
+                        )
+                    }
+                };
 
-                ekf.correct(&mut measurement);
+                corr.correct_us = timing::cycles_to_us_f32(correct_cycles);
+                sd::log_gnss_correction(corr);
 
-                #[cfg(feature = "profiling")]
-                correct_stats.observe(profiling::cycle_count().wrapping_sub(t0));
-
-                publisher.send(snapshot(ekf, sample.data.ts));
-                trace!(
-                    "ekf: corrected from GNSS, sats={}, h_acc={} mm, v_acc={} mm",
-                    pvt.num_satellites, pvt.horiz_accuracy, pvt.vert_accuracy,
-                );
+                publisher.send(snapshot(ekf, ts));
             }
         }
     }

@@ -1129,6 +1129,7 @@ name = "fw-sensor-carrier-v3"
 version = "0.1.0"
 dependencies = [
  "assign-resources",
+ "block-device-adapters",
  "built",
  "cortex-m",
  "cortex-m-rt",
@@ -1143,10 +1144,12 @@ dependencies = [
  "embassy-time",
  "embassy-usb",
  "embedded-can",
+ "embedded-fatfs",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io-async 0.7.0",
+ "embedded-partitions",
  "generic-array",
  "heapless 0.9.3",
  "littlefs2",
