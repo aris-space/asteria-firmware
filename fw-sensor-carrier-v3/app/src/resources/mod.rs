@@ -2,6 +2,7 @@ use assign_resources::assign_resources;
 use embassy_stm32::{Peri, Peripherals, peripherals};
 
 pub mod buses;
+pub mod buzzer;
 pub mod can;
 pub mod flash;
 pub mod leds;
@@ -12,6 +13,7 @@ pub mod usb;
 
 assign_resources! {
     buzzer: Buzzer {
+        timer: TIM4,
         pin: PD15,
     }
     green_led: GreenLed {

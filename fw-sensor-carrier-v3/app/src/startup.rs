@@ -6,6 +6,7 @@ use embassy_stm32::usart::UartRx;
 use embassy_time::Duration;
 
 use crate::resources::buses::SharedI2cBus;
+use crate::resources::buzzer::BuzzerPwm;
 use crate::resources::flash::BoardFlash;
 use crate::resources::sd::Sd;
 use crate::resources::sensors::SpiDevice;
@@ -34,6 +35,7 @@ pub struct ServiceResources {
     pub green_led: Output<'static>,
     pub yellow_led: Output<'static>,
     pub red_led: Output<'static>,
+    pub buzzer: BuzzerPwm,
 }
 
 pub struct SensorResources {
@@ -58,6 +60,7 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let green_led = resources.green_led.setup();
     let yellow_led = resources.yellow_led.setup();
     let red_led = resources.red_led.setup();
+    let buzzer = resources.buzzer.setup();
 
     let bus1 = resources.bus1.setup();
     let bus2 = resources.bus2.setup();
@@ -73,6 +76,7 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
             green_led,
             yellow_led,
             red_led,
+            buzzer,
         },
         sensors: SensorResources {
             gps1_rx,
@@ -95,6 +99,10 @@ pub fn spawn_tasks(
     level_0_spawner.spawn(
         tasks::blinky::task(board.services.yellow_led).expect("Failed to spawn blinky task"),
     );
+
+    // Audible status beeps (calibration done / first GNSS fix) on thread-mode.
+    thread_spawner
+        .spawn(tasks::buzzer::task(board.services.buzzer).expect("Failed to spawn buzzer task"));
 
     let (imu1_spi, imu1_int1) = board.sensors.imu1;
     let (imu2_spi, imu2_int1) = board.sensors.imu2;

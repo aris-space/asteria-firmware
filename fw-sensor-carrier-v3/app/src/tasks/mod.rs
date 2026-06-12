@@ -7,6 +7,7 @@
 use embassy_time::Duration;
 
 pub mod blinky;
+pub mod buzzer;
 pub mod processing;
 pub mod readout;
 pub mod sd;

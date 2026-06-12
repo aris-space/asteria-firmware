@@ -258,10 +258,14 @@ pub async fn task() -> ! {
                 let lon = pvt.lon_deg;
 
                 // Anchor the NED frame on the first qualifying fix.
-                let origin_ref = origin.get_or_insert_with(|| GeodeticOrigin {
-                    lat_deg: lat,
-                    lon_deg: lon,
-                    alt_m: alt,
+                let origin_ref = origin.get_or_insert_with(|| {
+                    // First qualifying fix — announce it (buzzer) and anchor NED.
+                    signals::FIRST_GNSS_FIX.signal(());
+                    GeodeticOrigin {
+                        lat_deg: lat,
+                        lon_deg: lon,
+                        alt_m: alt,
+                    }
                 });
 
                 // ublox accuracies are 1-sigma in millimetres. Convert to metres.

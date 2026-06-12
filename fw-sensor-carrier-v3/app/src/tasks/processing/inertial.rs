@@ -120,6 +120,11 @@ async fn run(id: ImuId) -> ! {
         cfg.gyro_bias.z,
     );
 
+    // Announce calibration completion once, on the primary (EKF-driving) IMU.
+    if id == IMU_0 {
+        signals::CALIBRATION_DONE.signal(());
+    }
+
     loop {
         let sample = sub.next_message_pure().await;
         signals::submit_inertial_sample(cfg.process(&sample));

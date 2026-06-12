@@ -1,5 +1,6 @@
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
+use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 
 use crate::measurements::{GnssSample, ImuSample, MagSample, PressureSample, StateEstimate};
@@ -12,6 +13,12 @@ use crate::sensors::{
 /// TODO: revisit if a downstream consumer needs the full history rather than
 /// the latest snapshot — switch to a PubSubChannel then.
 pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 4> = Watch::new();
+
+/// Raised once the primary IMU's stationary calibration has completed.
+pub static CALIBRATION_DONE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+/// Raised once the EKF anchors its NED origin on the first qualifying GNSS fix.
+pub static FIRST_GNSS_FIX: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 macro_rules! define_signal {
     (
