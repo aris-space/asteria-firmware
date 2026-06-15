@@ -397,8 +397,8 @@ pub async fn spawn_can_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
                 field.z_nt() as f32 * 1e-3,
             );
 
-            // passive rotation NED → body
-            let ned = orientation.inverse() * xyz;
+            // xyz is body-frame; orientation is body -> NED.
+            let ned = orientation * xyz;
 
             let can_data = messages::MagnetometerData {
                 magnetic_field_x: xyz.x,

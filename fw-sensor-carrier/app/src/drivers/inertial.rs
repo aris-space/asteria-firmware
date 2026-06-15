@@ -191,9 +191,11 @@ impl<'a> InertialDriver<'a> {
 
         const DECLINATION_RAD: f32 = DECLINATION_DEG.to_radians();
 
-        // rotate around the world-up axis by –declination → TRUE-north quaternion
+        // Fusion aligns its +x with the measured horizontal field (magnetic north).
+        // Mag-NED is the true-NED frame rotated by +declination about z-down, so
+        // body -> true-NED is R_z(+declination) * body -> mag-NED.
         let orientation_true =
-            UnitQuaternion::from_axis_angle(&Vector3::z_axis(), -DECLINATION_RAD) * orientation_mag;
+            UnitQuaternion::from_axis_angle(&Vector3::z_axis(), DECLINATION_RAD) * orientation_mag;
 
         let orientation = orientation_true;
 
@@ -207,7 +209,7 @@ impl<'a> InertialDriver<'a> {
         // we need to convert accel to m/s^2, angular velocity stays in deg/s
         let body_accel_scaled = body_accel_raw * STANDARD_G;
 
-        // we need to rotate from body into inertial frame. the quaternion is a passive rotation.
+        // we need to rotate from body into inertial frame. orientation maps body -> NED.
         let inertial_accel = orientation.transform_vector(&body_accel_scaled);
         let inertial_gyro = orientation.transform_vector(&body_angular_velocity);
 
