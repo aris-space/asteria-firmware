@@ -7,5 +7,5 @@ pub(crate) const ADC_CALIBRATION_SAMPLES: u64 = 50;
 pub(crate) const OXIDIZER_TANK_PRESSURE_1_RANGE: [f32; 2] = [-1.0, 99.0];
 pub(crate) const OXIDIZER_TANK_PRESSURE_2_RANGE: [f32; 2] = [-1.0, 99.0];
 pub(crate) const OXIDIZER_TANK_DIFFERENTIAL_PRESSURE_RANGE: [f32; 2] = [0.0, 0.5];
-
+pub(crate) const OXIDIZER_TANK_FULL_PRESSURE: f32 = 0.067; // 6.7kPa at a full LOx tank
 pub(crate) const CAN_BOARD_STATUS_FREQ_HZ: f32 = 1.0;
