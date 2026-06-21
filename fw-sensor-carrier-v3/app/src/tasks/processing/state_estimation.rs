@@ -14,7 +14,7 @@ use defmt::{info, warn};
 use ekf::adaptive_measurement::{ExponentialDecay, Window};
 use ekf::measurements::AdaptiveGnss;
 use ekf::measurements::gnss::{GeodeticOrigin, Gnss};
-use ekf::nalgebra::{UnitQuaternion, Vector3};
+use ekf::nalgebra::{ArrayStorage, Const, UnitQuaternion, Vector3};
 use ekf::predictors::imu::{AccelConvention, Imu, ImuNoise};
 use ekf::{
     CovMatrix, Ekf, IDX_AX, IDX_AY, IDX_AZ, IDX_D, IDX_E, IDX_N, IDX_VD, IDX_VE, IDX_VN, STATE_DIM,
@@ -39,8 +39,8 @@ const DPS_TO_RADPS: f64 = core::f64::consts::PI / 180.0;
 // TODO: move noise parameters into `params/` once a NVM-backed config slot
 // exists for them. Numbers are first-cut estimates for the LSM6DSO32 at
 // 833 Hz / ±8 g / ±2000 dps, derived from datasheet noise densities.
-const ACCEL_STDDEV_MPS2: f64 = 0.05;
-const GYRO_STDDEV_RADPS: f64 = 0.005;
+const ACCEL_STDDEV_MPS2: f64 = 0.29496;
+const GYRO_STDDEV_RADPS: f64 = 0.0285;
 
 /// Which IMU drives the EKF. TODO: support failover to IMU_1 if IMU_0 stops
 /// publishing, or fuse both streams once we have a multi-IMU prediction model.
@@ -67,14 +67,15 @@ enum GnssMode {
 /// Selected GNSS correction mode. Change to switch strategy.
 const GNSS_MODE: GnssMode = GnssMode::Fixed;
 /// Window length (number of fixes) for [`GnssMode::AdaptiveWindow`].
-const GNSS_ADAPT_WINDOW: usize = 20;
+const GNSS_ADAPT_WINDOW: usize = 200;
 /// Smoothing factor for [`GnssMode::AdaptiveEma`] (0..1; higher = faster).
-const GNSS_ADAPT_ALPHA: f64 = 0.1;
+const GNSS_ADAPT_ALPHA: f64 = 0.05;
 /// Initial / fallback 1-sigma per horizontal axis [m] for adaptive modes,
 /// used until the estimator has enough data. Vertical uses 2x.
-const GNSS_ADAPT_INIT_STDDEV: f64 = 5.0;
+const GNSS_INIT_STDDEV: ekf::nalgebra::Matrix<f64, Const<3>, Const<1>, ArrayStorage<f64, 3, 1>> =
+    Vector3::new(2.312, 2.312, 3.8472);
 /// Initial variance seed [m²] for the EMA strategy.
-const GNSS_ADAPT_INIT_VAR: f64 = 25.0;
+const GNSS_ADAPT_INIT_VAR: f64 = 4.0;
 
 /// Holds the active GNSS corrector. The adaptive variants carry per-axis
 /// estimator state that must persist across fixes, so the object lives for the
@@ -89,23 +90,18 @@ enum GnssCorrector {
 
 impl GnssCorrector {
     fn new() -> Self {
-        let init_stddev = Vector3::new(
-            GNSS_ADAPT_INIT_STDDEV,
-            GNSS_ADAPT_INIT_STDDEV,
-            GNSS_ADAPT_INIT_STDDEV * 2.0,
-        );
         match GNSS_MODE {
             GnssMode::Fixed => GnssCorrector::Fixed,
             GnssMode::AdaptiveWindow => GnssCorrector::Window(AdaptiveGnss::<
                 Window<f64, GNSS_ADAPT_WINDOW>,
                 f64,
             >::from_ned(
-                Vector3::zeros(), init_stddev
+                Vector3::zeros(), GNSS_INIT_STDDEV
             )),
             GnssMode::AdaptiveEma => {
                 GnssCorrector::Ema(AdaptiveGnss::<ExponentialDecay<f64>, f64>::from_ned_ema(
                     Vector3::zeros(),
-                    init_stddev,
+                    GNSS_INIT_STDDEV,
                     GNSS_ADAPT_ALPHA,
                     GNSS_ADAPT_INIT_VAR,
                 ))
@@ -269,9 +265,6 @@ pub async fn task() -> ! {
                 });
 
                 // ublox accuracies are 1-sigma in millimetres. Convert to metres.
-                let h_acc_m = pvt.horiz_accuracy as f64 * 1e-3;
-                let v_acc_m = pvt.vert_accuracy as f64 * 1e-3;
-                let stddev = Vector3::new(h_acc_m, h_acc_m, v_acc_m);
                 let ts = sample.data.ts;
 
                 // TODO: out-of-order handling. The GNSS readout backdates each
@@ -285,7 +278,8 @@ pub async fn task() -> ! {
                 // conversion done by from/set_geodetic).
                 let (mut corr, correct_cycles) = match &mut gnss_corrector {
                     GnssCorrector::Fixed => {
-                        let mut m = Gnss::<f64>::from_geodetic(lat, lon, alt, origin_ref, stddev);
+                        let mut m =
+                            Gnss::<f64>::from_geodetic(lat, lon, alt, origin_ref, GNSS_INIT_STDDEV);
                         let t0 = timing::cycle_count();
                         ekf.correct(&mut m);
                         let cyc = timing::cycle_count().wrapping_sub(t0);
