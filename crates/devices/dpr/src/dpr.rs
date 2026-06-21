@@ -118,7 +118,7 @@ impl<'a> DPR<'a> {
         }
     }
 
-    pub async fn step(&mut self) {
+    pub async fn step_pid(&mut self) {
         match self.loop_state {
             ActiveNominal => {
                 let elapsed_ms = self.last_time.elapsed().as_millis() as f32;
@@ -143,6 +143,21 @@ impl<'a> DPR<'a> {
         };
         info!("[DPR] State: {}, Pressure {}", loop_state, self.pressure);
         Timer::after(RELAXED_TICK_DURATION).await;
+    }
+    
+    pub async fn step_bang(&mut self) {
+        match self.loop_state {
+            ActiveNominal => {
+                if self.pressure < self.pid.setpoint {
+                    self.valve_pin.set_high();
+                } else {
+                    self.valve_pin.set_low();
+                }
+            }
+            _ => {
+                self.valve_pin.set_low();
+            }
+        }
     }
 
     pub async fn actuate_valve(&mut self, time_ms: u64) {

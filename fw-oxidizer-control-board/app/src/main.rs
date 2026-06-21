@@ -37,7 +37,6 @@ mod built_info {
 #[cfg(feature = "defmt")]
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::actuators::dpr::pid_controller;
 use crate::actuators::valves::valve_task;
 use crate::buzzer::buzzer_task;
 use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
@@ -46,6 +45,7 @@ use crate::globals::STATE;
 use crate::sensors::keller_analog_p::{OxidizerPressureHandles, oxidizer_pressure_acquisition};
 use crate::sensors::solenoid_current::solenoid_current_task;
 use analog_pressure::config_vref_buf;
+use dpr::pid_controller;
 use can_utils::broadcast::Broadcast as _;
 use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode as _;
@@ -144,7 +144,16 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(oxidizer_pressure_acquisition(pressure_handles).unwrap());
 
-    spawner.spawn(pid_controller(oxidizer_dpr_valve).expect("dpr task failed"));
+    spawner.spawn(
+        pid_controller(
+            oxidizer_dpr_valve,
+            STATE.dpr_control_loop.receiver().unwrap(),
+            STATE.dpr_pressure.receiver().unwrap(),
+            STATE.dpr_gain.receiver().unwrap(),
+            STATE.dpr_info.sender(),
+        )
+            .expect("failed to prepare pid_controller spawn token"),
+    );
 
     spawner.spawn(valve_task(oxidizer_vent_valve).expect("valve task failed"));
 

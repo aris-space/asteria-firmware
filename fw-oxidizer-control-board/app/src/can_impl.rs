@@ -21,6 +21,11 @@ data_core::can::sparse_decodable_can_message! {
         OxidizerDprValveControlRFS(dp_oxidizer_control_board::Message::OxidizerDprValveControlRFS),
         OxidizerVentValveControlFC(dp_oxidizer_control_board::Message::OxidizerVentValveControlFC),
         OxidizerVentValveControlRFS(dp_oxidizer_control_board::Message::OxidizerVentValveControlRFS),
+        OxidizerDprGainP(dp_oxidizer_control_board::Message::OxidizerDprGainP),
+        OxidizerDprGainI(dp_oxidizer_control_board::Message::OxidizerDprGainI),
+        OxidizerDprGainD(dp_oxidizer_control_board::Message::OxidizerDprGainD),
+        OxidizerDprMinOpeningTime(dp_oxidizer_control_board::Message::OxidizerDprMinOpeningTime),
+        OxidizerDprMaxOpeningTime(dp_oxidizer_control_board::Message::OxidizerDprMaxOpeningTime),
     }
 }
 
