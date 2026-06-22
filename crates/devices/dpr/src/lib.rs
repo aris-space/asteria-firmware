@@ -45,11 +45,6 @@ pub async fn pid_controller(
         // Compute controller output and actuate valve
         dpr.step_bang().await;
 
-        info!(
-            "[DPR] Loop state: {:?}, Pressure: {} barg, Elapsed Cycle Time: {} us",
-            dpr.loop_state, dpr.pressure, now.elapsed().as_micros() as f32
-        );
-        now = Instant::now();
-        Timer::after_micros(1667).await;
+        Timer::after_micros(1600).await;
     }
 }
