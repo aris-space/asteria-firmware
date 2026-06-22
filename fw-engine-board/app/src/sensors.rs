@@ -13,9 +13,9 @@ pub(crate) const ADC_CALIBRATION_SAMPLES: u64 = 50;
 pub(crate) static OXD_TNK_T: ThermocoupleType = ThermocoupleType::K;
 pub(crate) static OXD_RNL_T: ThermocoupleType = ThermocoupleType::K;
 
-pub(crate) const ENG_CC_P_RANGE: [f32; 2] = [0.0, 100.0];
-pub(crate) const FUE_INJ_P_RANGE: [f32; 2] = [0.0, 100.0];
-pub(crate) const OXD_INJ_P_RANGE: [f32; 2] = [0.0, 100.0];
+pub(crate) const ENG_CC_P_RANGE: [f32; 2] = [0.0, 60.0];
+pub(crate) const FUE_INJ_P_RANGE: [f32; 2] = [0.0, 60.0];
+pub(crate) const OXD_INJ_P_RANGE: [f32; 2] = [0.0, 60.0];
 
 #[derive(Clone, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
