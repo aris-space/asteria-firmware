@@ -1,3 +1,6 @@
+// Copyright 2026 ARIS
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Host CLI tool for interacting with Asteria boards over USB.
 //!
 //! Supports:

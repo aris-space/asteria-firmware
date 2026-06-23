@@ -1,3 +1,6 @@
+// Copyright 2026 ARIS
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 #![no_std]
 
 //! This crate provides an async I2c driver for the MS5607 pressure sensor.
