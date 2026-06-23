@@ -1,34 +1,125 @@
-# DEVELOPMENT
+# Development
 
-`just` is the primary interface for this repo. Run `just --list` in any `fw-*` folder to see available commands.
-The repo root has cross-workspace commands, which are mostly for CI.
+Use `just` for normal workflows. There is no root Cargo workspace.
 
-## Building and flashing
+## Board Workflow
 
-```bash
-just build          # compile firmware (thumbv7em-none-eabihf)
-just run {args}     # build, timestamp, flash, and attach RTT output
-just attach         # re-attach RTT output without reflashing
+Run board-specific commands inside a `fw-*` directory:
+
+```sh
+cd fw-communication-board
+just --list
+just build
+just run
 ```
 
-`just run` handles everything: it timestamps the artifact, flashes the board (via `probe-rs` or `STM32_Programmer_CLI` depending on configuration in the `fw-*/justfile`), and attaches RTT. Firmware defaults to the `debug` mode, which enables `defmt` log output.
+Common recipes:
 
-To build for a critical test or launch, use `just build --release --no-default-features`.
-
-At the repo root, `just build` compiles all workspaces, `just fmt` formats everything, and `just ci-checks` / `just clippy` / `just test` run lints and host-side tests.
-
-## Device communication and logs
-
-`asteria-tool` is the host CLI for USB RPC communication with a running board. Access it through `just`:
-
-```bash
-just connect                                          # interactive shell
-just cli fs ls /                                      # single command
-just fetch-logs latest                                # fetch and decode stored logs
-just fetch-logs 3                                     # fetch last 3 log directories
-just decode-logs .fetched-logs/<timestamp>/log_0      # re-decode an existing log
+```sh
+just build        # build for thumbv7em-none-eabihf
+just run          # build, upload ELF, flash, attach RTT
+just flash        # build, upload ELF, flash only
+just attach       # attach RTT using latest local ELF
+just ci-checks    # clippy with warnings denied
+just clean        # clean this workspace
 ```
 
-Logs are stored on-device as `defmt.bin` streams alongside `build_info.txt`, which contains an `artifact_timestamp_ms` linking the log to the exact ELF used at flash time. `just fetch-logs` pulls and decodes them using the matching ELF from `.artifacts/` or object storage (configured via `.b2.env`). If no ELF is found, fetching still works but decoding is skipped.
+`just run` reads `chip`, `bin`, and `use_probe_rs` from the board `justfile`. If `use_probe_rs` is false, flashing uses `STM32_Programmer_CLI` plus `arm-none-eabi-objcopy`.
 
-`asteria-tool` defaults to raw USB with a serial fallback. Pass `--connect raw` to force USB-only, or `--connect serial --port <PATH>` for serial.
+## Release Builds
+
+```sh
+just build --release
+```
+
+Many boards use default features for `debug`, `defmt`, and `panic-probe`. For production-style builds on those boards:
+
+```sh
+just build --release --no-default-features
+just run --release --no-default-features
+```
+
+Do not use `--no-default-features` blindly; some newer firmware uses default features for real functionality, for example storage on `fw-sensor-carrier-v3`.
+
+## Root Commands
+
+From repo root:
+
+```sh
+just build
+just fmt
+just ci-checks
+just clippy
+just test
+just doc
+```
+
+`just test` runs host-side tests for `crates/` and `tools/`. Embedded firmware test recipes are no-ops.
+
+Before pushing:
+
+```sh
+pre-commit run --all-files
+just fmt --check
+just ci-checks
+just test
+```
+
+## Artifacts
+
+`just run` and `just flash` timestamp the ELF, cache it in `.artifacts/`, upload it to object storage if configured, then flash the board. This lets fetched logs find the matching ELF later.
+
+Useful root recipes:
+
+```sh
+just upload-elf path/to/file.elf
+just upload-elf-as path/to/file.elf 1234567890.elf
+just clean-artifacts
+just sync-artifacts
+```
+
+## Device Communication
+
+`asteria-tool` talks to a running board over USB RPC.
+
+```sh
+just connect
+just cli info
+just cli fs ls /
+just cli fs pull -r /log_0 ./log_0
+```
+
+Connection options pass through:
+
+```sh
+just connect --connect raw
+just connect --connect serial --port /dev/ttyACM0 --baud 115200
+```
+
+See [../tools/asteria-tool/README.md](../tools/asteria-tool/README.md) for the full CLI.
+
+## Logs
+
+Fetch and decode logs:
+
+```sh
+just fetch-logs latest
+just fetch-logs 3
+just fetch-logs all
+```
+
+Decode an already fetched log:
+
+```sh
+just decode-logs .fetched-logs/<timestamp>/log_0
+```
+
+Logs are decoded with `defmt-print` using the matching ELF from `.artifacts/` or object storage. If no ELF is found, fetching still works but decoding is skipped.
+
+## Troubleshooting
+
+- Build fails before project code: check the pinned Rust toolchain and target installed.
+- Flashing fails on fallback boards: check `STM32_Programmer_CLI` and `arm-none-eabi-objcopy`.
+- Artifact upload fails: check `.b2.env`, `s5cmd`, and network access.
+- Log fetch fails immediately: check `defmt-print`.
+- USB connect fails: close other `asteria-tool` instances.

@@ -2,12 +2,7 @@
 
 Thanks for contributing.
 
-This file covers collaboration rules and best practices. For environment setup and workflows, use:
-
-- [DOCS INDEX](docs/README.md)
-- [SETUP](docs/SETUP.md)
-- [DEVELOPMENT](docs/DEVELOPMENT.md)
-- [ARCHITECTURE](docs/ARCHITECTURE.md)
+This file covers collaboration rules and best practices. Before working on this repository, complete [Setup](docs/SETUP.md). For daily workflows and architecture notes, see [docs/](docs/README.md).
 
 ## 1) Branching rules
 
@@ -77,3 +72,7 @@ Note that these checks will also be enforced by the CI.
 
 - Delete the remote branch.
 - Delete your local branch.
+
+## 8) Licensing of contributions
+
+By opening a PR you agree that your contribution is licensed under MIT OR Apache-2.0, the same terms as the rest of the repository. See [License](README.md#license).

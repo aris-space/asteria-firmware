@@ -1,63 +1,89 @@
-# SETUP
+# Setup Guide
 
-## 1) Clone the repository
+First-time setup for ASTERIA firmware development. Complete this before working on the repository.
 
-```bash
-git clone --recurse-submodules <repo-url>
+## Clone
+
+```sh
+git clone --recurse-submodules git@github.com:aris-space/asteria-firmware.git
 cd asteria-firmware
 ```
 
-If you already cloned without submodules:
+If already cloned:
 
-```bash
+```sh
 git submodule update --init --recursive
 ```
 
-## 2) Install required tooling
+Submodules are required. `data-definitions` provides ASTERIA message/datapoint definitions; `hermes-can` is still used by older board firmware. Some required submodules are ARIS-private, so a public checkout may not contain everything needed to build or flash all targets.
 
-Required tools:
+## Rust
 
-- [`just`](https://just.systems/) task runner used by this repo
-- [`probe-rs`](https://probe.rs/docs/getting-started/installation/) for flashing and debugging
-- [`flip-link`](https://github.com/knurling-rs/flip-link), a linker used by firmware builds
-- [`s5cmd`](https://github.com/peak/s5cmd) for artifact uploads/downloads to object storage
-- [`taplo-cli`](https://taplo.tamasfe.dev/cli/) for `.toml` formatting
-- [`jq`](https://jqlang.org/) for parsing JSON output
-- [`pre-commit`](https://pre-commit.com/) for local commit checks
+Install Rust with [`rustup`](https://rustup.rs/). The repo pins its nightly toolchain, components, and `thumbv7em-none-eabihf` target in [../rust-toolchain.toml](../rust-toolchain.toml), so first build should install them automatically.
 
-Most of the above can be installed via your package manager or directly with `cargo install`, depending on your setup preferences.
+## Tools
 
-Additional tools (required for some boards):
+Required:
 
-- [`STM32CubeProgrammer`](https://www.st.com/en/development-tools/stm32cubeprog.html)
-- [`arm-none-eabi-objcopy`](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
+- `just` - task runner
+- `probe-rs` - flashing and RTT output
+- `flip-link` - embedded linker
+- `pre-commit` - local hooks
+- `taplo-cli` - TOML formatting
+- `jq` - script JSON parsing
+- `s5cmd` - artifact upload/download
+- `defmt-print` - stored log decoding
 
-These are required for boards that cannot be flashed with `probe-rs` and use the fallback flashing path.
+Some boards also need:
 
-## 3) Install Rust toolchain
+- `STM32CubeProgrammer`
+- `arm-none-eabi-objcopy`
 
-The repository pins the required toolchain and target in `rust-toolchain.toml`.
+Install `defmt-print` with:
 
-Install Rust via [`rustup`](https://rustup.rs/). It will install the pinned toolchain/target automatically on first build.
+```sh
+cargo install defmt-print
+```
 
-## 4) Configure object storage credentials
+## Hooks
 
-We store every flashed firmware ELF in object storage and cache it locally in `.artifacts/`. This is mainly to make `defmt` log decoding reproducible later with the exact matching firmware image.
+```sh
+pre-commit install
+```
 
-```bash
+Before pushing:
+
+```sh
+pre-commit run --all-files
+just fmt --check
+just ci-checks
+just test
+```
+
+## Artifact Storage
+
+Flashed ELF files are cached locally and uploaded so stored `defmt` logs can be decoded with the exact matching binary.
+
+```sh
 cp .b2.env.example .b2.env
 ```
 
-Object storage is private, so you need credentials to access it. You can find them in the ARIS password manager under the `AV ASTERIA` collection. Copy the following fields into your `.b2.env` file:
-* `ASTERIA_B2_KEY_ID`
-* `ASTERIA_B2_APPLICATION_KEY`
+Fill in:
 
-## 5) Validate setup
+- `ASTERIA_B2_KEY_ID`
+- `ASTERIA_B2_APPLICATION_KEY`
 
-From any board workspace:
+Credentials are in the ARIS password manager under `AV ASTERIA`.
 
-```bash
+## Validate
+
+```sh
 cd fw-communication-board
 just build
+```
+
+With hardware connected:
+
+```sh
 just run
 ```
