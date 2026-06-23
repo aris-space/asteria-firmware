@@ -15,7 +15,7 @@ members = [
     "devices/keller-pressure",
     "devices/trafag-pressure",
     "devices/max31889-thermistor",
-    "devices/ltc2945",
+    "devices/ina232",
 ]
 
 [workspace.dependencies]
