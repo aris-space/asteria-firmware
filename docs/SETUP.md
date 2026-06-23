@@ -23,6 +23,8 @@ Install Rust with [`rustup`](https://rustup.rs/). The repo pins its nightly tool
 
 ## Tools
 
+The embedded rust ecosystem uses a number of tools for building, flashing, and debugging. The following are required for development in this repository. You will rarely need to invoke all of them yourself, as they are used by the `just` task runner, but they must be installed for the tasks to work.
+
 Required tools:
 
 - [`just`](https://just.systems/) task runner used by this repo
@@ -32,56 +34,57 @@ Required tools:
 - [`taplo-cli`](https://taplo.tamasfe.dev/cli/) for `.toml` formatting
 - [`jq`](https://jqlang.org/) for parsing JSON output
 - [`pre-commit`](https://pre-commit.com/) for local commit checks
-- [`defmt-print`](https://crates.io/crates/defmt-print) for decoding stored `defmt` logs
 
 Most of the above can be installed via your package manager or directly with `cargo install`, depending on your setup preferences.
 
-Additional tools (required for some boards):
+Some boards require additional tools:
 
 - [`STM32CubeProgrammer`](https://www.st.com/en/development-tools/stm32cubeprog.html)
 - [`arm-none-eabi-objcopy`](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
 
 These are required for boards that cannot be flashed with `probe-rs` and use the fallback flashing path.
 
-## Hooks
+## Pre-commit Hooks
+
+We use CI checks to enforce formatting and linting. To avoid wasting time on CI, we provide pre-commit hooks that run most of the same checks locally _before_ committing.
+To install the hooks, run:
 
 ```sh
 pre-commit install
 ```
 
-Before pushing:
-
-```sh
-pre-commit run --all-files
-just fmt --check
-just ci-checks
-just test
-```
+You will need pre-commit installed.
 
 ## Artifact Storage
 
-Flashed ELF files are cached locally and uploaded so stored `defmt` logs can be decoded with the exact matching binary.
+Flashed ELF files are cached locally and uploaded to an S3 object storage, so that stored `defmt` logs can be decoded with the exact matching binary.
 
+First, copy the example environment file to `.b2.env`:
 ```sh
 cp .b2.env.example .b2.env
 ```
 
-Fill in:
+Then, fill in the following environment variables with credentials from the ARIS password manager:
 
 - `ASTERIA_B2_KEY_ID`
 - `ASTERIA_B2_APPLICATION_KEY`
 
-Credentials are in the ARIS password manager under `AV ASTERIA`.
+These credentials can be found under `AV ASTERIA`.
+
+> [!IMPORTANT]
+> Do not commit `.b2.env` to the repository. It contains sensitive credentials, and is gitignored for a reason.
 
 ## Validate
 
+To validate your setup, you can build and run the communication board firmware.
+
+To build:
 ```sh
 cd fw-communication-board
 just build
 ```
 
-With hardware connected:
-
+To flash and run on a connected board, you'll need to connect the debug probe to the board and run:
 ```sh
 just run
 ```
