@@ -23,27 +23,25 @@ Install Rust with [`rustup`](https://rustup.rs/). The repo pins its nightly tool
 
 ## Tools
 
-Required:
+Required tools:
 
-- `just` - task runner
-- `probe-rs` - flashing and RTT output
-- `flip-link` - embedded linker
-- `pre-commit` - local hooks
-- `taplo-cli` - TOML formatting
-- `jq` - script JSON parsing
-- `s5cmd` - artifact upload/download
-- `defmt-print` - stored log decoding
+- [`just`](https://just.systems/) task runner used by this repo
+- [`probe-rs`](https://probe.rs/docs/getting-started/installation/) for flashing and debugging
+- [`flip-link`](https://github.com/knurling-rs/flip-link), a linker used by firmware builds
+- [`s5cmd`](https://github.com/peak/s5cmd) for artifact uploads/downloads to object storage
+- [`taplo-cli`](https://taplo.tamasfe.dev/cli/) for `.toml` formatting
+- [`jq`](https://jqlang.org/) for parsing JSON output
+- [`pre-commit`](https://pre-commit.com/) for local commit checks
+- [`defmt-print`](https://crates.io/crates/defmt-print) for decoding stored `defmt` logs
 
-Some boards also need:
+Most of the above can be installed via your package manager or directly with `cargo install`, depending on your setup preferences.
 
-- `STM32CubeProgrammer`
-- `arm-none-eabi-objcopy`
+Additional tools (required for some boards):
 
-Install `defmt-print` with:
+- [`STM32CubeProgrammer`](https://www.st.com/en/development-tools/stm32cubeprog.html)
+- [`arm-none-eabi-objcopy`](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
 
-```sh
-cargo install defmt-print
-```
+These are required for boards that cannot be flashed with `probe-rs` and use the fallback flashing path.
 
 ## Hooks
 
