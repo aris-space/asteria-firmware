@@ -3,6 +3,7 @@ name = "trafag-pressure"
 version = "0.1.0"
 edition = "2024"
 authors = ["Domenic Nebiker <dnebiker@aris-space.ch"]
+license = "MIT OR Apache-2.0"
 description = "Driver for Trafag Pressure Sensors using Analog Inputs"
 keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
 

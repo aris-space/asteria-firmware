@@ -17,7 +17,7 @@ Each `fw-*` directory is one board firmware workspace. Shared embedded crates li
 
 ## Provenance
 
-This repository was hard-forked from [`hermes-firmware`](https://github.com/aris-space/hermes-firmware) in 2025. Embedded Rust has been used within ARIS since project [NICOLLIER](https://github.com/aris-space/nicollier-core), through [HERMES](https://github.com/aris-space/hermes-firmware), and now in ASTERIA. Large parts of this repository are iterations on earlier HERMES patterns, tools, and embedded conventions, adapted for ASTERIA's hardware and mission needs.
+This repository was hard-forked from [`hermes-firmware`](https://github.com/aris-space/hermes-firmware) for the ASTERIA project. Embedded Rust has been used within ARIS since project [NICOLLIER](https://github.com/aris-space/nicollier-core), through [HERMES](https://github.com/aris-space/hermes-firmware), and now in ASTERIA. Large parts of this repository are iterations on earlier HERMES patterns, tools, and embedded conventions, adapted for ASTERIA's hardware and mission needs.
 
 ## Board Overview
 
@@ -55,8 +55,10 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. If you have 
 
 ## License
 
-Source files are licensed under `MIT OR Apache-2.0`, at your option. Contributions are licensed under those same terms.
+Source files are licensed under [`MIT`](LICENSE-MIT) OR [`Apache-2.0`](LICENSE-APACHE), at your option. Contributions are licensed under those same terms.
 
 SPDX-License-Identifier: `MIT OR Apache-2.0`
+
+See [NOTICE](NOTICE) for repository copyright attribution.
 
 Note that the compiled firmware links against the GPL-licensed [`asteria-data-definitions`](https://github.com/aris-space/asteria-data-definitions), so distributed firmware binaries are combined works under GPL-3.0-or-later.
