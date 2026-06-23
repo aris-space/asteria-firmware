@@ -63,8 +63,8 @@ const TAG_GNSS: u8 = 0x02;
 const TAG_EKF: u8 = 0x03;
 const TAG_GNSS_CORR: u8 = 0x04;
 
-/// SD block size. Keeping every write a multiple of this — and the stream
-/// position sector-aligned — keeps the card off the read-modify-write path.
+/// SD block size. Keeping every write a multiple of this, and the stream
+/// position sector-aligned, keeps the card off the read-modify-write path.
 const SECTOR: usize = 512;
 /// Largest possible encoded record. Largest payload is now EKF (88 B) or GNSS
 /// raw (77 B); 96 leaves margin and keeps the staging-headroom assert simple.
@@ -73,7 +73,7 @@ const MAX_RECORD: usize = 96;
 const STAGING_LEN: usize = 16384;
 /// Write whole sectors out once staged data reaches this many bytes.
 const FLUSH_THRESHOLD: usize = 8192;
-/// Depth of the producer→writer queue. Each slot is one `LogRecord`; deep
+/// Depth of the producer-writer queue. Each slot is one `LogRecord`; deep
 /// enough to ride out occasional multi-ms card write stalls without dropping.
 const LOG_QUEUE_DEPTH: usize = 1024;
 
@@ -95,13 +95,13 @@ const STATS_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Clone, Copy)]
 pub struct GnssCorr {
     pub ts_us: u64,
-    /// Residual `y = z - h(x)` per NED axis [m].
+    /// Residual
     pub residual: [f32; 3],
-    /// Innovation covariance `s = H P Hᵀ + R` per NED axis [m²].
+    /// Innovation covariance
     pub innovation_cov: [f32; 3],
-    /// Adaptive noise estimate `R̂` per NED axis [m²]; `NaN` if not adaptive.
+    /// Adaptive noise estimate
     pub adapted_var: [f32; 3],
-    /// Wall-clock duration of the EKF correct step [µs].
+    /// Duration of the EKF correct step
     pub correct_us: f32,
 }
 
@@ -111,7 +111,7 @@ pub enum LogRecord {
     Gnss(GnssSample),
     Ekf {
         state: StateEstimate,
-        /// Wall-clock duration of the EKF predict step [µs].
+        /// Duration of the EKF predict step
         predict_us: f32,
     },
     GnssCorr(GnssCorr),

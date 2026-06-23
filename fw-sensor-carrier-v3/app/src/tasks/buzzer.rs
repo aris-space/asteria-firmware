@@ -1,7 +1,7 @@
 //! Audible status indicator on the passive piezo buzzer.
 //!
 //! Waits on event signals and plays a distinct beep pattern for each:
-//!   - calibration complete: two beeps at 2.5 kHz
+//!   - calibration complete:  two beeps at 2.5 kHz
 //!   - first GNSS fix:        three beeps at 3.5 kHz
 
 use defmt::info;
