@@ -1,84 +1,70 @@
+//! Inter-task signals.
+//!
+//! Per-sensor `PubSubChannel`s carry raw readout samples (one channel per
+//! sensor instance, indexed by the sensor's id). Global `Watch`es carry
+//! fused/derived outputs published by the processing tasks; the CAN task is
+//! the single receiver for each.
+
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 
-use crate::measurements::{GnssSample, ImuSample, MagSample, PressureSample};
-use crate::sensors::{
-    BAROMETER_COUNT, BarometerId, GNSS_COUNT, GnssId, IMU_COUNT, ImuId, MAGNETOMETER_COUNT,
-    MagnetometerId,
+use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
+use crate::types::{
+    BaroSample, DhtSample, Environment, GnssSample, ImuSample, Inertial, MagSample, Orientation,
+    Position, Pressure, RawMagSample, Velocity,
 };
 
-macro_rules! define_signal {
+macro_rules! define_sample_channels {
     (
-        $channels:ident, $watches:ident, $submit:ident, $submit_batch:ident, $watch_getter:ident :
-        $T:ty, $id_ty:ty,
-        cap = $cap:expr, subs = $subs:expr, pubs = $pubs:expr,
-        count = $count:expr, watchers = $watchers:expr
+        $channels:ident, $submit:ident, $submit_batch:ident :
+        $T:ty, cap = $cap:expr, subs = $subs:expr, count = $count:expr
     ) => {
-        pub static $channels: [PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, $pubs>;
-            $count] = [const { PubSubChannel::new() }; $count];
-
-        pub static $watches: [Watch<CriticalSectionRawMutex, $T, $watchers>; $count] =
-            [const { Watch::new() }; $count];
-
-        #[allow(dead_code)]
-        pub fn $watch_getter(id: $id_ty) -> &'static Watch<CriticalSectionRawMutex, $T, $watchers> {
-            &$watches[id.index()]
-        }
+        pub static $channels: [PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, 1>; $count] =
+            [const { PubSubChannel::new() }; $count];
 
         #[allow(dead_code)]
         pub fn $submit(sample: $T) {
-            let idx = sample.sensor_id.index();
-            $channels[idx]
+            $channels[sample.src.index()]
                 .immediate_publisher()
                 .publish_immediate(sample);
-            $watches[idx].sender().send(sample);
         }
 
         #[allow(dead_code)]
         pub fn $submit_batch(samples: &[$T]) {
             let Some(last) = samples.last() else { return };
-            let idx = last.sensor_id.index();
-            let publisher = $channels[idx].immediate_publisher();
+            let publisher = $channels[last.src.index()].immediate_publisher();
             for sample in samples {
                 publisher.publish_immediate(*sample);
             }
-            $watches[idx].sender().send(*last);
         }
     };
 }
 
-define_signal!(
-    IMU_CHANNELS, IMU_WATCHES, submit_imu_sample, submit_imu_samples, imu_watch:
-    ImuSample, ImuId,
-    cap = 64, subs = 4, pubs = 2,
-    count = IMU_COUNT, watchers = 4
-);
+define_sample_channels!(IMU_CHANNELS, submit_imu_sample, submit_imu_sample_batch:
+    ImuSample, cap = 64, subs = 1, count = IMU_COUNT);
 
-define_signal!(
-    PRESSURE_CHANNELS, PRESSURE_WATCHES, submit_pressure_sample, submit_pressure_samples, pressure_watch:
-    PressureSample, BarometerId,
-    cap = 16, subs = 4, pubs = 2,
-    count = BAROMETER_COUNT, watchers = 4
-);
+define_sample_channels!(BARO_CHANNELS, submit_baro_sample, submit_baro_sample_batch:
+    BaroSample, cap = 16, subs = 2, count = BAROMETER_COUNT);
 
-define_signal!(
-    MAG_CHANNELS, MAG_WATCHES, submit_mag_sample, submit_mag_samples, mag_watch:
-    MagSample, MagnetometerId,
-    cap = 16, subs = 4, pubs = 2,
-    count = MAGNETOMETER_COUNT, watchers = 4
-);
+define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch:
+    MagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
 
-define_signal!(
-    INERTIAL_CHANNELS, INERTIAL_WATCHES, submit_inertial_sample, submit_inertial_samples, inertial_watch:
-    ImuSample, ImuId,
-    cap = 64, subs = 4, pubs = 2,
-    count = IMU_COUNT, watchers = 4
-);
+// Raw, pre-calibration mag samples for the calibration task to consume
+// while the device is being tumbled. Off the hot path otherwise.
+define_sample_channels!(RAW_MAG_CHANNELS, submit_raw_mag_sample, submit_raw_mag_sample_batch:
+    RawMagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
 
-define_signal!(
-    GNSS_CHANNELS, GNSS_WATCHES, submit_gnss_sample, submit_gnss_samples, gnss_watch:
-    GnssSample, GnssId,
-    cap = 8, subs = 4, pubs = 2,
-    count = GNSS_COUNT, watchers = 4
-);
+define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_batch:
+    GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);
+
+define_sample_channels!(DHT_CHANNELS, submit_dht_sample, submit_dht_sample_batch:
+    DhtSample, cap = 8, subs = 1, count = DHT_COUNT);
+
+pub static PRESSURE_WATCH: Watch<CriticalSectionRawMutex, Pressure, 1> = Watch::new();
+pub static ENVIRONMENT_WATCH: Watch<CriticalSectionRawMutex, Environment, 1> = Watch::new();
+pub static ORIENTATION_WATCH: Watch<CriticalSectionRawMutex, Orientation, 1> = Watch::new();
+pub static INERTIAL_WATCH: Watch<CriticalSectionRawMutex, Inertial, 1> = Watch::new();
+pub static MAG_WATCH: Watch<CriticalSectionRawMutex, MagSample, 1> = Watch::new();
+pub static POSITION_WATCH: Watch<CriticalSectionRawMutex, Position, 1> = Watch::new();
+pub static VELOCITY_WATCH: Watch<CriticalSectionRawMutex, Velocity, 1> = Watch::new();

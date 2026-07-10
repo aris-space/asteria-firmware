@@ -78,14 +78,16 @@ assign_resources! {
         tx: PF7,
     }
     flash: Flash {
-        periph: SPI2,
-        sck: PB13,
-        miso: PB14,
-        mosi: PB15,
-        cs: PB12,
+        periph: OCTOSPI1,
+        sck: PB2,
+        io0: PB1,
+        io1: PB0,
+        hold: PA6,
+        wp: PA7,
+        ncs: PG6,
     }
     usb: Usb {
-        usb: USB_OTG_HS,
+        periph: USB_OTG_HS,
         dp: PA12,
         dm: PA11,
     }

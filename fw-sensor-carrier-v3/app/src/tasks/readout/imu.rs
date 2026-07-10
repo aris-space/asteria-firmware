@@ -1,46 +1,98 @@
-use defmt::{info, trace, warn};
+//! LSM6DSO32 IMU readout.
+//!
+//! Like every readout in this module, the task follows the shared
+//! `Inactive` <-> `Active` shape (see [`super`]): `Inactive` tries to
+//! init the sensor and retries with exponential backoff on failure;
+//! `Active` runs the FIFO drain loop until too many consecutive errors
+//! push it back to `Inactive`. Each transition flips
+//! [`crate::sensors::IMU_STATUS`] so we can publish the state to CAN.
+//!
+//! The sensor batches accel and gyro samples into its hardware FIFO at the
+//! configured ODR. Each FIFO entry carries a `TagSensor` byte that says
+//! whether it's an accel or gyro reading; because [`ACCEL_ODR`] and [`GYRO_ODR`]
+//! are the same, we expect them to be produced in pairs. While it remains undefined
+//! in the datasheet, in practice these pairs are interleaved.
+//!
+//! One of the interrupt lines (INT1) is configured to fire when the FIFO
+//! crosses [`FIFO_WATERMARK`]. We then drain whatever is queued into a local
+//! scratch buffer ([`FIFO_BUFFER_SIZE`] entries) with a single SPI transaction, iterate
+//! it as accel+gyro pairs, apply the sensor-to-board axis flip, and publish one [`ImuSample`]
+//! per pair. Sample timestamps are interpolated across the batch using the wall-clock
+//! interval between consecutive interrupts.
+//!
+//! [`LOOP_TIMEOUT`] bounds the wait on INT1 so a missed interrupt is
+//! recovered after roughly two expected periods.
+
+use core::sync::atomic::Ordering;
+
+use defmt::{Debug2Format, debug, error, info, trace, warn};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::mode::Async;
 use embassy_time::{Delay, Duration, Instant, Timer, with_timeout};
 use lsm6dso32::spi::Lsm6Dso32SpiInterface;
 use lsm6dso32::{
-    Acceleration, AccelerationRaw, AccelerometerFullScale, AngularRate, AngularRateRaw,
-    FifoDataOut, FifoMode, GyroscopeFullScale, Initialised, Int1Config, Lsm6dso32, TagSensor,
-    Uninitialised,
+    AccelBatchDataRate, Acceleration, AccelerationRaw, AccelerometerFullScale, AccelerometerOdr,
+    AngularRate, AngularRateRaw, FifoDataOut, FifoMode, GyroBatchDataRate, GyroscopeFullScale,
+    GyroscopeOdr, Initialised, Int1Config, Lsm6dso32, TagSensor, Uninitialised,
 };
 
-use crate::measurements::{ImuData, ImuSample, Timestamped};
+use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::calibration;
 use crate::resources::sensors::SpiDevice;
-use crate::sensors::ImuId;
+use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
-use crate::tasks::{MAX_CONSECUTIVE_ERRORS, backoff};
+use crate::types::{ImuSample, RawImuSample};
 
+/// Accelerometer output data rate. Should match [`IMU_ODR_HZ`]
+const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
+/// Gyroscope output data rate. Should match [`IMU_ODR_HZ`]
+const GYRO_ODR: GyroscopeOdr = GyroscopeOdr::Hz833;
+/// Accelerometer batch data rate. Should match [`ACCEL_ODR`]
+const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
+/// Gyroscope batch data rate. Should match [`GYRO_ODR`]
+const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
+/// IMU output data rate in Hz. MUST match the above ODR and BDR settings.
+/// Do not change without also updating the above settings!
+pub const IMU_ODR_HZ: u32 = 833;
+/// Target IMU loop data rate
+pub const IMU_TARGET_DT: f32 = 1.0 / IMU_ODR_HZ as f32;
+/// Accelerometer full-scale range
+const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G8;
+/// Gyroscope full-scale range
+const GYRO_FULL_SCALE: GyroscopeFullScale = GyroscopeFullScale::Dps2000;
+pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
+    GyroscopeFullScale::Dps250 => 250.0,
+    GyroscopeFullScale::Dps500 => 500.0,
+    GyroscopeFullScale::Dps1000 => 1000.0,
+    GyroscopeFullScale::Dps2000 => 2000.0,
+};
+
+/// Local scratch buffer for FIFO drains. Sized larger than the expected
+/// per-interrupt batch; the sensor's hardware FIFO is independent.
 const FIFO_BUFFER_SIZE: usize = 512;
+/// FIFO watermark in entries. With paired accel+gyro at 833 Hz, the
+/// watermark interrupt fires every ~15.6 ms (13 pairs).
 const FIFO_WATERMARK: u16 = 26;
-const LOOP_TIMEOUT_MS: u64 = 30;
+/// Max wait for the FIFO watermark interrupt before retrying. Roughly
+/// 2x the expected period, to catch a missed/stuck interrupt.
+const LOOP_TIMEOUT: Duration = Duration::from_millis(30);
 
 async fn configure<SPI: embedded_hal_async::spi::SpiDevice>(
     sensor: &mut Lsm6dso32<Lsm6Dso32SpiInterface<SPI>, Initialised>,
 ) -> Result<(), ()> {
     sensor
-        .set_accelerometer_odr_and_full_scale(
-            Some(lsm6dso32::AccelerometerOdr::Hz833),
-            Some(AccelerometerFullScale::G8),
-        )
+        .set_accelerometer_odr_and_full_scale(Some(ACCEL_ODR), Some(ACCEL_FULL_SCALE))
         .await
         .map_err(|_| ())?;
     sensor
-        .set_gyroscope_odr_and_full_scale(
-            Some(lsm6dso32::GyroscopeOdr::Hz833),
-            Some(GyroscopeFullScale::Dps2000),
-        )
+        .set_gyroscope_odr_and_full_scale(Some(GYRO_ODR), Some(GYRO_FULL_SCALE))
         .await
         .map_err(|_| ())?;
     sensor.set_fifo_mode(FifoMode::Fifo).await.map_err(|_| ())?;
     sensor
         .set_fifo_batch_data_rates(
-            Some(lsm6dso32::AccelBatchDataRate::Hz833),
-            Some(lsm6dso32::GyroBatchDataRate::Hz833),
+            Some(ACCEL_BDR),
+            Some(GYRO_BDR),
             Some(lsm6dso32::TempBatchDataRate::NotBatched),
             Some(lsm6dso32::DecTsBatch::NotBatched),
         )
@@ -75,30 +127,30 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 {
     async fn run(mut self) -> Active<SPI, INT> {
         loop {
+            debug!("{} initializing", self.id);
             let uninit = Lsm6dso32::<_, Uninitialised>::new(self.iface);
             match uninit.init(&mut Delay).await {
-                Ok(mut sensor) => {
-                    if configure(&mut sensor).await.is_err() {
-                        warn!("imu: configuration failed, retrying...");
-                        self.iface = sensor.destroy();
-                        self.attempt = self.attempt.saturating_add(1);
-                        Timer::after(backoff(self.attempt)).await;
-                        continue;
+                Ok(mut sensor) => match configure(&mut sensor).await {
+                    Ok(()) => {
+                        info!("{} initialized", self.id);
+                        return Active {
+                            sensor,
+                            int1: self.int1,
+                            id: self.id,
+                        };
                     }
-                    info!("imu: active");
-                    return Active {
-                        sensor,
-                        int1: self.int1,
-                        id: self.id,
-                    };
-                }
+                    Err(()) => {
+                        error!("{} configuration failed", self.id);
+                        self.iface = sensor.destroy();
+                    }
+                },
                 Err(err) => {
-                    self.attempt = self.attempt.saturating_add(1);
-                    warn!("imu: init failed (attempt {})", self.attempt);
+                    error!("{} init failed: {:?}", self.id, Debug2Format(&err.kind));
                     self.iface = err.sensor.destroy();
-                    Timer::after(backoff(self.attempt)).await;
                 }
             }
+            self.attempt = self.attempt.saturating_add(1);
+            Timer::after(backoff(self.attempt)).await;
         }
     }
 }
@@ -118,20 +170,13 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
         let mut errors: u8 = 0;
 
         loop {
-            let _ = with_timeout(
-                Duration::from_millis(LOOP_TIMEOUT_MS),
-                self.int1.wait_for_rising_edge(),
-            )
-            .await;
+            let _ = with_timeout(LOOP_TIMEOUT, self.int1.wait_for_rising_edge()).await;
 
             let fifo_level = match self.sensor.read_fifo_level().await {
                 Ok(level) => level,
-                Err(_) => {
+                Err(e) => {
+                    warn!("{} FIFO level read error: {:?}", self.id, Debug2Format(&e));
                     errors = errors.saturating_add(1);
-                    warn!(
-                        "imu: fifo level read error ({}/{})",
-                        errors, MAX_CONSECUTIVE_ERRORS
-                    );
                     if errors >= MAX_CONSECUTIVE_ERRORS {
                         break;
                     }
@@ -144,6 +189,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 
             let fifo_entries = (fifo_level as usize).min(fifo_buf.len()) & !1;
             if fifo_entries == 0 {
+                warn!("{} FIFO empty", self.id);
                 errors = errors.saturating_add(1);
                 if errors >= MAX_CONSECUTIVE_ERRORS {
                     break;
@@ -151,17 +197,13 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 continue;
             }
 
-            if self
+            if let Err(e) = self
                 .sensor
                 .read_multiple_fifo_data(&mut fifo_buf[..fifo_entries])
                 .await
-                .is_err()
             {
+                warn!("{} FIFO data read error: {:?}", self.id, Debug2Format(&e));
                 errors = errors.saturating_add(1);
-                warn!(
-                    "imu: fifo read error ({}/{})",
-                    errors, MAX_CONSECUTIVE_ERRORS
-                );
                 if errors >= MAX_CONSECUTIVE_ERRORS {
                     break;
                 }
@@ -172,12 +214,21 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             let avg_dt_us =
                 this_data_end.duration_since(this_data_start).as_micros() / num_pairs as u64;
 
+            // While the sensor's fifo can in theory produce timestamps, in practice these were
+            // less accurate than simply using the wall clock time and interpolating over samples.
             let mut samples = heapless::Vec::<ImuSample, 256>::new();
             for (i, chunk) in fifo_buf[..fifo_entries].chunks_exact(2).enumerate() {
                 let (acc, gyr) = match (chunk[0].tag_sensor(), chunk[1].tag_sensor()) {
                     (TagSensor::AccelerometerNC, TagSensor::GyroscopeNC) => (chunk[0], chunk[1]),
                     (TagSensor::GyroscopeNC, TagSensor::AccelerometerNC) => (chunk[1], chunk[0]),
-                    _ => continue,
+                    other => {
+                        warn!(
+                            "{} unexpected FIFO tag pair: {:?}",
+                            self.id,
+                            Debug2Format(&other)
+                        );
+                        continue;
+                    }
                 };
 
                 let accel = Acceleration::from_raw(
@@ -198,18 +249,21 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 );
 
                 let ts = this_data_start + Duration::from_micros(avg_dt_us * i as u64);
-                let _ = samples.push(ImuSample {
-                    sensor_id: self.id,
-                    data: Timestamped::at(ts, ImuData { accel, gyro }),
-                });
+                let raw = RawImuSample {
+                    src: self.id,
+                    ts,
+                    accel,
+                    gyro,
+                };
+                let _ = samples.push(calibration::imu::apply_calibration(raw));
             }
 
-            signals::submit_imu_samples(&samples);
+            signals::submit_imu_sample_batch(&samples);
             errors = 0;
-            trace!("imu: read {} pairs, dt={} us", num_pairs, avg_dt_us);
+            trace!("{} FIFO {} pairs, dt={} us", self.id, num_pairs, avg_dt_us);
         }
 
-        warn!("imu: inactive (too many errors)");
+        error!("{} offline (too many consecutive errors)", self.id);
         Inactive {
             iface: self.sensor.destroy(),
             int1: self.int1,
@@ -233,7 +287,9 @@ where
 
     loop {
         let active = inactive.run().await;
+        IMU_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
         inactive = active.run().await;
+        IMU_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
     }
 }
 

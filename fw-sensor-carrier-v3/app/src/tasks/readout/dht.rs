@@ -1,24 +1,24 @@
+use core::sync::atomic::Ordering;
+
 use defmt::{Debug2Format, debug, error, info, trace, warn};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
-use ms5607::{Ms5607, Oversampling};
-
-use core::sync::atomic::Ordering;
+use sht4x::{Precision, Sht4xAsync};
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::calibration;
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
-use crate::sensors::{BAROMETER_STATUS, BarometerId, SensorStatus};
+use crate::sensors::{DHT_STATUS, DhtId, SensorStatus};
 use crate::signals;
-use crate::types::RawBaroSample;
+use crate::types::RawDhtSample;
 
-pub const SAMPLE_HZ: u32 = 40;
+pub const SAMPLE_HZ: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 struct Inactive<I2C> {
-    sensor: Ms5607<I2C, ms5607::Uninitialized>,
-    id: BarometerId,
+    sensor: Sht4xAsync<I2C, Delay>,
+    id: DhtId,
     attempt: u8,
 }
 
@@ -26,18 +26,27 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
     async fn run(mut self) -> Active<I2C> {
         loop {
             debug!("{} initializing", self.id);
-            match self.sensor.init(&mut Delay).await {
-                Ok(sensor) => {
+
+            let result = match self.sensor.soft_reset(&mut Delay).await {
+                Ok(()) => self
+                    .sensor
+                    .measure(Precision::Low, &mut Delay)
+                    .await
+                    .map(|_| ()),
+                Err(e) => Err(e),
+            };
+
+            match result {
+                Ok(()) => {
                     info!("{} initialized", self.id);
                     return Active {
-                        sensor,
+                        sensor: self.sensor,
                         id: self.id,
                     };
                 }
-                Err(err) => {
-                    error!("{} init failed: {:?}", self.id, Debug2Format(&err.kind));
+                Err(e) => {
+                    error!("{} init failed: {:?}", self.id, Debug2Format(&e));
                     self.attempt = self.attempt.saturating_add(1);
-                    self.sensor = Ms5607::new(err.sensor.destroy(), false);
                     Timer::after(backoff(self.attempt)).await;
                 }
             }
@@ -46,8 +55,8 @@ impl<I2C: embedded_hal_async::i2c::I2c> Inactive<I2C> {
 }
 
 struct Active<I2C> {
-    sensor: Ms5607<I2C, ms5607::Initialized>,
-    id: BarometerId,
+    sensor: Sht4xAsync<I2C, Delay>,
+    id: DhtId,
 }
 
 impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
@@ -57,17 +66,19 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
         loop {
             let next_sample = Instant::now() + SAMPLE_INTERVAL;
 
-            match self.sensor.measure(Oversampling::Osr2048, &mut Delay).await {
+            match self.sensor.measure(Precision::Low, &mut Delay).await {
                 Ok(m) => {
                     errors = 0;
-                    let raw = RawBaroSample {
+                    let temperature_c: f32 = m.temperature_celsius().to_num();
+                    let humidity_rh: f32 = m.humidity_percent().to_num();
+                    let raw = RawDhtSample {
                         src: self.id,
                         ts: Instant::now(),
-                        pressure_mbar: m.pressure_mbar,
-                        temperature_c: m.temperature_c,
+                        temperature_c,
+                        humidity_rh,
                     };
-                    signals::submit_baro_sample(calibration::baro::apply_calibration(raw));
-                    trace!("{} p={} mbar", self.id, m.pressure_mbar);
+                    signals::submit_dht_sample(calibration::dht::apply_calibration(raw));
+                    trace!("{} t={} c rh={} %", self.id, temperature_c, humidity_rh);
                 }
                 Err(e) => {
                     warn!("{} read error: {:?}", self.id, Debug2Format(&e));
@@ -87,33 +98,33 @@ impl<I2C: embedded_hal_async::i2c::I2c> Active<I2C> {
 
         error!("{} offline (too many consecutive errors)", self.id);
         Inactive {
-            sensor: Ms5607::new(self.sensor.destroy(), false),
+            sensor: Sht4xAsync::new(self.sensor.destroy()),
             id: self.id,
             attempt: 0,
         }
     }
 }
 
-async fn run_inner<I2C>(i2c: I2C, id: BarometerId) -> !
+async fn run_inner<I2C>(i2c: I2C, id: DhtId) -> !
 where
     I2C: embedded_hal_async::i2c::I2c,
 {
     let mut inactive = Inactive {
-        sensor: Ms5607::new(i2c, false),
+        sensor: Sht4xAsync::new(i2c),
         id,
         attempt: 0,
     };
 
     loop {
         let active = inactive.run().await;
-        BAROMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
+        DHT_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
         inactive = active.run().await;
-        BAROMETER_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
+        DHT_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
     }
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(bus: SharedI2cBus, id: BarometerId) -> ! {
+pub async fn task(bus: SharedI2cBus, id: DhtId) -> ! {
     let i2c = I2cDevice::<CriticalSectionRawMutex, SharedI2c>::new(bus);
     run_inner(i2c, id).await
 }
