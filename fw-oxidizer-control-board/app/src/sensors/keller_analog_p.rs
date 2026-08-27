@@ -1,6 +1,9 @@
 use crate::Irqs;
 use crate::drivers::analog_pressure::{OxidizerPressureDriver, OxidizerPressureMeasurementRaw};
-use crate::sensors::{ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES, OXIDIZER_TANK_DIFFERENTIAL_PRESSURE_RANGE, OXIDIZER_TANK_FULL_PRESSURE, OXIDIZER_TANK_PRESSURE_1_RANGE, OXIDIZER_TANK_PRESSURE_2_RANGE};
+use crate::sensors::{
+    ACQ_PRESSURE_FREQ_HZ, ADC_CALIBRATION_SAMPLES, OXIDIZER_TANK_DIFFERENTIAL_PRESSURE_RANGE,
+    OXIDIZER_TANK_FULL_PRESSURE, OXIDIZER_TANK_PRESSURE_1_RANGE, OXIDIZER_TANK_PRESSURE_2_RANGE,
+};
 use analog_pressure::ADCPressure;
 use analog_pressure::pressures::TrafagPSens;
 use embassy_futures::join::join3;
@@ -88,7 +91,8 @@ pub async fn oxidizer_pressure_acquisition(pressure_handles: OxidizerPressureHan
         let measurement = OxidizerPressureMeasurementRaw {
             oxidizer_tank_pressure_1,
             oxidizer_tank_pressure_2,
-            oxidizer_tank_differential_pressure: oxidizer_tank_differential_pressure / OXIDIZER_TANK_FULL_PRESSURE,
+            oxidizer_tank_differential_pressure: oxidizer_tank_differential_pressure
+                / OXIDIZER_TANK_FULL_PRESSURE,
         };
 
         info!(
