@@ -176,7 +176,6 @@ async fn main(spawner: Spawner) -> ! {
         fuel_pressure_acquisition(pressure_handles).expect("failed to prepare pressure task"),
     );
 
-    // TODO: Replace PA0/PA1/PA2 with the correct solenoid detection pins
     spawner.spawn(
         solenoid_detection_task(p.PC3, p.PB6, p.PC2)
             .expect("failed to prepare solenoid detection task"),
