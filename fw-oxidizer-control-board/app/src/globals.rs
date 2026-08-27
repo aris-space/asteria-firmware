@@ -79,6 +79,8 @@ pub struct BoardState {
     // Solenoid currents
     // TODO: Broadcast this once the corresponding data-definition messages exist.
     pub solenoid_currents: Watch<ThreadModeRawMutex, SolenoidCurrentMeasurements, WATCH>,
+    /// Raw, unfiltered tank pressure used as the DPR control loop input.
+    pub dpr_pressure: Watch<ThreadModeRawMutex, f32, WATCH>,
 }
 
 impl BoardState {
@@ -95,6 +97,7 @@ impl BoardState {
             buzzer: Watch::new(),
             solenoid_states: Watch::new(),
             solenoid_currents: Watch::new(),
+            dpr_pressure: Watch::new(),
         }
     }
 }

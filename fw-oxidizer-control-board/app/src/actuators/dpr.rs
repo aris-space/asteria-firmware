@@ -10,8 +10,7 @@ use embedded_utils::error;
 
 #[embassy_executor::task]
 pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
-    let mut p1_watcher = STATE.oxidizer_tank_pressure_sensor_1.receiver().unwrap();
-    let mut p2_watcher = STATE.oxidizer_tank_pressure_sensor_2.receiver().unwrap();
+    let mut dpr_pressure_watcher = STATE.dpr_pressure.receiver().unwrap();
     let mut dpr_control_loop_receiver = STATE.dpr_control_loop.receiver().unwrap();
 
     let dpr_control_loop_sender = STATE.dpr_control_loop.sender();
@@ -43,10 +42,8 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
             }
         }
 
-        // Update pressure reading with available tank pressure data.
-        let p1 = p1_watcher.get().await;
-        let p2 = p2_watcher.get().await;
-        let new_pressure = get_control_pressure(p1, p2);
+        // Update pressure reading with the raw, unfiltered control pressure.
+        let new_pressure = dpr_pressure_watcher.get().await;
         if new_pressure != f32::INFINITY {
             pressure = new_pressure
         }
@@ -93,20 +90,5 @@ pub(crate) async fn pid_controller(mut valve_pin: Output<'static>) {
         }
         // Wait for next cycle
         ticker.next().await;
-    }
-}
-
-fn get_control_pressure(p1: datatypes::units::BarG, p2: datatypes::units::BarG) -> f32 {
-    let p1 = p1.0;
-    let p2 = p2.0;
-
-    if p1.is_finite() && p2.is_finite() {
-        f32::max(p1, p2)
-    } else if p1.is_finite() {
-        p1
-    } else if p2.is_finite() {
-        p2
-    } else {
-        f32::INFINITY
     }
 }
