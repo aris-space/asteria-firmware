@@ -87,6 +87,8 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
+    let _green = Output::new(p.PC15, Level::High, Speed::Low);
+    let _yellow = Output::new(p.PC14, Level::High, Speed::Low);
     let red = Output::new(p.PC13, Level::High, Speed::Low);
 
     // Solenoids
@@ -182,11 +184,12 @@ async fn main(spawner: Spawner) -> ! {
 #[embassy_executor::task]
 async fn build_status_blinky(mut red: Output<'static>) {
     let build_info = crate::build_info::BUILD_INFO.get();
-    let warning_build = build_info.is_git_dirty || !build_info.is_release;
+    let warning_build =
+        build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
     let (on_ms, off_ms) = if warning_build {
         (125, 125)
     } else {
-        (900, 100)
+        (200, 1800)
     };
 
     loop {
