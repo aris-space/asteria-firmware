@@ -224,7 +224,6 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     spawner.spawn(buzzer_task(buzzer_pwm).unwrap());
-    // TODO: Replace PC2/PC3/PA1 with the correct solenoid detection pins.
     spawner.spawn(
         solenoid_detection_task(p.PB6, p.PC2, p.PA1)
             .expect("failed to prepare solenoid detection task"),
