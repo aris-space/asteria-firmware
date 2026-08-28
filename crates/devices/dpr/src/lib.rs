@@ -12,6 +12,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as DprRawMutex;
 #[cfg(not(any(doc, docsrs)))]
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex as DprRawMutex;
 use embassy_sync::watch::{Receiver, Sender};
+use embassy_time::Timer;
 
 #[embassy_executor::task]
 pub async fn pid_controller(
@@ -33,9 +34,6 @@ pub async fn pid_controller(
         // Check if config has changed
         dpr.update_state();
 
-        // Check if gain has changed
-        dpr.update_pid();
-
         // Update pressure if available
         dpr.update_pressure();
 
@@ -43,6 +41,8 @@ pub async fn pid_controller(
         dpr.handle_overpressure();
 
         // Compute controller output and actuate valve
-        dpr.step().await;
+        dpr.step_bang().await;
+
+        Timer::after_micros(1600).await;
     }
 }

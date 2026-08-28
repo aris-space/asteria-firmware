@@ -4,7 +4,7 @@ use crate::drivers::solenoid_detection::SolenoidStates;
 use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
 use datatypes::actuator::{DPRValve, NormallyOpenValve};
-use datatypes::status::BuildInformationCommon;
+use datatypes::status::{BuildInformationCommon, DprGainInfo, DprLoopInfo};
 use datatypes::units::BarG;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::Watch;
@@ -79,6 +79,10 @@ pub struct BoardState {
     // Solenoid currents
     // TODO: Broadcast this once the corresponding data-definition messages exist.
     pub solenoid_currents: Watch<ThreadModeRawMutex, SolenoidCurrentMeasurements, WATCH>,
+    /// DPR loop state, published by the shared `dpr` crate.
+    pub dpr_info: Watch<ThreadModeRawMutex, DprLoopInfo, WATCH>,
+    /// DPR gains received over CAN.
+    pub dpr_gain: Watch<ThreadModeRawMutex, DprGainInfo, WATCH>,
     /// Raw, unfiltered tank pressure used as the DPR control loop input.
     pub dpr_pressure: Watch<ThreadModeRawMutex, f32, WATCH>,
 }
@@ -97,6 +101,8 @@ impl BoardState {
             buzzer: Watch::new(),
             solenoid_states: Watch::new(),
             solenoid_currents: Watch::new(),
+            dpr_info: Watch::new(),
+            dpr_gain: Watch::new(),
             dpr_pressure: Watch::new(),
         }
     }

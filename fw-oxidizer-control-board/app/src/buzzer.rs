@@ -9,6 +9,10 @@ use embassy_time::{Duration, Instant, Timer};
 const STATUS_BEEP_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
+// No sender remains since the local DPR controller was replaced by the shared `dpr`
+// crate, which does not drive the buzzer. Kept so the buzzer task still compiles;
+// see the DVF open items - this board currently has no audible fault indication.
+#[allow(dead_code)]
 pub enum BuzzerState {
     Idle,
     Error,

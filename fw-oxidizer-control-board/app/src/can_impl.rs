@@ -1,11 +1,10 @@
-use crate::actuators::{KD, KI, KP};
 use crate::globals::STATE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
-use datatypes::actuator::DPRValve;
 use datatypes::status::{BoardId, DprGainInfo, DprLoopInfo, SensorStatus, StatusCommonMessage};
+use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
 use embassy_futures::yield_now;
 use embassy_stm32::can::CanRx;
 use embassy_time::{Duration, Instant, Ticker};
@@ -21,6 +20,11 @@ data_core::can::sparse_decodable_can_message! {
         OxidizerDprValveControlRFS(dp_oxidizer_control_board::Message::OxidizerDprValveControlRFS),
         OxidizerVentValveControlFC(dp_oxidizer_control_board::Message::OxidizerVentValveControlFC),
         OxidizerVentValveControlRFS(dp_oxidizer_control_board::Message::OxidizerVentValveControlRFS),
+        OxidizerDprGainP(dp_oxidizer_control_board::Message::OxidizerDprGainP),
+        OxidizerDprGainI(dp_oxidizer_control_board::Message::OxidizerDprGainI),
+        OxidizerDprGainD(dp_oxidizer_control_board::Message::OxidizerDprGainD),
+        OxidizerDprMinOpeningTime(dp_oxidizer_control_board::Message::OxidizerDprMinOpeningTime),
+        OxidizerDprMaxOpeningTime(dp_oxidizer_control_board::Message::OxidizerDprMaxOpeningTime),
     }
 }
 
@@ -33,6 +37,16 @@ const __ASSERT_LEN_OK: () = {
 
 #[embassy_executor::task]
 pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
+    let dpr_gain_sender = STATE.dpr_gain.sender();
+
+    let mut dpr_gain = DprGainInfo {
+        p: GAINS.p,
+        i: GAINS.i,
+        d: GAINS.d,
+        min_ms: MIN_TIME_MS,
+        max_ms: MAX_TIME_MS,
+    };
+
     loop {
         match can_rx.recv().await {
             Ok(ReceivedMessage::ResetAll(_)) => {
@@ -47,9 +61,31 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
                     reset_now();
                 }
             }
-            Ok(msg) => {
-                let _ = STATE.update_from(msg);
-            }
+            Ok(msg) => match msg {
+                ReceivedMessage::OxidizerDprGainP(p) => {
+                    dpr_gain.p = p;
+                    dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::OxidizerDprGainI(i) => {
+                    dpr_gain.i = i;
+                    dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::OxidizerDprGainD(d) => {
+                    dpr_gain.d = d;
+                    dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::OxidizerDprMinOpeningTime(min_ms) => {
+                    dpr_gain.min_ms = min_ms;
+                    dpr_gain_sender.send(dpr_gain);
+                }
+                ReceivedMessage::OxidizerDprMaxOpeningTime(max_ms) => {
+                    dpr_gain.max_ms = max_ms;
+                    dpr_gain_sender.send(dpr_gain);
+                }
+                _ => {
+                    let _ = STATE.update_from(msg);
+                }
+            },
             Err(err) => {
                 error!("CAN RX error: {:?}", err);
             }
@@ -67,19 +103,27 @@ pub async fn board_status_update_task() -> ! {
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
     let mut pressure_bus_status = STATE.pressure_bus_status.receiver().unwrap();
-    let mut dpr_control_loop = STATE.dpr_control_loop.receiver().unwrap();
+    let mut dpr_info_receiver = STATE.dpr_info.receiver().unwrap();
+    let mut dpr_gain_receiver = STATE.dpr_gain.receiver().unwrap();
     let mut pressure_status = SensorStatus::Online;
-    let mut dpr_loop_info = DprLoopInfo::Passive;
+    let mut dpr_loop_info = DprLoopInfo::default();
+    let mut dpr_gain = DprGainInfo {
+        p: GAINS.p,
+        i: GAINS.i,
+        d: GAINS.d,
+        min_ms: MIN_TIME_MS,
+        max_ms: MAX_TIME_MS,
+    };
 
     loop {
         if let Some(status) = pressure_bus_status.try_changed() {
             pressure_status = status;
         }
-        if let Some(status) = dpr_control_loop.try_changed() {
-            dpr_loop_info = match status {
-                DPRValve::Enabled { .. } => DprLoopInfo::ActiveNominal,
-                DPRValve::Disabled => DprLoopInfo::Passive,
-            };
+        if let Some(status) = dpr_info_receiver.try_changed() {
+            dpr_loop_info = status;
+        }
+        if let Some(gain) = dpr_gain_receiver.try_changed() {
+            dpr_gain = gain;
         }
 
         STATE
@@ -93,13 +137,7 @@ pub async fn board_status_update_task() -> ! {
                 thermocouple_status: SensorStatus::Online,
                 pressure_bus: pressure_status,
                 dpr_loop_info,
-                dpr_gain_info: DprGainInfo {
-                    p: KP,
-                    i: KI,
-                    d: KD,
-                    min_ms: 0.0,
-                    max_ms: 0.0,
-                },
+                dpr_gain_info: dpr_gain,
             });
 
         status_ticker.next().await;

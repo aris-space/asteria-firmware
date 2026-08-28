@@ -6,6 +6,7 @@ authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-
 
 [dependencies]
 filters = { path = "../../crates/filters" }
+dpr = { path = "../../crates/devices/dpr", features = ["defmt"] }
 embedded-utils = { path = "../../crates/embedded-utils" }
 analog-pressure = { path = "../../crates/devices/analog-pressure" }
 can-utils = { path = "../../crates/can-utils" }
