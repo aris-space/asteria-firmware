@@ -1,3 +1,4 @@
+use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
@@ -101,6 +102,7 @@ pub async fn board_status_update_task() -> ! {
         1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,
     ));
     let mut dpr_info_receiver = STATE.dpr_info.receiver().unwrap();
+    let buzzer_sender = STATE.buzzer.sender();
     let mut dpr_status = DprLoopInfo::default();
 
     let mut dpr_gain_receiver = STATE.dpr_gain.receiver().unwrap();
@@ -123,6 +125,10 @@ pub async fn board_status_update_task() -> ! {
         }
         if let Some(status) = dpr_info_receiver.try_changed() {
             dpr_status = status;
+            buzzer_sender.send(match status {
+                DprLoopInfo::ActiveOverPressure => BuzzerState::Error,
+                _ => BuzzerState::Idle,
+            });
         }
         if let Some(gain) = dpr_gain_receiver.try_changed() {
             dpr_gain = gain;

@@ -7,7 +7,6 @@ use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_time::{Duration, Timer};
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub enum BuzzerState {
     Idle,
     Error,

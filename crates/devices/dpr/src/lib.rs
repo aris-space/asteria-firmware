@@ -34,6 +34,10 @@ pub async fn pid_controller(
         // Check if config has changed
         dpr.update_state();
 
+        // Apply any gains received over CAN. step_bang() only uses the setpoint,
+        // but the values are kept current so the PID path stays tunable.
+        dpr.update_pid();
+
         // Update pressure if available
         dpr.update_pressure();
 

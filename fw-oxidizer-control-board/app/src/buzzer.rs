@@ -9,10 +9,6 @@ use embassy_time::{Duration, Instant, Timer};
 const STATUS_BEEP_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
-// No sender remains since the local DPR controller was replaced by the shared `dpr`
-// crate, which does not drive the buzzer. Kept so the buzzer task still compiles;
-// see the DVF open items - this board currently has no audible fault indication.
-#[allow(dead_code)]
 pub enum BuzzerState {
     Idle,
     Error,
@@ -34,7 +30,16 @@ pub async fn buzzer_task(mut pwm: SimplePwm<'static, TIM3>) {
         let state = watcher.get().await;
 
         match state {
-            BuzzerState::Error => {}
+            BuzzerState::Error => {
+                // Overpressure. Fast repeating beep, clearly distinct from the
+                // slow idle status beep.
+                for _ in 0..3 {
+                    pwm.set_duty(Ch4, on);
+                    Timer::after(Duration::from_millis(80)).await;
+                    pwm.set_duty(Ch4, off);
+                    Timer::after(Duration::from_millis(80)).await;
+                }
+            }
             BuzzerState::Idle => {
                 pwm.set_duty(Ch4, off);
 
