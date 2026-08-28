@@ -31,14 +31,7 @@ pub async fn buzzer_task(mut pwm: SimplePwm<'static, TIM3>) {
 
         match state {
             BuzzerState::Error => {
-                // Overpressure. Fast repeating beep, clearly distinct from the
-                // slow idle status beep.
-                for _ in 0..3 {
-                    pwm.set_duty(Ch4, on);
-                    Timer::after(Duration::from_millis(80)).await;
-                    pwm.set_duty(Ch4, off);
-                    Timer::after(Duration::from_millis(80)).await;
-                }
+                pwm.set_duty(Ch4, on);
             }
             BuzzerState::Idle => {
                 pwm.set_duty(Ch4, off);
