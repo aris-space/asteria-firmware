@@ -1,10 +1,11 @@
 //! Sensor readout tasks: drive a single sensor (or sensor-bus pair), publish
 //! raw samples to its per-sensor signal, and report `SensorStatus`.
 //!
-//! Every readout follows the same shape: an `Inactive` state that retries
-//! init with exponential backoff, an `Active` state that loops on the
-//! sensor's wakeup/interrupt, and `run_inner` which flips the
-//! [`crate::sensors::*_STATUS`] table at each state transition.
+//! I2C readouts initialize sequentially at startup with bounded retries, then
+//! run a read task. Failed initialization or too many read errors disables the
+//! sensor until reboot. IMU/GNSS readouts retain `Inactive`/`Active` states and
+//! retry initialization indefinitely. Each readout updates its sensor status
+//! at state transitions.
 
 use embassy_time::Duration;
 
@@ -14,14 +15,23 @@ pub mod gnss;
 pub mod imu;
 pub mod magnetometer;
 
-/// Maximum consecutive read errors before a readout transitions back to
-/// `Inactive` and retries init.
+/// Maximum consecutive read errors before an I2C readout disables itself,
+/// or an IMU/GNSS readout transitions back to `Inactive` and retries init.
 pub const MAX_CONSECUTIVE_ERRORS: u8 = 10;
 
-// A failed init attempt busy-blocks the shared executor for the I2C timeout
-// (embassy's async I2C doesn't yield while the bus is wedged), so a dead bus must
-// back off hard to avoid starving the healthy buses.
-const BASE_BACKOFF_MS: u64 = 500;
+/// How many times a readout retries init before it gives up, disables itself, and
+/// stops touching the bus. A sensor that never answers (unpopulated or shorted
+/// bus) would otherwise retry forever, and each failed attempt busy-blocks the
+/// shared executor (embassy's async I2C doesn't yield while the bus is wedged),
+/// starving the healthy sensors on the same bus.
+pub const MAX_INIT_ATTEMPTS: u8 = 3;
+
+// Exponential backoff between init retries. The bus readouts take only a couple of
+// these before they disable (see `MAX_INIT_ATTEMPTS`); keeping the base short means
+// an absent/shorted bus runs through its attempts and goes quiet within ~0.6 s,
+// before the healthy sensors settle into steady-state reads. IMU/GNSS retry
+// indefinitely on dedicated buses and rely on the cap.
+const BASE_BACKOFF_MS: u64 = 100;
 const MAX_BACKOFF_MS: u64 = 5000;
 
 /// Exponential backoff for sensor init retries. Saturates at `MAX_BACKOFF_MS`.

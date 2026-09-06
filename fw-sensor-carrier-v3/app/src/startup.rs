@@ -83,7 +83,11 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     }
 }
 
-pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawner: SendSpawner) {
+pub async fn spawn_tasks(
+    board: PreparedBoard,
+    thread_spawner: Spawner,
+    level_0_spawner: SendSpawner,
+) {
     level_0_spawner.spawn(
         tasks::blinky::task(board.services.yellow_led).expect("Failed to spawn blinky task"),
     );
@@ -98,23 +102,48 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawne
         tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1).expect("Failed to spawn IMU 1 task"),
     );
 
-    level_0_spawner.spawn(
-        tasks::readout::barometer::task(board.sensors.bus1, BARO_BUS_1)
-            .expect("Failed to spawn barometer 0 task"),
-    );
-    level_0_spawner.spawn(
-        tasks::readout::barometer::task(board.sensors.bus2, BARO_BUS_2)
-            .expect("Failed to spawn barometer 1 task"),
-    );
+    // Do not replace this unless you know why it was there in the first place.
+    let mag1 = tasks::readout::magnetometer::init(board.sensors.bus1, MAG_BUS_1).await;
+    let baro1 = tasks::readout::barometer::init(board.sensors.bus1, BARO_BUS_1).await;
+    let dht1 = tasks::readout::dht::init(board.sensors.bus1, DHT_BUS_1).await;
+    let mag2 = tasks::readout::magnetometer::init(board.sensors.bus2, MAG_BUS_2).await;
+    let baro2 = tasks::readout::barometer::init(board.sensors.bus2, BARO_BUS_2).await;
+    let dht2 = tasks::readout::dht::init(board.sensors.bus2, DHT_BUS_2).await;
 
-    level_0_spawner.spawn(
-        tasks::readout::magnetometer::task(board.sensors.bus1, MAG_BUS_1)
-            .expect("Failed to spawn magnetometer 0 task"),
-    );
-    level_0_spawner.spawn(
-        tasks::readout::magnetometer::task(board.sensors.bus2, MAG_BUS_2)
-            .expect("Failed to spawn magnetometer 1 task"),
-    );
+    if let Some(sensor) = mag1 {
+        level_0_spawner.spawn(
+            tasks::readout::magnetometer::read_task(sensor, MAG_BUS_1)
+                .expect("Failed to spawn magnetometer 0 task"),
+        );
+    }
+    if let Some(sensor) = baro1 {
+        level_0_spawner.spawn(
+            tasks::readout::barometer::read_task(sensor, BARO_BUS_1)
+                .expect("Failed to spawn barometer 0 task"),
+        );
+    }
+    if let Some(sensor) = dht1 {
+        level_0_spawner.spawn(
+            tasks::readout::dht::read_task(sensor, DHT_BUS_1).expect("Failed to spawn DHT 0 task"),
+        );
+    }
+    if let Some(sensor) = mag2 {
+        level_0_spawner.spawn(
+            tasks::readout::magnetometer::read_task(sensor, MAG_BUS_2)
+                .expect("Failed to spawn magnetometer 1 task"),
+        );
+    }
+    if let Some(sensor) = baro2 {
+        level_0_spawner.spawn(
+            tasks::readout::barometer::read_task(sensor, BARO_BUS_2)
+                .expect("Failed to spawn barometer 1 task"),
+        );
+    }
+    if let Some(sensor) = dht2 {
+        level_0_spawner.spawn(
+            tasks::readout::dht::read_task(sensor, DHT_BUS_2).expect("Failed to spawn DHT 1 task"),
+        );
+    }
 
     level_0_spawner.spawn(
         tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0)
@@ -123,15 +152,6 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner, level_0_spawne
     level_0_spawner.spawn(
         tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1)
             .expect("Failed to spawn GNSS 1 task"),
-    );
-
-    level_0_spawner.spawn(
-        tasks::readout::dht::task(board.sensors.bus1, DHT_BUS_1)
-            .expect("Failed to spawn DHT 0 task"),
-    );
-    level_0_spawner.spawn(
-        tasks::readout::dht::task(board.sensors.bus2, DHT_BUS_2)
-            .expect("Failed to spawn DHT 1 task"),
     );
 
     // --- Processing ---------------------------------------------------------

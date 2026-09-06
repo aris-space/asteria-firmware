@@ -49,7 +49,7 @@ async fn main(thread_spawner: Spawner) -> ! {
     let board = startup::prepare(resources::split(p)).await;
     let level_0_spawner = interrupt_executor!(TIM2, P6);
 
-    startup::spawn_tasks(board, thread_spawner, level_0_spawner);
+    startup::spawn_tasks(board, thread_spawner, level_0_spawner).await;
 
     loop {
         pending::<()>().await;
