@@ -87,6 +87,8 @@ define_sensor_family! {
 pub enum SensorStatus {
     Inactive,
     Active,
+    /// Init or reads failed too many times; polling stops until reboot.
+    Disabled,
 }
 
 macro_rules! status_array {
