@@ -23,7 +23,6 @@ This repository was hard-forked from [`hermes-firmware`](https://github.com/aris
 
 | Firmware                     | Common name             | MCU             |
 | ---------------------------- | ----------------------- | --------------- |
-| `fw-communication-board`     | Communication board     | `STM32G473RCTx` |
 | `fw-engine-board`            | Engine board            | `STM32G473RCTx` |
 | `fw-fuel-control-board`      | Fuel control board      | `STM32G473RCTx` |
 | `fw-lox-valve-control-board` | LOX valve control board | `STM32G4A1KETx` |
@@ -55,10 +54,6 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. If you have 
 
 ## License
 
-Source files are licensed under [`MIT`](LICENSE-MIT) OR [`Apache-2.0`](LICENSE-APACHE), at your option. Contributions are licensed under those same terms.
-
-SPDX-License-Identifier: `MIT OR Apache-2.0`
-
-See [NOTICE](NOTICE) for repository copyright attribution.
+Source files and contributions are licensed under [`MIT`](LICENSE-MIT) OR [`Apache-2.0`](LICENSE-APACHE), at your option. See [NOTICE](NOTICE) for attribution.
 
 Note that the compiled firmware links against the GPL-licensed [`asteria-data-definitions`](https://github.com/aris-space/asteria-data-definitions), so distributed firmware binaries are combined works under GPL-3.0-or-later.

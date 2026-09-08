@@ -8,7 +8,6 @@ Each `fw-*` workspace builds one board firmware binary. Shared embedded code liv
 
 | Workspace | Binary | MCU | `just run` flash path |
 | --- | --- | --- | --- |
-| `fw-communication-board` | `fw-communication-board` | `STM32G473RCTx` | `probe-rs run` |
 | `fw-engine-board` | `fw-engine-board` | `STM32G473RCTx` | `STM32_Programmer_CLI` + `probe-rs attach` |
 | `fw-fuel-control-board` | `fw-fuel-control-board` | `STM32G473RCTx` | `STM32_Programmer_CLI` + `probe-rs attach` |
 | `fw-lox-valve-control-board` | `fw-lox-valve-control-board` | `STM32G4A1KETx` | `probe-rs run` |
@@ -25,19 +24,19 @@ The flash path comes from each board's `justfile`.
 
 ```text
 asteria-firmware/
-|-- fw-*/                 # board firmware workspaces
-|   |-- app/              # main firmware binary crate
-|   |-- Cargo.toml
-|   |-- Embed.toml
-|   `-- justfile
-|-- crates/               # shared embedded crates
-|-- tools/                # host-side tools
-|-- data-definitions/     # message/datapoint definitions submodule
-|-- hermes-can/           # legacy CAN message library submodule
-|-- just/                 # shared recipes and scripts
-|-- shared/               # include!() snippets
-|-- docs/
-`-- justfile              # root orchestration
+├── fw-*/                 # board firmware workspaces
+│   ├── app/              # main firmware binary crate
+│   ├── Cargo.toml
+│   ├── Embed.toml
+│   └── justfile
+├── crates/               # shared embedded crates
+├── tools/                # host-side tools
+├── data-definitions/     # message/datapoint definitions submodule
+├── hermes-can/           # legacy CAN message library submodule
+├── just/                 # shared recipes and scripts
+├── shared/               # include!() snippets
+├── docs/
+└── justfile              # root orchestration
 ```
 
 There is no root Cargo workspace. `fw-*`, `crates/`, and `tools/` are separate workspaces. Use root `just` for cross-workspace commands.

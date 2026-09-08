@@ -1,19 +1,10 @@
 # Development
 
-Use `just` for normal workflows. There is no root Cargo workspace.
+Use `just` for normal workflows. Run `just --list` for available commands. There is no root Cargo workspace.
 
 ## Board Workflow
 
 Run board-specific commands inside a `fw-*` directory:
-
-```sh
-cd fw-communication-board
-just --list
-just build
-just run
-```
-
-Common recipes:
 
 ```sh
 just build        # build for thumbv7em-none-eabihf
@@ -43,31 +34,15 @@ Do not use `--no-default-features` blindly; some newer firmware uses default fea
 
 ## Root Commands
 
-From repo root:
-
-```sh
-just build
-just fmt
-just ci-checks
-just clippy
-just test
-just doc
-```
+Run cross-workspace commands from the repository root.
 
 `just test` runs host-side tests for `crates/` and `tools/`. Embedded firmware test recipes are no-ops.
 
-Before pushing:
-
-```sh
-pre-commit run --all-files
-just fmt --check
-just ci-checks
-just test
-```
+See [Contributing](../CONTRIBUTING.md#5-required-local-checks-before-push) for checks to run before pushing.
 
 ## Artifacts
 
-`just run` and `just flash` timestamp the ELF, cache it in `.artifacts/`, upload it to object storage if configured, then flash the board. This lets fetched logs find the matching ELF later.
+`just run` and `just flash` timestamp the ELF, cache it in `.artifacts/`, upload it to object storage if configured, and flash the board. This lets fetched logs find the matching ELF later.
 
 Useful root recipes:
 
@@ -80,7 +55,7 @@ just sync-artifacts
 
 ## Device Communication
 
-`asteria-tool` talks to a running board over USB RPC.
+`asteria-tool` talks to a running board over USB RPC. Run these commands from the repository root.
 
 ```sh
 just connect
@@ -100,18 +75,18 @@ See [../tools/asteria-tool/README.md](../tools/asteria-tool/README.md) for the f
 
 ## Logs
 
-Fetch and decode logs:
+From the repository root, fetch and decode logs:
 
 ```sh
 just fetch-logs latest
-just fetch-logs 3
+just fetch-logs 3      # fetch log_3
 just fetch-logs all
 ```
 
-Decode an already fetched log:
+Decode an already fetched log (substitute its path):
 
 ```sh
-just decode-logs .fetched-logs/<timestamp>/log_0
+just decode-logs '.fetched-logs/<timestamp>/log_0'
 ```
 
 Logs are decoded with `defmt-print` using the matching ELF from `.artifacts/` or object storage. If no ELF is found, fetching still works but decoding is skipped.
