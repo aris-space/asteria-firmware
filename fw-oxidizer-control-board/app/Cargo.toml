@@ -1,33 +1,23 @@
 [package]
 name = "fw-oxidizer-control-board"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-authors = ["Domenic Nebiker <dnebiker@aris-space.ch>"]
+authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-space.ch>"]
 
 [dependencies]
-keller-pressure = { path = "../../crates/devices/keller-pressure" }
-max31889-thermistor = { path = "../../crates/devices/max31889-thermistor" }
-ads1120-thermocouples = { path = "../../crates/devices/ads1120-thermocouples" }
+filters = { path = "../../crates/filters" }
+dpr = { path = "../../crates/devices/dpr", features = ["defmt"] }
 embedded-utils = { path = "../../crates/embedded-utils" }
-hermes-can = { path = "../../hermes-can", version = "=0.3", features = [
-    "defmt",
-    "message-oxidizer-control-board-build-info",
-    "message-oxidizer-control-board-status",
-    "message-oxidizer-control-board-valve-states",
-    "message-oxidizer-vent-control-ecu",
-    "message-oxidizer-vent-control-fc",
-    "message-oxidizer-vent-control-rfs",
-    "message-oxidizer-dpr-config-ecu",
-    "message-oxidizer-dpr-config-fc",
-    "message-oxidizer-dpr-config-rfs",
-    "message-oxidizer-tank-level",
-    "message-oxidizer-tank-pressure",
-    "message-fuel-tank-temperature",
-    "message-oxidizer-pressurization",
-    "message-oxidizer-pressurization-abort",
-    "message-oxidizer-pressurization-gain",
+analog-pressure = { path = "../../crates/devices/analog-pressure" }
+can-utils = { path = "../../crates/can-utils" }
+data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
+dp-oxidizer-control-board = { path = "../../data-definitions/datapoints/dp-oxidizer-control-board", version = "=0.5", features = [
+    "can",
 ] }
-thiserror = { version = "2.0.11", default-features = false }
+dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [
+    "can",
+] }
+datatypes = { path = "../../data-definitions/datatypes" }
 cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
 embassy-stm32 = { version = "*", features = [
@@ -42,9 +32,10 @@ embassy-time = { version = "*", features = ["tick-hz-32_768"] }
 embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread"] }
 embassy-futures = "*"
 embassy-sync = "*"
-embedded-can = "0.4.1"
 embedded-hal-async = "1.0.0"
 embedded-hal-bus = { version = "0.3.0", features = ["async"] }
+ads1x1x = "0.3.0"
+nb = "1.1.0"
 defmt = { version = "1.0.1", optional = true }
 defmt-rtt = { version = "1.0.0", optional = true }
 panic-probe = { version = "1.0.0", optional = true }
@@ -59,6 +50,9 @@ debug = ["defmt", "dep:panic-probe"]
 defmt = [
     "dep:defmt",
     "dep:defmt-rtt",
+    "can-utils/defmt",
+    "dp-oxidizer-control-board/derive_defmt",
+    "dp-system-management/derive_defmt",
     "panic-probe/defmt",
     "panic-probe/defmt-error",
     "panic-probe/print-defmt",
@@ -70,9 +64,8 @@ defmt = [
     "embassy-stm32/defmt",
     "embedded-hal-async/defmt-03",
     "embedded-hal-bus/defmt-03",
-    "max31889-thermistor/defmt-03",
-    "ads1120-thermocouples/defmt",
-    "keller-pressure/defmt",
+    "embedded-utils/defmt",
+    "analog-pressure/defmt",
 ]
 
 [[bin]]

@@ -1,7 +1,7 @@
 use crate::drivers::WATCH;
+use datatypes::status::SensorStatus;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::watch::{Sender, Watch};
-use hermes_can::messages::board_status::SensorStatus;
 
 pub static DIGITAL_PRESSURE_WATCH: Watch<ThreadModeRawMutex, DigitalPressureMeasurementRaw, WATCH> =
     Watch::new();

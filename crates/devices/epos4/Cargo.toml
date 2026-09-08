@@ -9,3 +9,8 @@ defmt = { version = "0.3", optional = true }
 
 [features]
 defmt = ["dep:defmt", "embedded-io-async/defmt"]
+
+[lib]
+test = false
+doctest = false
+bench = false

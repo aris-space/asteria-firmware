@@ -13,9 +13,10 @@ members = [
     "devices/lsm6dso32",
     "devices/epos4",
     "devices/keller-pressure",
-    "devices/trafag-pressure",
+    "devices/analog-pressure",
     "devices/max31889-thermistor",
     "devices/ltc2945",
+    "devices/dpr",
 ]
 
 [workspace.dependencies]

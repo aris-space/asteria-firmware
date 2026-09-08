@@ -1,0 +1,22 @@
+[package]
+name = "analog-pressure"
+version = "0.1.0"
+edition = "2024"
+authors = ["Domenic Nebiker <dnebiker@aris-space.ch"]
+description = "Driver for pressure sensors using analog inputs"
+keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
+
+[dependencies]
+embassy-stm32 = { workspace = true, features = ["stm32g473rc", "unstable-pac", "single-bank"] }
+cortex-m = { workspace = true }
+
+defmt = { version = "0.3", optional = true }
+embedded-utils = { path = "../../embedded-utils" }
+
+[features]
+defmt = ["dep:defmt"]
+
+[lib]
+test = false
+doctest = false
+bench = false
