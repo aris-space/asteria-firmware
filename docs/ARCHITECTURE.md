@@ -1,44 +1,5 @@
 # Architecture
 
-ASTERIA firmware is embedded Rust for STM32 boards. It is `#![no_std]`, uses [Embassy](https://embassy.dev/) for async tasking, and compiles for `thumbv7em-none-eabihf`.
-
-Each `fw-*` workspace builds one board firmware binary. Shared embedded code lives in `crates/`; host tooling lives in `tools/`; message definitions come from `data-definitions/` and `hermes-can/`.
-
-## Board Targets
-
-| Workspace | Binary | MCU | `just run` flash path |
-| --- | --- | --- | --- |
-| `fw-engine-board` | `fw-engine-board` | `STM32G473RCTx` | `STM32_Programmer_CLI` + `probe-rs attach` |
-| `fw-fuel-control-board` | `fw-fuel-control-board` | `STM32G473RCTx` | `STM32_Programmer_CLI` + `probe-rs attach` |
-| `fw-lox-valve-control-board` | `fw-lox-valve-control-board` | `STM32G4A1KETx` | `probe-rs run` |
-| `fw-oxidizer-control-board` | `fw-oxidizer-control-board` | `STM32G473RCTx` | `STM32_Programmer_CLI` + `probe-rs attach` |
-| `fw-power-board` | `fw-power-board` | `STM32G473RCTx` | `probe-rs run` |
-| `fw-recovery-board` | `fw-recovery-board` | `STM32G473RCTx` | `probe-rs run` |
-| `fw-sensor-carrier` | `fw-sensor-carrier` | `STM32H723ZG` | `STM32_Programmer_CLI` + `probe-rs attach` |
-| `fw-sensor-carrier-v3` | `fw-sensor-carrier-v3` | `STM32H723ZG` | `probe-rs run` |
-| `fw-test-board` | `fw-test-board` | `STM32G473RCTx` | `probe-rs run` |
-
-The flash path comes from each board's `justfile`.
-
-## Layout
-
-```text
-asteria-firmware/
-├── fw-*/                 # board firmware workspaces
-│   ├── app/              # main firmware binary crate
-│   ├── Cargo.toml
-│   ├── Embed.toml
-│   └── justfile
-├── crates/               # shared embedded crates
-├── tools/                # host-side tools
-├── data-definitions/     # message/datapoint definitions submodule
-├── hermes-can/           # legacy CAN message library submodule
-├── just/                 # shared recipes and scripts
-├── shared/               # include!() snippets
-├── docs/
-└── justfile              # root orchestration
-```
-
 There is no root Cargo workspace. `fw-*`, `crates/`, and `tools/` are separate workspaces. Use root `just` for cross-workspace commands.
 
 ## Firmware Shape

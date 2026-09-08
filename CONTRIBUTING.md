@@ -76,3 +76,12 @@ Note that these checks will also be enforced by the CI.
 ## 8) Licensing of contributions
 
 By opening a PR you agree that your contribution is licensed under MIT OR Apache-2.0, the same terms as the rest of the repository. See [License](README.md#license).
+
+## 9) Source headers
+
+All crate-root `lib.rs` and `main.rs` files should begin with:
+
+```rust
+// Copyright 2026 ARIS
+// SPDX-License-Identifier: MIT OR Apache-2.0
+```

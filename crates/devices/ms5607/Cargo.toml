@@ -17,6 +17,6 @@ defmt = { version = "0.3", optional = true }
 defmt-03 = ["dep:defmt", "embedded-hal/defmt-03", "embedded-hal-async/defmt-03"]
 
 [lib]
-test = true
+test = false
 doctest = false
 bench = false

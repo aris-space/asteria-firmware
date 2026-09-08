@@ -1,100 +1,35 @@
 # Development
 
-Use `just` for normal workflows. Run `just --list` for available commands. There is no root Cargo workspace.
+`just` is the command interface for this repository. Run it inside a specific `fw-*` directory for board recipes, or from the repository root for commands that operate across workspaces. Run `just --list` in either location to see the available recipes. The repository has several independent Cargo workspaces rather than one root workspace, so `just` provides a consistent command interface across them.
 
-## Board Workflow
+## Building and flashing
 
-Run board-specific commands inside a `fw-*` directory:
-
-```sh
-just build        # build for thumbv7em-none-eabihf
-just run          # build, upload ELF, flash, attach RTT
-just flash        # build, upload ELF, flash only
-just attach       # attach RTT using latest local ELF
-just ci-checks    # clippy with warnings denied
-just clean        # clean this workspace
-```
-
-`just run` reads `chip`, `bin`, and `use_probe_rs` from the board `justfile`. If `use_probe_rs` is false, flashing uses `STM32_Programmer_CLI` plus `arm-none-eabi-objcopy`.
-
-## Release Builds
+From a board directory:
 
 ```sh
-just build --release
+cd fw-test-board
+just --list
+just build
+just run
 ```
 
-Many boards use default features for `debug`, `defmt`, and `panic-probe`. For production-style builds on those boards:
+`just run` builds the firmware, stores its timestamped ELF artifact, flashes the board, and attaches RTT output. Use `just flash` to flash without attaching, or `just attach` to reconnect to the most recently built ELF. Add `--release` for a release build. Do not add `--no-default-features` unless you know what you are doing.
 
-```sh
-just build --release --no-default-features
-just run --release --no-default-features
-```
+From the repository root, `just build`, `just fmt`, `just ci-checks`, `just clippy`, and `just test` operate across the relevant workspaces. `just test` runs host-side tests; embedded firmware test recipes are no-ops.
 
-Do not use `--no-default-features` blindly; some newer firmware uses default features for real functionality, for example storage on `fw-sensor-carrier-v3`.
+## Flashing paths
 
-## Root Commands
+Each board's `justfile` selects its flashing path. `probe-rs` is convenient because it flashes and attaches RTT in one step, and is often fast on smaller boards. `STM32_Programmer_CLI` is kept for boards where it is more compatible or reliable, and can be faster in some cases; its path flashes a converted binary and then uses `probe-rs attach` for RTT. `probe-rs` can hang on some target and probe combinations, so the configured fallback should be used when that happens.
 
-Run cross-workspace commands from the repository root.
+## Device communication and logs
 
-`just test` runs host-side tests for `crates/` and `tools/`. Embedded firmware test recipes are no-ops.
-
-See [Contributing](../CONTRIBUTING.md#5-required-local-checks-before-push) for checks to run before pushing.
-
-## Artifacts
-
-`just run` and `just flash` timestamp the ELF, cache it in `.artifacts/`, upload it to object storage if configured, and flash the board. This lets fetched logs find the matching ELF later.
-
-Useful root recipes:
-
-```sh
-just upload-elf path/to/file.elf
-just upload-elf-as path/to/file.elf 1234567890.elf
-just clean-artifacts
-just sync-artifacts
-```
-
-## Device Communication
-
-`asteria-tool` talks to a running board over USB RPC. Run these commands from the repository root.
+`asteria-tool` is the host CLI for USB RPC communication with a running board. Run these recipes from the repository root:
 
 ```sh
 just connect
-just cli info
 just cli fs ls /
-just cli fs pull -r /log_0 ./log_0
-```
-
-Connection options pass through:
-
-```sh
-just connect --connect raw
-just connect --connect serial --port /dev/ttyACM0 --baud 115200
-```
-
-See [../tools/asteria-tool/README.md](../tools/asteria-tool/README.md) for the full CLI.
-
-## Logs
-
-From the repository root, fetch and decode logs:
-
-```sh
 just fetch-logs latest
-just fetch-logs 3      # fetch log_3
-just fetch-logs all
+just decode-logs path/to/fetched/log_0
 ```
 
-Decode an already fetched log (substitute its path):
-
-```sh
-just decode-logs '.fetched-logs/<timestamp>/log_0'
-```
-
-Logs are decoded with `defmt-print` using the matching ELF from `.artifacts/` or object storage. If no ELF is found, fetching still works but decoding is skipped.
-
-## Troubleshooting
-
-- Build fails before project code: check the pinned Rust toolchain and target installed.
-- Flashing fails on fallback boards: check `STM32_Programmer_CLI` and `arm-none-eabi-objcopy`.
-- Artifact upload fails: check `.b2.env`, `s5cmd`, and network access.
-- Log fetch fails immediately: check `defmt-print`.
-- USB connect fails: close other `asteria-tool` instances.
+Logs are decoded with the matching ELF from `.artifacts/` or configured object storage. If no ELF is available, fetching still works but decoding is skipped. See [`asteria-tool`'s README](../tools/asteria-tool/README.md) for connection modes and the full CLI.

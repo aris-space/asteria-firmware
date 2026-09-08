@@ -33,7 +33,7 @@ This repository was hard-forked from [`hermes-firmware`](https://github.com/aris
 | `fw-sensor-carrier-v3`       | Sensor carrier          | `STM32H723ZG`   |
 | `fw-test-board`              | Test board              | `STM32G473RCTx` |
 
-See [Architecture and board targets](docs/ARCHITECTURE.md) for flashing paths and more repository layout details.
+See [Architecture notes](docs/ARCHITECTURE.md) for flashing paths and workspace details.
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ Before working on this repository, complete the [setup guide](docs/SETUP.md).
 Useful follow-up docs:
 
 - [Development workflow](docs/DEVELOPMENT.md)
-- [Architecture and board targets](docs/ARCHITECTURE.md)
+- [Architecture notes](docs/ARCHITECTURE.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Contributing

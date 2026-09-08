@@ -45,7 +45,7 @@ Some boards require additional tools:
 - [`STM32CubeProgrammer`](https://www.st.com/en/development-tools/stm32cubeprog.html)
 - [`arm-none-eabi-objcopy`](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
 
-These are required for boards that cannot be flashed with `probe-rs` and use the fallback flashing path.
+These are required for boards configured to use the fallback flashing path.
 
 ## Pre-commit Hooks
 
