@@ -3,6 +3,7 @@ name = "fw-sensor-carrier-v3"
 version = "0.1.0"
 edition = "2024"
 authors = ["Louis Schell <louis.schell1@gmx.de>"]
+license = "MIT OR Apache-2.0"
 
 [features]
 default = ["storage"]

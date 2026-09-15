@@ -3,6 +3,7 @@ name = "fw-oxidizer-control-board"
 version = "0.2.0"
 edition = "2024"
 authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-space.ch>"]
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 filters = { path = "../../crates/filters" }
