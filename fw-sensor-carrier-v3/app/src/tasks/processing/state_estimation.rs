@@ -19,6 +19,7 @@ use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::types::{BaroSample, GnssSample, ImuSample, VerticalEstimate};
 
 const GNSS_PAIR_WAIT: Duration = Duration::from_millis(150);
+const GNSS_REFERENCE_WAIT: Duration = Duration::from_secs(2);
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const BARO_HEIGHT_STD_M: f32 = 3.0;
@@ -39,6 +40,8 @@ struct Processor {
     estimator: Estimator,
     baro_reference: [Option<BarometerReference>; 2],
     gnss_reference_msl_m: Option<f32>,
+    gnss_reference_candidates: [Option<GnssSample>; 2],
+    gnss_reference_started: Option<Instant>,
     pending_gnss: Option<PendingGnss>,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
@@ -53,6 +56,8 @@ impl Processor {
             estimator: new_estimator(GYRO_RANGE_DPS)?,
             baro_reference: [None; 2],
             gnss_reference_msl_m: None,
+            gnss_reference_candidates: [None; 2],
+            gnss_reference_started: None,
             pending_gnss: None,
             last_output: None,
             last_status_log: None,
@@ -131,26 +136,55 @@ impl Processor {
     }
 
     fn queue_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
-        if sample.pvt.height_msl.is_finite()
-            && self.gnss_reference_msl_m.is_none()
-            && matches!(
-                sample.pvt.fix_type,
-                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
-            )
-        {
+        if self.gnss_reference_msl_m.is_none() {
+            if !sample.pvt.height_msl.is_finite()
+                || !matches!(
+                    sample.pvt.fix_type,
+                    ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
+                )
+            {
+                return Ok(());
+            }
+            let now = Instant::now();
+            let started = *self.gnss_reference_started.get_or_insert(now);
+            self.gnss_reference_candidates[sample.src.index()] = Some(sample);
+            let [first, second] = self.gnss_reference_candidates;
+            let selected = match (first, second) {
+                (Some(first), Some(second)) => {
+                    if first.pvt.vert_accuracy <= second.pvt.vert_accuracy {
+                        first
+                    } else {
+                        second
+                    }
+                }
+                (Some(first), None)
+                    if now.saturating_duration_since(started) >= GNSS_REFERENCE_WAIT =>
+                {
+                    first
+                }
+                (None, Some(second))
+                    if now.saturating_duration_since(started) >= GNSS_REFERENCE_WAIT =>
+                {
+                    second
+                }
+                _ => return Ok(()),
+            };
             // Match the GNSS MSL frame to the barometer/IMU frame even if the
-            // first GNSS fix arrives after the board has moved.
+            // first GNSS fix arrives after the board has moved. Choose the
+            // reference before fusing GNSS so the filter history uses one frame.
             let relative_height_m = self.estimator.selected_state().height_m;
-            let origin_msl_m = sample.pvt.height_msl - relative_height_m;
+            let origin_msl_m = selected.pvt.height_msl - relative_height_m;
             info!(
                 "SEF MSL reference: {} raw={} m, relative={} m, origin={} m, vAcc={} mm",
-                sample.src,
-                sample.pvt.height_msl,
+                selected.src,
+                selected.pvt.height_msl,
                 relative_height_m,
                 origin_msl_m,
-                sample.pvt.vert_accuracy
+                selected.pvt.vert_accuracy
             );
             self.gnss_reference_msl_m = Some(origin_msl_m);
+            self.gnss_reference_candidates = [None; 2];
+            self.gnss_reference_started = None;
         }
         if let Some(pending) = self.pending_gnss.take() {
             if sample.src == pending.sample.src
