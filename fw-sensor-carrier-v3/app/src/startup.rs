@@ -170,6 +170,9 @@ pub async fn spawn_tasks(
         tasks::processing::position_velocity::task()
             .expect("Failed to spawn position/velocity proc task"),
     );
+    thread_spawner.spawn(
+        tasks::processing::state_estimation::task().expect("Failed to spawn state estimation task"),
+    );
 
     // --- CAN ----------------------------------------------------------------
     let (can_tx, can_rx, _options) = board.can.split();

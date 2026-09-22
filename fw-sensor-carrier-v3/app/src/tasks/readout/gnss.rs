@@ -118,6 +118,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                     src: self.id,
                                     ts: Instant::now(),
                                     pvt: Pvt {
+                                        epoch_ms: pvt.itow(),
                                         lon_deg: pvt.lon_degrees(),
                                         lat_deg: pvt.lat_degrees(),
                                         fix_type: pvt.fix_type(),
@@ -134,6 +135,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                         pdop: pvt.pdop(),
                                         vert_accuracy: pvt.vert_accuracy(),
                                         horiz_accuracy: pvt.horiz_accuracy(),
+                                        speed_accuracy_mps: pvt.speed_accuracy_estimate() as f32,
                                         magnetic_declination_deg: pvt.magnetic_declination_degrees()
                                             as f32,
                                         magnetic_declination_accuracy_deg: pvt
