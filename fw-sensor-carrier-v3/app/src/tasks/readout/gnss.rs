@@ -4,8 +4,8 @@ use embassy_stm32::usart::{UartRx, UartTx};
 use embassy_time::{Duration, Instant};
 use ublox::{
     AlignmentToReferenceTime, CfgMsgSinglePortBuilder, CfgPrtUartBuilder, CfgRateBuilder, DataBits,
-    GpsFix, InProtoMask, NavPvt, NavStatus, OutProtoMask, PacketRef, Parity, Parser, StopBits,
-    UartMode, UartPortId,
+    GpsFix, InProtoMask, NavPvt, NavPvtFlags, NavStatus, OutProtoMask, PacketRef, Parity, Parser,
+    StopBits, UartMode, UartPortId,
 };
 
 use core::sync::atomic::Ordering;
@@ -136,6 +136,7 @@ struct Active<'a, RX> {
 impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
     async fn run(mut self) -> Inactive<'a, RX> {
         let mut recv_buf = [0u8; 4096];
+        let mut next_report = Instant::now();
 
         loop {
             match self.rx.read(&mut recv_buf).await {
@@ -143,9 +144,27 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                     let mut msgs = self.parser.consume(&recv_buf[..n]);
                     while let Some(pkt) = msgs.next() {
                         match pkt {
-                            Ok(PacketRef::NavPvt(pvt))
-                                if matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D) =>
-                            {
+                            Ok(PacketRef::NavPvt(pvt)) => {
+                                let fix_ok = pvt.flags().contains(NavPvtFlags::GPS_FIX_OK);
+                                if Instant::now() >= next_report {
+                                    info!(
+                                        "{} GNSS: MSL={} m, vAcc={} mm, vDown={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
+                                        self.id,
+                                        pvt.height_msl(),
+                                        pvt.vert_accuracy(),
+                                        pvt.vel_down(),
+                                        pvt.pdop(),
+                                        pvt.num_satellites(),
+                                        Debug2Format(&pvt.fix_type()),
+                                        fix_ok,
+                                    );
+                                    next_report = Instant::now() + Duration::from_secs(1);
+                                }
+                                if !fix_ok
+                                    || !matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D)
+                                {
+                                    continue;
+                                }
                                 self.errors = 0;
                                 let raw = RawGnssSample {
                                     src: self.id,

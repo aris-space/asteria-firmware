@@ -42,6 +42,7 @@ struct Processor {
     pending_gnss: Option<PendingGnss>,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
+    last_baro_log: [Option<Instant>; 2],
     last_warning: Option<Instant>,
     published_since_status: u32,
 }
@@ -55,6 +56,7 @@ impl Processor {
             pending_gnss: None,
             last_output: None,
             last_status_log: None,
+            last_baro_log: [None; 2],
             last_warning: None,
             published_since_status: 0,
         })
@@ -106,6 +108,15 @@ impl Processor {
         let height_m = reference
             .height_m(sample.pressure_mbar)
             .ok_or(EstimatorError::OutOfRangeInput)?;
+        if self.last_baro_log[index]
+            .is_none_or(|last| sample.ts.saturating_duration_since(last) >= Duration::from_secs(1))
+        {
+            info!(
+                "SEF baro {}: relative={} m, pressure={} mbar",
+                sample.src, height_m, sample.pressure_mbar
+            );
+            self.last_baro_log[index] = Some(sample.ts);
+        }
         let barometer = asteria_sef_light::BarometerId::from_index(index)
             .expect("firmware barometer ID must map to SEF-light");
         self.estimator.update_pressure(
@@ -129,8 +140,17 @@ impl Processor {
         {
             // Match the GNSS MSL frame to the barometer/IMU frame even if the
             // first GNSS fix arrives after the board has moved.
-            self.gnss_reference_msl_m =
-                Some(sample.pvt.height_msl - self.estimator.selected_state().height_m);
+            let relative_height_m = self.estimator.selected_state().height_m;
+            let origin_msl_m = sample.pvt.height_msl - relative_height_m;
+            info!(
+                "SEF MSL reference: {} raw={} m, relative={} m, origin={} m, vAcc={} mm",
+                sample.src,
+                sample.pvt.height_msl,
+                relative_height_m,
+                origin_msl_m,
+                sample.pvt.vert_accuracy
+            );
+            self.gnss_reference_msl_m = Some(origin_msl_m);
         }
         if let Some(pending) = self.pending_gnss.take() {
             if sample.src == pending.sample.src
@@ -254,7 +274,7 @@ impl Processor {
             .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
         {
             info!(
-                "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
+                "SEF-light: altitude_msl={} m, filter_height_std={} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
                 altitude_msl_m,
                 libm::sqrtf(uncertainty.height_variance_m2),
                 state.velocity_mps,
