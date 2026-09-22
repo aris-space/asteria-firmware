@@ -196,7 +196,7 @@ async fn vertical_state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'s
         VELOCITY_MIN_PERIOD,
         |estimate| {
             let msg = VerticalStateData {
-                height_m: estimate.height_m,
+                height_m: estimate.height_msl_m,
                 velocity_mps: estimate.velocity_mps,
                 height_std_m: estimate.height_std_m,
                 velocity_std_mps: estimate.velocity_std_mps,

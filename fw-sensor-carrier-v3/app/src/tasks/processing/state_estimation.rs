@@ -223,14 +223,25 @@ impl Processor {
         if now.saturating_duration_since(ts) > IMU_FRESH || !self.estimator.imu_ready(imu) {
             return;
         }
+        let Some(origin_msl_m) = self.gnss_reference_msl_m else {
+            if self
+                .last_status_log
+                .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
+            {
+                info!("SEF-light: waiting for GNSS 3D fix to establish MSL altitude");
+                self.last_status_log = Some(now);
+            }
+            return;
+        };
         let state = self.estimator.selected_state();
         let uncertainty = self.estimator.selected_uncertainty();
+        let altitude_msl_m = origin_msl_m + state.height_m;
         let selected_imu = if imu.index() == 0 { IMU_0 } else { IMU_1 };
         signals::VERTICAL_ESTIMATE_WATCH
             .sender()
             .send(VerticalEstimate {
                 ts,
-                height_m: state.height_m,
+                height_msl_m: altitude_msl_m,
                 velocity_mps: state.velocity_mps,
                 height_std_m: libm::sqrtf(uncertainty.height_variance_m2),
                 velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
@@ -243,8 +254,8 @@ impl Processor {
             .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
         {
             info!(
-                "SEF-light: h={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
-                state.height_m,
+                "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
+                altitude_msl_m,
                 libm::sqrtf(uncertainty.height_variance_m2),
                 state.velocity_mps,
                 libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),

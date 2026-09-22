@@ -197,7 +197,7 @@ pub struct Velocity {
 #[derive(Clone, Copy, Debug)]
 pub struct VerticalEstimate {
     pub ts: Instant,
-    pub height_m: f32,
+    pub height_msl_m: f32,
     pub velocity_mps: f32,
     pub height_std_m: f32,
     pub velocity_std_mps: f32,
