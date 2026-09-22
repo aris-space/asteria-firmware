@@ -15,7 +15,10 @@ pub const MAX_AIDING_DELAY_US: u64 = 400_000;
 pub type Estimator = DualVerticalEstimator<HISTORY_CAPACITY>;
 
 pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorError> {
-    let filter = VerticalFilterConfig::new(0.5, 5.0, [0.02, 0.02], 10.0, 3.0, [5.0, 5.0], 5.0)?;
+    // At 833 Hz, per-sample acceleration uncertainty below a few m/s² makes the filter
+    // overconfident about velocity when an uncalibrated IMU has a persistent ~0.06 m/s² offset.
+    // Keep enough process uncertainty for barometric and GNSS updates to correct that drift.
+    let filter = VerticalFilterConfig::new(10.0, 20.0, [0.02, 0.02], 10.0, 3.0, [5.0, 5.0], 5.0)?;
     let attitude = ImuAttitudeConfig::new(2.0, gyroscope_range_deg_s, 10.0, 300)?;
     let selection = SelectorConfig::new(2.0, 250_000).ok_or(EstimatorError::OutOfRangeInput)?;
     let selector = VerticalEstimatorSelectorConfig::new(0.95, 25.0, 10.0, 100_000, selection)?;

@@ -43,6 +43,7 @@ struct Processor {
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
     last_warning: Option<Instant>,
+    published_since_status: u32,
 }
 
 impl Processor {
@@ -55,6 +56,7 @@ impl Processor {
             last_output: None,
             last_status_log: None,
             last_warning: None,
+            published_since_status: 0,
         })
     }
 
@@ -232,17 +234,22 @@ impl Processor {
                 selected_imu,
                 redundancy_ready: self.estimator.redundancy_ready(),
             });
+        self.published_since_status = self.published_since_status.saturating_add(1);
         if self
             .last_status_log
             .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
         {
             info!(
-                "SEF-light: h={} m, v={} m/s, IMU={}, redundancy_ready={}",
+                "SEF-light: h={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
                 state.height_m,
+                libm::sqrtf(uncertainty.height_variance_m2),
                 state.velocity_mps,
+                libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
                 selected_imu,
                 self.estimator.redundancy_ready(),
+                self.published_since_status,
             );
+            self.published_since_status = 0;
             self.last_status_log = Some(now);
         }
         self.last_output = Some(now);
