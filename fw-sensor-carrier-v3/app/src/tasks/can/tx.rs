@@ -53,6 +53,7 @@ pub fn spawn_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
     spawner.spawn(mag_task(can_tx).expect("spawn can mag"));
     spawner.spawn(position_task(can_tx).expect("spawn can position"));
     spawner.spawn(velocity_task(can_tx).expect("spawn can velocity"));
+    spawner.spawn(vertical_state_task(can_tx).expect("spawn can vertical state"));
     spawner.spawn(inertial_task(can_tx).expect("spawn can inertial"));
     spawner.spawn(status_task(can_tx).expect("spawn can status"));
     spawner.spawn(build_information_task(can_tx).expect("spawn can build info"));
@@ -185,6 +186,26 @@ async fn velocity_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>
         };
         send(can_tx, msg).await;
     });
+}
+
+#[embassy_executor::task]
+async fn vertical_state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::VerticalStateData;
+    watch_loop!(
+        signals::VERTICAL_ESTIMATE_WATCH,
+        VELOCITY_MIN_PERIOD,
+        |estimate| {
+            let msg = VerticalStateData {
+                height_m: estimate.height_m,
+                velocity_mps: estimate.velocity_mps,
+                height_std_m: estimate.height_std_m,
+                velocity_std_mps: estimate.velocity_std_mps,
+                selected_imu: estimate.selected_imu.index() as u8,
+                redundancy_ready: estimate.redundancy_ready,
+            };
+            send(can_tx, msg).await;
+        }
+    );
 }
 
 #[embassy_executor::task]

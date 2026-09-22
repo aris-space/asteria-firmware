@@ -37,7 +37,8 @@ impl Gps1Uart {
 
 impl Gps2Uart {
     pub fn setup(self) -> Uart<'static, Async> {
-        let config = config();
+        let mut config = config();
+        config.baudrate = 38_400;
         bind_interrupts!(struct Gps2Irqs {
             UART7 => usart::InterruptHandler<peripherals::UART7>;
             DMA1_STREAM2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH2>;

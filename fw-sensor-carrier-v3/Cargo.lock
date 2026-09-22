@@ -106,6 +106,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "840ad5d907de7448d88a3f22b4a7b5d326c6eb3deeb9f94cfaaec7354a80b305"
 
 [[package]]
+name = "asteria-estimator-selector"
+version = "0.1.0"
+
+[[package]]
+name = "asteria-sef-light"
+version = "0.1.0"
+dependencies = [
+ "asteria-estimator-selector",
+ "fusion-ahrs",
+ "heapless 0.9.3",
+ "libm",
+ "nalgebra 0.35.0",
+]
+
+[[package]]
 name = "atomic-polyfill"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -640,7 +655,7 @@ dependencies = [
  "embedded-storage",
  "embedded-storage-async",
  "futures-util",
- "heapless 0.9.2",
+ "heapless 0.9.3",
  "nb 1.1.0",
  "proc-macro2",
  "quote",
@@ -668,7 +683,7 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "futures-core",
  "futures-sink",
- "heapless 0.9.2",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -701,7 +716,7 @@ version = "0.3.0"
 source = "git+https://github.com/embassy-rs/embassy.git?rev=cf6a6cd#cf6a6cd33bc21907212384d9fe5f017ecf2e006c"
 dependencies = [
  "embassy-executor-timer-queue",
- "heapless 0.9.2",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -717,7 +732,7 @@ dependencies = [
  "embassy-time",
  "embassy-usb-driver",
  "embedded-io-async 0.7.0",
- "heapless 0.9.2",
+ "heapless 0.9.3",
  "ssmarshal",
  "usbd-hid",
 ]
@@ -952,6 +967,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
+name = "fusion-ahrs"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf587d61645ec9b18002b229c2364394c0fb2fea5db4505b8f5d9a6396b30921"
+dependencies = [
+ "nalgebra 0.35.0",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -985,6 +1009,7 @@ name = "fw-sensor-carrier-v3"
 version = "0.1.0"
 dependencies = [
  "assign-resources",
+ "asteria-sef-light",
  "atomic_enum",
  "built",
  "cortex-m",
@@ -1006,7 +1031,7 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "embedded-storage-async",
  "embedded-utils",
- "heapless 0.9.2",
+ "heapless 0.9.3",
  "hermes-can",
  "imu-fusion",
  "libm",
@@ -1067,6 +1092,42 @@ dependencies = [
  "libgit2-sys",
  "log",
  "url",
+]
+
+[[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+dependencies = [
+ "libm",
+]
+
+[[package]]
+name = "glam"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "556f6b2ea90b8d15a74e0e7bb41671c9bdf38cd9f78c284d750b9ce58a2b5be7"
+dependencies = [
+ "libm",
+]
+
+[[package]]
+name = "glam"
+version = "0.32.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
+dependencies = [
+ "libm",
+]
+
+[[package]]
+name = "glam"
+version = "0.33.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0990707078259d76f65619a692e87c82645be66cbee224173cd1af151e54ba2"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
@@ -1157,9 +1218,9 @@ dependencies = [
 
 [[package]]
 name = "heapless"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2af2455f757db2b292a9b1768c4b70186d443bcb3b316252d6b540aec1cd89ed"
+checksum = "25ba4bd83f9415b58b4ed8dc5714c76e626a105be4646c02630ad730ad3b5aa4"
 dependencies = [
  "hash32 0.3.1",
  "stable_deref_trait",
@@ -1537,6 +1598,24 @@ dependencies = [
  "num-rational",
  "num-traits",
  "simba 0.9.1",
+ "typenum",
+]
+
+[[package]]
+name = "nalgebra"
+version = "0.35.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adc43a60c217b0c6ff46e47f26911015ad8d2e5a8be1af668c67e370d99a4346"
+dependencies = [
+ "approx",
+ "glam 0.30.10",
+ "glam 0.31.1",
+ "glam 0.32.1",
+ "glam 0.33.8",
+ "num-complex",
+ "num-rational",
+ "num-traits",
+ "simba 0.10.2",
  "typenum",
 ]
 
@@ -1964,7 +2043,7 @@ dependencies = [
  "embedded-hal-bus",
  "embedded-io-async 0.7.0",
  "embedded-partitions",
- "heapless 0.9.2",
+ "heapless 0.9.3",
  "libm",
  "log",
  "lsm303agr",
@@ -2091,6 +2170,17 @@ dependencies = [
  "num-complex",
  "num-traits",
  "paste",
+]
+
+[[package]]
+name = "simba"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1a7200d82ff1c7b4235efd12f11e2537a402c91cf83a5cb97ce80eef787fde7"
+dependencies = [
+ "approx",
+ "num-complex",
+ "num-traits",
 ]
 
 [[package]]

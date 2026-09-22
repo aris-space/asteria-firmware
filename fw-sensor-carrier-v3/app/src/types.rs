@@ -109,6 +109,8 @@ pub struct MagSample {
 /// 16 fields would bury the metadata.
 #[derive(Clone, Copy, Debug)]
 pub struct Pvt {
+    /// Receiver navigation epoch, GPS milliseconds of week.
+    pub epoch_ms: u32,
     pub lon_deg: f64,
     pub lat_deg: f64,
     pub fix_type: ublox::GpsFix,
@@ -123,6 +125,7 @@ pub struct Pvt {
     pub pdop: u16,
     pub vert_accuracy: u32,
     pub horiz_accuracy: u32,
+    pub speed_accuracy_mps: f32,
     pub magnetic_declination_deg: f32,
     pub magnetic_declination_accuracy_deg: f32,
 }
@@ -188,4 +191,16 @@ pub struct Velocity {
     pub ned_north: f32,
     pub ned_east: f32,
     pub ned_down: f32,
+}
+
+/// Launch-relative, up-positive SEF-light output.
+#[derive(Clone, Copy, Debug)]
+pub struct VerticalEstimate {
+    pub ts: Instant,
+    pub height_m: f32,
+    pub velocity_mps: f32,
+    pub height_std_m: f32,
+    pub velocity_std_mps: f32,
+    pub selected_imu: ImuId,
+    pub redundancy_ready: bool,
 }
