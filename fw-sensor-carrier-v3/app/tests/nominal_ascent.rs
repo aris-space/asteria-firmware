@@ -1,7 +1,7 @@
 use asteria_sef_light::{
     BARO_BUS_1, BARO_BUS_2, IMU_0, IMU_1, PressureMeasurement, STANDARD_GRAVITY_MPS2,
 };
-use sensor_carrier_sef_adapter::{
+use fw_sensor_carrier_v3::sef::{
     BarometerReference, GnssVerticalInput, gnss_measurement, imu_measurement, new_estimator,
 };
 

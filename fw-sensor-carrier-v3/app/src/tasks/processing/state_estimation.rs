@@ -8,7 +8,7 @@ use asteria_sef_light::{
 use defmt::{Debug2Format, info, warn};
 use embassy_futures::select::{Either, Either6, select, select6};
 use embassy_time::{Duration, Instant, Timer};
-use sensor_carrier_sef_adapter::{
+use fw_sensor_carrier_v3::sef::{
     BarometerReference, Estimator, GnssEpoch, GnssVerticalInput, gnss_measurement, imu_measurement,
     new_estimator, pairable_epoch,
 };

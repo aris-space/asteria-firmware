@@ -4,7 +4,7 @@ use asteria_sef_light::{
     BARO_BUS_1, IMU_0, IMU_1, ImuAttitudeConfig, ImuMeasurement, ImuVerticalizer,
     PressureMeasurement, STANDARD_GRAVITY_MPS2,
 };
-use sensor_carrier_sef_adapter::new_estimator;
+use fw_sensor_carrier_v3::sef::new_estimator;
 
 #[test]
 fn stationary_bias_remains_within_reported_velocity_uncertainty() {

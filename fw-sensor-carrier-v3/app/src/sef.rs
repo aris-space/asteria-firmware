@@ -1,5 +1,3 @@
-#![no_std]
-
 //! Unit and epoch conversion at the SEF-light input boundary.
 
 use asteria_sef_light::{

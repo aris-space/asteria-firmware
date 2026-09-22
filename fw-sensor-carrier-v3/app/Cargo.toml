@@ -6,10 +6,18 @@ authors = ["Louis Schell <louis.schell1@gmx.de>"]
 license = "MIT OR Apache-2.0"
 
 [features]
-default = ["debug"]
+# Host tests use --no-default-features to build only the pure SEF library.
+default = ["firmware", "debug"]
+firmware = []
 debug = ["dep:panic-probe"]
 
 [dependencies]
+# The host-testable SEF configuration and unit conversions live in this package.
+# Local SEF-light integration branch; this checkout expects the sibling repository.
+asteria-sef-light = { path = "../../../../asteria-state-estimation/crates/sef-light" }
+libm = "0.2.11"
+
+[target.'cfg(target_os = "none")'.dependencies]
 # Shared crates from the repo
 embedded-utils = { path = "../../crates/embedded-utils", features = ["defmt"] }
 ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
@@ -60,9 +68,6 @@ ublox = { version = "0.4.5", default-features = false }
 # Sensor fusion
 imu-fusion = { git = "https://github.com/Rechenmaschine/imu-fusion-rs.git", default-features = false }
 magcal = { git = "https://github.com/Rechenmaschine/magcal-rs.git" }
-# Local SEF-light integration branch; this checkout expects the sibling repository.
-asteria-sef-light = { path = "../../../../asteria-state-estimation/crates/sef-light" }
-sensor-carrier-sef-adapter = { path = "../state-estimation-adapter" }
 
 embedded-can = "0.4.1"
 embedded-hal = "1.0.0"
@@ -79,7 +84,6 @@ defmt-rtt = "1.0.0"
 # Math
 nalgebra = { version = "0.33", default-features = false, features = ["libm"] }
 num-traits = { version = "0.2.19", default-features = false }
-libm = "0.2.11"
 
 thiserror = { version = "2.0.11", default-features = false }
 atomic_enum = { version = "0.3.0", default-features = false }
@@ -98,6 +102,7 @@ built = { version = "0.8", features = ["git2"] }
 
 [[bin]]
 name = "fw-sensor-carrier-v3"
+required-features = ["firmware"]
 test = false
 doctest = false
 bench = false
