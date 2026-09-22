@@ -1,8 +1,12 @@
 use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::mode::Async;
-use embassy_stm32::usart::UartRx;
-use embassy_time::Instant;
-use ublox::{GpsFix, PacketRef, Parser};
+use embassy_stm32::usart::{UartRx, UartTx};
+use embassy_time::{Duration, Instant};
+use ublox::{
+    AlignmentToReferenceTime, CfgMsgSinglePortBuilder, CfgPrtUartBuilder, CfgRateBuilder, DataBits,
+    GpsFix, InProtoMask, NavPvt, NavStatus, OutProtoMask, PacketRef, Parity, Parser, StopBits,
+    UartMode, UartPortId,
+};
 
 use core::sync::atomic::Ordering;
 
@@ -26,6 +30,11 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
         let mut consecutive_errors: u8 = 0;
         let mut recv_buf = [0u8; 64];
         let mut fix_type = GpsFix::NoFix;
+        let mut report_at = Instant::now() + Duration::from_secs(30);
+        let mut valid_packets = 0u32;
+        let mut status_packets = 0u32;
+        let mut pvt_packets = 0u32;
+        let mut received_bytes = 0u32;
 
         loop {
             if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
@@ -44,27 +53,39 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                     continue;
                 }
             };
+            received_bytes = received_bytes.saturating_add(n as u32);
 
             let mut got_fix = false;
             {
                 let mut parsed = self.parser.consume(&recv_buf[..n]);
                 while let Some(msg) = parsed.next() {
                     match msg {
-                        Ok(PacketRef::NavStatus(stat)) => match stat.fix_type() {
-                            GpsFix::Fix2D
-                            | GpsFix::Fix3D
-                            | GpsFix::GPSPlusDeadReckoning
-                            | GpsFix::TimeOnlyFix => {
-                                fix_type = stat.fix_type();
-                                got_fix = true;
-                                break;
+                        Ok(PacketRef::NavStatus(stat)) => {
+                            status_packets = status_packets.saturating_add(1);
+                            match stat.fix_type() {
+                                GpsFix::Fix2D
+                                | GpsFix::Fix3D
+                                | GpsFix::GPSPlusDeadReckoning
+                                | GpsFix::TimeOnlyFix => {
+                                    fix_type = stat.fix_type();
+                                    got_fix = true;
+                                    break;
+                                }
+                                _ => {
+                                    valid_packets = valid_packets.saturating_add(1);
+                                    self.attempt = 0;
+                                    consecutive_errors = 0;
+                                }
                             }
-                            _ => {
-                                self.attempt = 0;
-                                consecutive_errors = 0;
-                            }
-                        },
+                        }
+                        Ok(PacketRef::NavPvt(_)) => {
+                            pvt_packets = pvt_packets.saturating_add(1);
+                            valid_packets = valid_packets.saturating_add(1);
+                            self.attempt = 0;
+                            consecutive_errors = 0;
+                        }
                         Ok(_) => {
+                            valid_packets = valid_packets.saturating_add(1);
                             self.attempt = 0;
                             consecutive_errors = 0;
                         }
@@ -74,6 +95,18 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                         }
                     }
                 }
+            }
+
+            if Instant::now() >= report_at {
+                info!(
+                    "{} GNSS link: {} bytes, {} UBX, {} NAV-STATUS, {} NAV-PVT in 30 s",
+                    self.id, received_bytes, valid_packets, status_packets, pvt_packets
+                );
+                received_bytes = 0;
+                valid_packets = 0;
+                status_packets = 0;
+                pvt_packets = 0;
+                report_at = Instant::now() + Duration::from_secs(30);
             }
 
             if got_fix {
@@ -195,8 +228,61 @@ async fn run_inner<'a, RX: embedded_io_async::Read>(
     }
 }
 
+async fn configure_gnss_1(tx: &mut UartTx<'static, Async>, rx: &UartRx<'static, Async>) {
+    // A receiver with factory settings sends NMEA at 38400 baud. An already
+    // configured receiver ignores this first packet and accepts the later ones.
+    let port = CfgPrtUartBuilder {
+        portid: UartPortId::Uart1,
+        reserved0: 0,
+        tx_ready: 0,
+        mode: UartMode::new(DataBits::Eight, Parity::None, StopBits::One),
+        baud_rate: 921_600,
+        in_proto_mask: InProtoMask::all(),
+        out_proto_mask: OutProtoMask::UBLOX,
+        flags: 0,
+        reserved5: 0,
+    }
+    .into_packet_bytes();
+    if let Err(e) = tx.write(&port).await {
+        warn!("GNSS_1 port configuration failed: {:?}", Debug2Format(&e));
+    }
+    embassy_time::Timer::after_millis(100).await;
+    if let Err(e) = rx.set_baudrate(921_600) {
+        warn!("GNSS_1 baud change failed: {:?}", Debug2Format(&e));
+        return;
+    }
+
+    // Match GNSS_0 so both receivers can produce the same navigation epochs.
+    let rate = CfgRateBuilder {
+        measure_rate_ms: 50,
+        nav_rate: 1,
+        time_ref: AlignmentToReferenceTime::Gps,
+    }
+    .into_packet_bytes();
+    let status = CfgMsgSinglePortBuilder::set_rate_for::<NavStatus>(1).into_packet_bytes();
+    let pvt = CfgMsgSinglePortBuilder::set_rate_for::<NavPvt>(1).into_packet_bytes();
+    for packet in [&rate[..], &status[..], &pvt[..]] {
+        if let Err(e) = tx.write(packet).await {
+            warn!(
+                "GNSS_1 message configuration failed: {:?}",
+                Debug2Format(&e)
+            );
+            return;
+        }
+        embassy_time::Timer::after_millis(20).await;
+    }
+    info!("GNSS_1 UBX configuration sent at 921600 baud");
+}
+
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(rx: UartRx<'static, Async>, id: GnssId) -> ! {
+pub async fn task(
+    rx: UartRx<'static, Async>,
+    mut tx: Option<UartTx<'static, Async>>,
+    id: GnssId,
+) -> ! {
+    if let Some(tx) = tx.as_mut() {
+        configure_gnss_1(tx, &rx).await;
+    }
     let mut uart_ring_buf = [0u8; 4096];
     let rx = rx.into_ring_buffered(&mut uart_ring_buf);
 

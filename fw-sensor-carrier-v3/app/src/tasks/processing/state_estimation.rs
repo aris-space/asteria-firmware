@@ -38,7 +38,7 @@ struct PendingGnss {
 struct Processor {
     estimator: Estimator,
     baro_reference: [Option<BarometerReference>; 2],
-    launch_height_msl_m: Option<f32>,
+    gnss_reference_msl_m: Option<f32>,
     pending_gnss: Option<PendingGnss>,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
@@ -51,7 +51,7 @@ impl Processor {
         Ok(Self {
             estimator: new_estimator(GYRO_RANGE_DPS)?,
             baro_reference: [None; 2],
-            launch_height_msl_m: None,
+            gnss_reference_msl_m: None,
             pending_gnss: None,
             last_output: None,
             last_status_log: None,
@@ -121,13 +121,16 @@ impl Processor {
 
     fn queue_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
         if sample.pvt.height_msl.is_finite()
-            && self.launch_height_msl_m.is_none()
+            && self.gnss_reference_msl_m.is_none()
             && matches!(
                 sample.pvt.fix_type,
                 ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
             )
         {
-            self.launch_height_msl_m = Some(sample.pvt.height_msl);
+            // Match the GNSS MSL frame to the barometer/IMU frame even if the
+            // first GNSS fix arrives after the board has moved.
+            self.gnss_reference_msl_m =
+                Some(sample.pvt.height_msl - self.estimator.selected_state().height_m);
         }
         if let Some(pending) = self.pending_gnss.take() {
             if sample.src == pending.sample.src
@@ -188,7 +191,7 @@ impl Processor {
         &self,
         sample: GnssSample,
     ) -> Option<FilterGnssSample<VerticalGnssMeasurement>> {
-        let origin = self.launch_height_msl_m?;
+        let origin = self.gnss_reference_msl_m?;
         let fix_tier = match sample.pvt.fix_type {
             ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
             _ => 0,
