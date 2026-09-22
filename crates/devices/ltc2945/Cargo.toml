@@ -3,6 +3,7 @@ name = "ltc2945"
 version = "0.1.0"
 edition = "2024"
 authors = ["Robert Jahnke", "Louis Schell"]
+license = "MIT OR Apache-2.0"
 description = "Device driver for the LTC2945 Voltage/Power-Sensor"
 
 [dependencies]

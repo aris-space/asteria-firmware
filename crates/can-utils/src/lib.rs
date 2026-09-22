@@ -1,3 +1,6 @@
+// Copyright 2026 ARIS
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! This crate serves to provide helpers for interacting with CAN
 //! using the data-definitions framework.
 

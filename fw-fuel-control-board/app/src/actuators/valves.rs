@@ -1,23 +1,23 @@
 use crate::drivers::WATCH;
+use crate::globals::STATE;
 use core::future::pending;
+use datatypes::actuator::NormallyOpenValve;
 use embassy_futures::join::join;
 use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::watch::{Receiver, Watch};
-use hermes_can::messages::board_status::ValveState;
-
-pub static PRZ_VENT_CONTROL: Watch<ThreadModeRawMutex, ValveState, WATCH> = Watch::new();
-pub static FSS_VENT_CONTROL: Watch<ThreadModeRawMutex, ValveState, WATCH> = Watch::new();
+use embassy_sync::watch::Receiver;
 
 #[embassy_executor::task]
-pub(crate) async fn valve_task(prz_vnt_vlv: Output<'static>, fue_vnt_vlv: Output<'static>) {
-    let prz_vnt_watcher = PRZ_VENT_CONTROL.receiver().unwrap();
-    let fue_vnt_watcher = FSS_VENT_CONTROL.receiver().unwrap();
-    let prz_vnt_task = valve_task_impl(prz_vnt_vlv, prz_vnt_watcher);
-    let fue_vnt_task = valve_task_impl(fue_vnt_vlv, fue_vnt_watcher);
+pub(crate) async fn valve_task(
+    pressurization_vent_valve: Output<'static>,
+    fuel_vent_valve: Output<'static>,
+) {
+    let fue_vnt_watcher = STATE.fuel_vent_control.receiver().unwrap();
+    let prz_vnt_watcher = STATE.pressurization_vent_control.receiver().unwrap();
+    let prz_vnt_task = valve_task_impl(pressurization_vent_valve, prz_vnt_watcher);
+    let fue_vnt_task = valve_task_impl(fuel_vent_valve, fue_vnt_watcher);
 
     join(prz_vnt_task, fue_vnt_task).await;
-
     loop {
         pending::<()>().await;
     }
@@ -25,15 +25,15 @@ pub(crate) async fn valve_task(prz_vnt_vlv: Output<'static>, fue_vnt_vlv: Output
 
 async fn valve_task_impl(
     mut valve: Output<'static>,
-    mut watch: Receiver<'static, ThreadModeRawMutex, ValveState, WATCH>,
+    mut watch: Receiver<'static, ThreadModeRawMutex, NormallyOpenValve, WATCH>,
 ) {
     loop {
         let state = watch.changed().await;
         match state {
-            ValveState::Active => {
+            NormallyOpenValve::Closed => {
                 valve.set_high();
             }
-            ValveState::Inactive => {
+            NormallyOpenValve::Open => {
                 valve.set_low();
             }
         }

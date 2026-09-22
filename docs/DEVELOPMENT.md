@@ -1,34 +1,35 @@
-# DEVELOPMENT
+# Development
 
-`just` is the primary interface for this repo. Run `just --list` in any `fw-*` folder to see available commands.
-The repo root has cross-workspace commands, which are mostly for CI.
+`just` is the command interface for this repository. Run it inside a specific `fw-*` directory for board recipes, or from the repository root for commands that operate across workspaces. Run `just --list` in either location to see the available recipes. The repository has several independent Cargo workspaces rather than one root workspace, so `just` provides a consistent command interface across them.
 
 ## Building and flashing
 
-```bash
-just build          # compile firmware (thumbv7em-none-eabihf)
-just run {args}     # build, timestamp, flash, and attach RTT output
-just attach         # re-attach RTT output without reflashing
+From a board directory:
+
+```sh
+cd fw-test-board
+just --list
+just build
+just run
 ```
 
-`just run` handles everything: it timestamps the artifact, flashes the board (via `probe-rs` or `STM32_Programmer_CLI` depending on configuration in the `fw-*/justfile`), and attaches RTT. Firmware defaults to the `debug` mode, which enables `defmt` log output.
+`just run` builds the firmware, stores its timestamped ELF artifact, flashes the board, and attaches RTT output. Use `just flash` to flash without attaching, or `just attach` to reconnect to the most recently built ELF. Add `--release` for a release build. Do not add `--no-default-features` unless you know what you are doing.
 
-To build for a critical test or launch, use `just build --release --no-default-features`.
+From the repository root, `just build`, `just fmt`, `just ci-checks`, `just clippy`, and `just test` operate across the relevant workspaces. `just test` runs host-side tests; embedded firmware test recipes are no-ops.
 
-At the repo root, `just build` compiles all workspaces, `just fmt` formats everything, and `just ci-checks` / `just clippy` / `just test` run lints and host-side tests.
+## Flashing paths
+
+Each board's `justfile` selects its flashing path. `probe-rs` is convenient because it flashes and attaches RTT in one step, and is often fast on smaller boards. `STM32_Programmer_CLI` is kept for boards where it is more compatible or reliable, and can be faster in some cases; its path flashes a converted binary and then uses `probe-rs attach` for RTT. `probe-rs` can hang on some target and probe combinations, so the configured fallback should be used when that happens.
 
 ## Device communication and logs
 
-`asteria-tool` is the host CLI for USB RPC communication with a running board. Access it through `just`:
+`asteria-tool` is the host CLI for USB RPC communication with a running board. Run these recipes from the repository root:
 
-```bash
-just connect                                          # interactive shell
-just cli fs ls /                                      # single command
-just fetch-logs latest                                # fetch and decode stored logs
-just fetch-logs 3                                     # fetch last 3 log directories
-just decode-logs .fetched-logs/<timestamp>/log_0      # re-decode an existing log
+```sh
+just connect
+just cli fs ls /
+just fetch-logs latest
+just decode-logs path/to/fetched/log_0
 ```
 
-Logs are stored on-device as `defmt.bin` streams alongside `build_info.txt`, which contains an `artifact_timestamp_ms` linking the log to the exact ELF used at flash time. `just fetch-logs` pulls and decodes them using the matching ELF from `.artifacts/` or object storage (configured via `.b2.env`). If no ELF is found, fetching still works but decoding is skipped.
-
-`asteria-tool` defaults to raw USB with a serial fallback. Pass `--connect raw` to force USB-only, or `--connect serial --port <PATH>` for serial.
+Logs are decoded with the matching ELF from `.artifacts/` or configured object storage. If no ELF is available, fetching still works but decoding is skipped. See [`asteria-tool`'s README](../tools/asteria-tool/README.md) for connection modes and the full CLI.

@@ -1,3 +1,6 @@
+// Copyright 2026 ARIS
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! This `Collector` derive macro can be used to set fields of a struct based on an enum.
 //!
 //! This reduces boilerplate when implementing message dispatching patterns for structs

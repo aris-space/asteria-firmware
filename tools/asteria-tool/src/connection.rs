@@ -14,6 +14,7 @@ const RAW_RETRIES: usize = 6;
 const RAW_RETRY_DELAY_MS: u64 = 250;
 const RAW_RPC_PROBE_TIMEOUT_MS_DEFAULT: u64 = 200;
 const RAW_AUTOCONNECT_MANUFACTURER: &str = "ARIS";
+#[cfg(not(target_os = "windows"))]
 const RAW_INTERFACE_CLASS_VENDOR_SPECIFIC: u8 = 0xFF;
 type RawConnectInfo = (
     HostClient<WireError>,

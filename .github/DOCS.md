@@ -15,7 +15,7 @@ git fetch ci
 git merge --allow-unrelated-histories ci/main
 ```
 
-The repository and all its submodules must be added to the PAT token `HERMES_CI_TOKEN`, contact @Indeximal.
+The repository and all its submodules must be added to the PAT token `ASTERIA_CI_TOKEN`, contact @Indeximal.
 
 Sources:
 - <https://www.youtube.com/watch?v=xUH-4y92jPg&t=491s&ab_channel=JonGjengset> (05.10.2024)
