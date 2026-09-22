@@ -5,7 +5,7 @@ use core::future::pending;
 use asteria_sef_light::{
     EstimatorError, GnssSample as FilterGnssSample, PressureMeasurement, VerticalGnssMeasurement,
 };
-use defmt::{Debug2Format, warn};
+use defmt::{Debug2Format, info, warn};
 use embassy_futures::select::{Either, Either6, select, select6};
 use embassy_time::{Duration, Instant, Timer};
 use sensor_carrier_sef_adapter::{
@@ -41,6 +41,7 @@ struct Processor {
     launch_height_msl_m: Option<f32>,
     pending_gnss: Option<PendingGnss>,
     last_output: Option<Instant>,
+    last_status_log: Option<Instant>,
     last_warning: Option<Instant>,
 }
 
@@ -52,6 +53,7 @@ impl Processor {
             launch_height_msl_m: None,
             pending_gnss: None,
             last_output: None,
+            last_status_log: None,
             last_warning: None,
         })
     }
@@ -230,6 +232,19 @@ impl Processor {
                 selected_imu,
                 redundancy_ready: self.estimator.redundancy_ready(),
             });
+        if self
+            .last_status_log
+            .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
+        {
+            info!(
+                "SEF-light: h={} m, v={} m/s, IMU={}, redundancy_ready={}",
+                state.height_m,
+                state.velocity_mps,
+                selected_imu,
+                self.estimator.redundancy_ready(),
+            );
+            self.last_status_log = Some(now);
+        }
         self.last_output = Some(now);
     }
 }
