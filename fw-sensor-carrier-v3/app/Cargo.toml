@@ -62,6 +62,7 @@ imu-fusion = { git = "https://github.com/Rechenmaschine/imu-fusion-rs.git", defa
 magcal = { git = "https://github.com/Rechenmaschine/magcal-rs.git" }
 # Local SEF-light integration branch; this checkout expects the sibling repository.
 asteria-sef-light = { path = "../../../../asteria-state-estimation/crates/sef-light" }
+sensor-carrier-sef-adapter = { path = "../state-estimation-adapter" }
 
 embedded-can = "0.4.1"
 embedded-hal = "1.0.0"

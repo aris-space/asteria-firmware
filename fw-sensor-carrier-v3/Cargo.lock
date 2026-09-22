@@ -1046,6 +1046,7 @@ dependencies = [
  "panic-reset",
  "postcard",
  "postcard-schema",
+ "sensor-carrier-sef-adapter",
  "sequential-storage",
  "serde",
  "sht4x",
@@ -2053,6 +2054,14 @@ dependencies = [
  "sht4x",
  "static_cell",
  "ublox",
+]
+
+[[package]]
+name = "sensor-carrier-sef-adapter"
+version = "0.1.0"
+dependencies = [
+ "asteria-sef-light",
+ "libm",
 ]
 
 [[package]]

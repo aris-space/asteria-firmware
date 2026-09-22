@@ -4,12 +4,16 @@ use core::future::pending;
 
 use asteria_sef_light::{
     DualVerticalEstimator, EstimatorError, GnssSample as FilterGnssSample, GnssSelectorConfig,
-    ImuAttitudeConfig, ImuMeasurement, PressureMeasurement, SelectorConfig,
-    VerticalEstimatorSelectorConfig, VerticalFilterConfig, VerticalGnssMeasurement,
+    ImuAttitudeConfig, PressureMeasurement, SelectorConfig, VerticalEstimatorSelectorConfig,
+    VerticalFilterConfig, VerticalGnssMeasurement,
 };
 use defmt::{Debug2Format, warn};
 use embassy_futures::select::{Either, Either6, select, select6};
 use embassy_time::{Duration, Instant, Timer};
+use sensor_carrier_sef_adapter::{
+    BarometerReference, GnssEpoch, GnssVerticalInput, gnss_measurement, imu_measurement,
+    pairable_epoch,
+};
 
 use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, IMU_0, IMU_1};
 use crate::signals;
@@ -41,7 +45,7 @@ struct PendingGnss {
 
 struct Processor {
     estimator: Estimator,
-    baro_reference: [Option<(f32, f32)>; 2],
+    baro_reference: [Option<BarometerReference>; 2],
     launch_height_msl_m: Option<f32>,
     pending_gnss: Option<PendingGnss>,
     last_output: Option<Instant>,
@@ -89,16 +93,10 @@ impl Processor {
     fn update_imu(&mut self, sample: ImuSample) -> Result<(), EstimatorError> {
         let imu = asteria_sef_light::ImuId::from_index(sample.src.index())
             .expect("firmware IMU ID must map to SEF-light");
-        const G: f32 = asteria_sef_light::STANDARD_GRAVITY_MPS2;
-        const DPS_TO_RAD: f32 = core::f32::consts::PI / 180.0;
-        let measurement = ImuMeasurement {
-            acceleration_body_mps2: [sample.accel.x * G, sample.accel.y * G, sample.accel.z * G],
-            angular_rate_body_rad_s: [
-                sample.gyro.x * DPS_TO_RAD,
-                sample.gyro.y * DPS_TO_RAD,
-                sample.gyro.z * DPS_TO_RAD,
-            ],
-        };
+        let measurement = imu_measurement(
+            [sample.accel.x, sample.accel.y, sample.accel.z],
+            [sample.gyro.x, sample.gyro.y, sample.gyro.z],
+        );
         self.estimator
             .update_imu(imu, sample.ts.as_micros(), measurement)?;
         Ok(())
@@ -106,19 +104,18 @@ impl Processor {
 
     fn update_barometer(&mut self, sample: BaroSample) -> Result<(), EstimatorError> {
         let index = sample.src.index();
-        let pressure = sample.pressure_mbar;
-        let temperature_k = sample.temperature_c + 273.15;
-        if !pressure.is_finite()
-            || pressure <= 0.0
-            || !temperature_k.is_finite()
-            || temperature_k <= 0.0
-        {
-            return Err(EstimatorError::OutOfRangeInput);
-        }
-        let (reference_pressure, reference_temperature_k) =
-            *self.baro_reference[index].get_or_insert((pressure, temperature_k));
-        // Hypsometric conversion relative to each sensor's launch pressure.
-        let height_m = 29.271 * reference_temperature_k * libm::logf(reference_pressure / pressure);
+        let reference = match self.baro_reference[index] {
+            Some(reference) => reference,
+            None => {
+                let reference = BarometerReference::new(sample.pressure_mbar, sample.temperature_c)
+                    .ok_or(EstimatorError::OutOfRangeInput)?;
+                self.baro_reference[index] = Some(reference);
+                reference
+            }
+        };
+        let height_m = reference
+            .height_m(sample.pressure_mbar)
+            .ok_or(EstimatorError::OutOfRangeInput)?;
         let barometer = asteria_sef_light::BarometerId::from_index(index)
             .expect("firmware barometer ID must map to SEF-light");
         self.estimator.update_pressure(
@@ -149,15 +146,19 @@ impl Processor {
                 self.pending_gnss = Some(pending);
                 return Ok(());
             }
-            let span = if sample.ts >= pending.sample.ts {
-                sample.ts - pending.sample.ts
-            } else {
-                pending.sample.ts - sample.ts
-            };
-            if sample.src != pending.sample.src
-                && sample.pvt.epoch_ms == pending.sample.pvt.epoch_ms
-                && span <= GNSS_PAIR_WAIT
-            {
+            if pairable_epoch(
+                GnssEpoch {
+                    receiver: pending.sample.src.index(),
+                    epoch_ms: pending.sample.pvt.epoch_ms,
+                    time_us: pending.sample.ts.as_micros(),
+                },
+                GnssEpoch {
+                    receiver: sample.src.index(),
+                    epoch_ms: sample.pvt.epoch_ms,
+                    time_us: sample.ts.as_micros(),
+                },
+                GNSS_PAIR_WAIT.as_micros(),
+            ) {
                 let mut pair = [None, None];
                 pair[pending.sample.src.index()] = self.gnss_measurement(pending.sample);
                 pair[sample.src.index()] = self.gnss_measurement(sample);
@@ -202,22 +203,15 @@ impl Processor {
             ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
             _ => 0,
         };
-        let height_std_m = (sample.pvt.vert_accuracy as f32 / 1000.0).max(0.5);
-        let velocity_std_mps = if sample.pvt.speed_accuracy_mps > 0.0 {
-            sample.pvt.speed_accuracy_mps.max(0.1)
-        } else {
-            1.0
-        };
-        Some(FilterGnssSample {
-            measurement: VerticalGnssMeasurement {
-                height_m: sample.pvt.height_msl - origin,
-                velocity_mps: -sample.pvt.vel_down,
-                height_std_m,
-                velocity_std_mps,
-            },
+        Some(gnss_measurement(GnssVerticalInput {
+            launch_height_msl_m: origin,
+            height_msl_m: sample.pvt.height_msl,
+            velocity_down_mps: sample.pvt.vel_down,
+            vertical_accuracy_mm: sample.pvt.vert_accuracy,
+            speed_accuracy_mps: sample.pvt.speed_accuracy_mps,
             fix_tier,
             pdop_centi: sample.pvt.pdop,
-        })
+        }))
     }
 
     fn publish(&mut self) {

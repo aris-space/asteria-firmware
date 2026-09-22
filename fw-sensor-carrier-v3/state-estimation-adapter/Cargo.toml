@@ -1,0 +1,9 @@
+[package]
+name = "sensor-carrier-sef-adapter"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+asteria-sef-light = { path = "../../../../asteria-state-estimation/crates/sef-light" }
+libm = "0.2.16"
