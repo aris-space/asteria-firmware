@@ -7,7 +7,8 @@ use embassy_stm32::usart::{UartRx, UartTx};
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
-    BARO_BUS_1, BARO_BUS_2, DHT_BUS_1, DHT_BUS_2, GNSS_1, IMU_0, IMU_1, MAG_BUS_1, MAG_BUS_2,
+    BARO_BUS_1, BARO_BUS_2, DHT_BUS_1, DHT_BUS_2, GNSS_0, GNSS_1, IMU_0, IMU_1, MAG_BUS_1,
+    MAG_BUS_2,
 };
 
 use crate::{calibration, resources, storage, tasks};
@@ -29,6 +30,7 @@ pub struct ServiceResources {
 }
 
 pub struct SensorResources {
+    pub gps1_rx: UartRx<'static, Async>,
     pub gps2_rx: UartRx<'static, Async>,
     pub gps2_tx: UartTx<'static, Async>,
     pub imu1: (SpiDevice, ExtiInput<'static, Async>),
@@ -41,6 +43,9 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let flash = resources.flash.setup();
     let storage = storage::Storage::init(flash);
     calibration::mag::load(storage).await;
+
+    let gps1_data = resources.gps1_uart.setup();
+    let (_gps1_tx, gps1_rx) = gps1_data.split();
 
     let gps2_data = resources.gps2_uart.setup();
     let (gps2_tx, gps2_rx) = gps2_data.split();
@@ -69,6 +74,7 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
             red_led,
         },
         sensors: SensorResources {
+            gps1_rx,
             gps2_rx,
             gps2_tx,
             imu1,
@@ -141,6 +147,10 @@ pub async fn spawn_tasks(
         );
     }
 
+    level_0_spawner.spawn(
+        tasks::readout::gnss::task(board.sensors.gps1_rx, None, GNSS_0)
+            .expect("Failed to spawn GNSS 0 task"),
+    );
     level_0_spawner.spawn(
         tasks::readout::gnss::task(board.sensors.gps2_rx, Some(board.sensors.gps2_tx), GNSS_1)
             .expect("Failed to spawn GNSS 1 task"),

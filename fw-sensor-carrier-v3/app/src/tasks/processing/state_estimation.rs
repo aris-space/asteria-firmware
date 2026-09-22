@@ -2,20 +2,21 @@
 
 use asteria_sef_light::{EstimatorError, PressureMeasurement};
 use defmt::{Debug2Format, info, warn};
-use embassy_futures::select::{Either5, select5};
+use embassy_futures::select::{Either6, select6};
 use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
     BarometerReference, Estimator, GnssVerticalInput, gnss_measurement, imu_measurement,
     new_estimator,
 };
 
-use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_1, IMU_0, IMU_1};
+use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, GnssId, IMU_0, IMU_1};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::types::{BaroSample, GnssSample, ImuSample, VerticalEstimate};
 
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
+const GNSS_FRESH: Duration = Duration::from_millis(500);
 const BARO_HEIGHT_STD_M: f32 = 3.0;
 
 enum Event {
@@ -28,6 +29,8 @@ struct Processor {
     estimator: Estimator,
     baro_reference: [Option<BarometerReference>; 2],
     gnss_reference_msl_m: Option<f32>,
+    gnss_latest: [Option<GnssSample>; 2],
+    selected_gnss: Option<GnssId>,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
     last_baro_log: [Option<Instant>; 2],
@@ -41,6 +44,8 @@ impl Processor {
             estimator: new_estimator(GYRO_RANGE_DPS)?,
             baro_reference: [None; 2],
             gnss_reference_msl_m: None,
+            gnss_latest: [None; 2],
+            selected_gnss: None,
             last_output: None,
             last_status_log: None,
             last_baro_log: [None; 2],
@@ -123,24 +128,50 @@ impl Processor {
                 ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
             );
         if !valid {
+            self.gnss_latest[sample.src.index()] = None;
             return Ok(());
         }
-        if self.gnss_reference_msl_m.is_none() {
-            // Anchor the relative filter state to GNSS_1's MSL altitude.
+        self.gnss_latest[sample.src.index()] = Some(sample);
+        let now = Instant::now();
+        let [first, second] = self.gnss_latest.map(|candidate| {
+            candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
+        });
+        let best = match (first, second) {
+            (Some(first), Some(second)) => {
+                if first.pvt.vert_accuracy < second.pvt.vert_accuracy {
+                    first
+                } else {
+                    second
+                }
+            }
+            (Some(first), None) => first,
+            (None, Some(second)) => second,
+            (None, None) => return Ok(()),
+        };
+        if sample.src != best.src {
+            return Ok(());
+        }
+        if self.selected_gnss != Some(best.src) {
+            // Keep the reported altitude in the active receiver's MSL frame.
             let relative_height_m = self.estimator.selected_state().height_m;
-            let origin_msl_m = sample.pvt.height_msl - relative_height_m;
+            let origin_msl_m = best.pvt.height_msl - relative_height_m;
             info!(
                 "SEF MSL reference: {} raw={} m, relative={} m, origin={} m, vAcc={} mm",
-                sample.src,
-                sample.pvt.height_msl,
+                best.src,
+                best.pvt.height_msl,
                 relative_height_m,
                 origin_msl_m,
-                sample.pvt.vert_accuracy
+                best.pvt.vert_accuracy
             );
             self.gnss_reference_msl_m = Some(origin_msl_m);
+            info!(
+                "SEF GNSS source: {} (vAcc={} mm)",
+                best.src, best.pvt.vert_accuracy
+            );
+            self.selected_gnss = Some(best.src);
         }
         let mut measurements = [None, None];
-        measurements[GNSS_1.index()] = Some(gnss_measurement(GnssVerticalInput {
+        measurements[best.src.index()] = Some(gnss_measurement(GnssVerticalInput {
             launch_height_msl_m: self.gnss_reference_msl_m.expect("GNSS MSL reference set"),
             height_msl_m: sample.pvt.height_msl,
             velocity_down_mps: sample.pvt.vel_down,
@@ -231,24 +262,28 @@ pub async fn task() -> ! {
     let mut baro1 = signals::BARO_CHANNELS[BARO_BUS_2.index()]
         .subscriber()
         .expect("SEF barometer 1 subscriber");
+    let mut gnss0 = signals::GNSS_CHANNELS[GNSS_0.index()]
+        .subscriber()
+        .expect("SEF GNSS 0 subscriber");
     let mut gnss1 = signals::GNSS_CHANNELS[GNSS_1.index()]
         .subscriber()
         .expect("SEF GNSS 1 subscriber");
     let mut processor = Processor::new().expect("SEF-light configuration must be valid");
 
     loop {
-        let event = match select5(
+        let event = match select6(
             baro0.next_message_pure(),
             baro1.next_message_pure(),
+            gnss0.next_message_pure(),
             gnss1.next_message_pure(),
             imu0.next_message_pure(),
             imu1.next_message_pure(),
         )
         .await
         {
-            Either5::First(sample) | Either5::Second(sample) => Event::Barometer(sample),
-            Either5::Third(sample) => Event::Gnss(sample),
-            Either5::Fourth(sample) | Either5::Fifth(sample) => Event::Imu(sample),
+            Either6::First(sample) | Either6::Second(sample) => Event::Barometer(sample),
+            Either6::Third(sample) | Either6::Fourth(sample) => Event::Gnss(sample),
+            Either6::Fifth(sample) | Either6::Sixth(sample) => Event::Imu(sample),
         };
         processor.handle(event);
     }
