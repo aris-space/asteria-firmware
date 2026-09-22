@@ -65,8 +65,6 @@ lsm303agr = { version = "1.1.0", features = ["async"] }
 sht4x = { version = "0.2.0", features = ["embedded-hal-async", "defmt"] }
 ublox = { version = "0.4.5", default-features = false }
 
-# Sensor fusion
-imu-fusion = { git = "https://github.com/Rechenmaschine/imu-fusion-rs.git", default-features = false }
 magcal = { git = "https://github.com/Rechenmaschine/magcal-rs.git" }
 
 embedded-can = "0.4.1"
@@ -83,7 +81,6 @@ defmt-rtt = "1.0.0"
 
 # Math
 nalgebra = { version = "0.33", default-features = false, features = ["libm"] }
-num-traits = { version = "0.2.19", default-features = false }
 
 thiserror = { version = "2.0.11", default-features = false }
 atomic_enum = { version = "0.3.0", default-features = false }

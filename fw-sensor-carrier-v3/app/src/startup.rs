@@ -157,21 +157,6 @@ pub async fn spawn_tasks(
     );
 
     // --- Processing ---------------------------------------------------------
-    thread_spawner
-        .spawn(tasks::processing::pressure::task().expect("Failed to spawn pressure proc task"));
-    thread_spawner.spawn(
-        tasks::processing::environmental::task().expect("Failed to spawn environmental proc task"),
-    );
-    thread_spawner.spawn(
-        tasks::processing::magnetic_field::task()
-            .expect("Failed to spawn magnetic field proc task"),
-    );
-    thread_spawner
-        .spawn(tasks::processing::inertial::task().expect("Failed to spawn inertial proc task"));
-    thread_spawner.spawn(
-        tasks::processing::position_velocity::task()
-            .expect("Failed to spawn position/velocity proc task"),
-    );
     thread_spawner.spawn(
         tasks::processing::state_estimation::task().expect("Failed to spawn state estimation task"),
     );

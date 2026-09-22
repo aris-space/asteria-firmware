@@ -1033,7 +1033,6 @@ dependencies = [
  "embedded-utils",
  "heapless 0.9.3",
  "hermes-can",
- "imu-fusion",
  "libm",
  "lsm303agr",
  "lsm6dso32",
@@ -1041,7 +1040,6 @@ dependencies = [
  "ms5607",
  "nalgebra 0.33.3",
  "noline",
- "num-traits",
  "panic-probe",
  "panic-reset",
  "postcard",
@@ -1356,15 +1354,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "imu-fusion"
-version = "0.2.5"
-source = "git+https://github.com/Rechenmaschine/imu-fusion-rs.git#56706a1bf11cd3e5727f4caa26283c9b4a5848f9"
-dependencies = [
- "libm",
- "nalgebra 0.32.6",
-]
-
-[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1571,20 +1560,6 @@ dependencies = [
  "defmt 0.3.100",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
-]
-
-[[package]]
-name = "nalgebra"
-version = "0.32.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5c17de023a86f59ed79891b2e5d5a94c705dbe904a5b5c9c952ea6221b03e4"
-dependencies = [
- "approx",
- "num-complex",
- "num-rational",
- "num-traits",
- "simba 0.8.1",
- "typenum",
 ]
 
 [[package]]
@@ -2145,19 +2120,6 @@ dependencies = [
  "embedded-hal-async",
  "fixed",
  "sensirion-i2c",
-]
-
-[[package]]
-name = "simba"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061507c94fc6ab4ba1c9a0305018408e312e17c041eb63bef8aa726fa33aceae"
-dependencies = [
- "approx",
- "libm",
- "num-complex",
- "num-traits",
- "paste",
 ]
 
 [[package]]

@@ -43,19 +43,14 @@ use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
 use crate::types::{ImuSample, RawImuSample};
 
-/// Accelerometer output data rate. Should match [`IMU_ODR_HZ`]
+/// Accelerometer output data rate. Keep both ODRs and BDRs at 833 Hz.
 const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
-/// Gyroscope output data rate. Should match [`IMU_ODR_HZ`]
+/// Gyroscope output data rate. Keep both ODRs and BDRs at 833 Hz.
 const GYRO_ODR: GyroscopeOdr = GyroscopeOdr::Hz833;
 /// Accelerometer batch data rate. Should match [`ACCEL_ODR`]
 const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
 /// Gyroscope batch data rate. Should match [`GYRO_ODR`]
 const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
-/// IMU output data rate in Hz. MUST match the above ODR and BDR settings.
-/// Do not change without also updating the above settings!
-pub const IMU_ODR_HZ: u32 = 833;
-/// Target IMU loop data rate
-pub const IMU_TARGET_DT: f32 = 1.0 / IMU_ODR_HZ as f32;
 /// Accelerometer full-scale range
 const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G8;
 /// Gyroscope full-scale range

@@ -1,25 +1,21 @@
 //! SEF-light vertical estimation from the calibrated sensor streams.
 
-use core::future::pending;
-
-use asteria_sef_light::{
-    EstimatorError, GnssSample as FilterGnssSample, PressureMeasurement, VerticalGnssMeasurement,
-};
+use asteria_sef_light::{EstimatorError, PressureMeasurement};
 use defmt::{Debug2Format, info, warn};
-use embassy_futures::select::{Either, Either6, select, select6};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_futures::select::{Either6, select6};
+use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
-    BarometerReference, Estimator, GnssEpoch, GnssVerticalInput, gnss_measurement, imu_measurement,
-    new_estimator, pairable_epoch,
+    BarometerReference, Estimator, GnssVerticalInput, gnss_measurement, imu_measurement,
+    new_estimator,
 };
 
-use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, IMU_0, IMU_1};
+use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, GnssId, IMU_0, IMU_1};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::types::{BaroSample, GnssSample, ImuSample, VerticalEstimate};
 
-const GNSS_PAIR_WAIT: Duration = Duration::from_millis(150);
 const GNSS_REFERENCE_WAIT: Duration = Duration::from_secs(2);
+const GNSS_FRESH: Duration = Duration::from_millis(500);
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const BARO_HEIGHT_STD_M: f32 = 3.0;
@@ -28,21 +24,15 @@ enum Event {
     Imu(ImuSample),
     Barometer(BaroSample),
     Gnss(GnssSample),
-    GnssTimeout,
-}
-
-struct PendingGnss {
-    sample: GnssSample,
-    deadline: Instant,
 }
 
 struct Processor {
     estimator: Estimator,
     baro_reference: [Option<BarometerReference>; 2],
     gnss_reference_msl_m: Option<f32>,
-    gnss_reference_candidates: [Option<GnssSample>; 2],
+    gnss_latest: [Option<GnssSample>; 2],
     gnss_reference_started: Option<Instant>,
-    pending_gnss: Option<PendingGnss>,
+    selected_gnss: Option<GnssId>,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
     last_baro_log: [Option<Instant>; 2],
@@ -56,9 +46,9 @@ impl Processor {
             estimator: new_estimator(GYRO_RANGE_DPS)?,
             baro_reference: [None; 2],
             gnss_reference_msl_m: None,
-            gnss_reference_candidates: [None; 2],
+            gnss_latest: [None; 2],
             gnss_reference_started: None,
-            pending_gnss: None,
+            selected_gnss: None,
             last_output: None,
             last_status_log: None,
             last_baro_log: [None; 2],
@@ -72,7 +62,6 @@ impl Processor {
             Event::Imu(sample) => self.update_imu(sample),
             Event::Barometer(sample) => self.update_barometer(sample),
             Event::Gnss(sample) => self.queue_gnss(sample),
-            Event::GnssTimeout => self.flush_gnss(),
         };
         if let Err(error) = result {
             let now = Instant::now();
@@ -136,42 +125,43 @@ impl Processor {
     }
 
     fn queue_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
+        let valid = sample.pvt.height_msl.is_finite()
+            && matches!(
+                sample.pvt.fix_type,
+                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
+            );
+        self.gnss_latest[sample.src.index()] = valid.then_some(sample);
+        if !valid {
+            return Ok(());
+        }
+        let now = Instant::now();
+        let [first, second] = self.gnss_latest.map(|candidate| {
+            candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
+        });
+        let selected = match (first, second) {
+            (Some(first), Some(second)) => {
+                if first.pvt.vert_accuracy <= second.pvt.vert_accuracy {
+                    first
+                } else {
+                    second
+                }
+            }
+            (Some(first), None) => first,
+            (None, Some(second)) => second,
+            (None, None) => return Ok(()),
+        };
         if self.gnss_reference_msl_m.is_none() {
-            if !sample.pvt.height_msl.is_finite()
-                || !matches!(
-                    sample.pvt.fix_type,
-                    ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
-                )
+            let started = *self.gnss_reference_started.get_or_insert(now);
+            if (first.is_none() || second.is_none())
+                && now.saturating_duration_since(started) < GNSS_REFERENCE_WAIT
             {
                 return Ok(());
             }
-            let now = Instant::now();
-            let started = *self.gnss_reference_started.get_or_insert(now);
-            self.gnss_reference_candidates[sample.src.index()] = Some(sample);
-            let [first, second] = self.gnss_reference_candidates;
-            let selected = match (first, second) {
-                (Some(first), Some(second)) => {
-                    if first.pvt.vert_accuracy <= second.pvt.vert_accuracy {
-                        first
-                    } else {
-                        second
-                    }
-                }
-                (Some(first), None)
-                    if now.saturating_duration_since(started) >= GNSS_REFERENCE_WAIT =>
-                {
-                    first
-                }
-                (None, Some(second))
-                    if now.saturating_duration_since(started) >= GNSS_REFERENCE_WAIT =>
-                {
-                    second
-                }
-                _ => return Ok(()),
-            };
-            // Match the GNSS MSL frame to the barometer/IMU frame even if the
-            // first GNSS fix arrives after the board has moved. Choose the
-            // reference before fusing GNSS so the filter history uses one frame.
+            self.gnss_reference_started = None;
+        }
+        if self.selected_gnss != Some(selected.src) {
+            // Anchor the relative filter state to the active receiver's MSL
+            // altitude. A source change must also replace the old MSL offset.
             let relative_height_m = self.estimator.selected_state().height_m;
             let origin_msl_m = selected.pvt.height_msl - relative_height_m;
             info!(
@@ -183,82 +173,28 @@ impl Processor {
                 selected.pvt.vert_accuracy
             );
             self.gnss_reference_msl_m = Some(origin_msl_m);
-            self.gnss_reference_candidates = [None; 2];
-            self.gnss_reference_started = None;
+            info!(
+                "SEF GNSS source: {} (vAcc={} mm)",
+                selected.src, selected.pvt.vert_accuracy
+            );
+            self.selected_gnss = Some(selected.src);
         }
-        if let Some(pending) = self.pending_gnss.take() {
-            if sample.src == pending.sample.src
-                && sample.pvt.epoch_ms == pending.sample.pvt.epoch_ms
-            {
-                self.pending_gnss = Some(pending);
-                return Ok(());
-            }
-            if pairable_epoch(
-                GnssEpoch {
-                    receiver: pending.sample.src.index(),
-                    epoch_ms: pending.sample.pvt.epoch_ms,
-                    time_us: pending.sample.ts.as_micros(),
-                },
-                GnssEpoch {
-                    receiver: sample.src.index(),
-                    epoch_ms: sample.pvt.epoch_ms,
-                    time_us: sample.ts.as_micros(),
-                },
-                GNSS_PAIR_WAIT.as_micros(),
-            ) {
-                let mut pair = [None, None];
-                pair[pending.sample.src.index()] = self.gnss_measurement(pending.sample);
-                pair[sample.src.index()] = self.gnss_measurement(sample);
-                let fusion_time_us = sample.ts.as_micros().min(pending.sample.ts.as_micros());
-                self.estimator.update_gnss(fusion_time_us, pair)?;
-                return Ok(());
-            }
-            let result = self.fuse_single(pending.sample);
-            self.pending_gnss = Some(PendingGnss {
-                sample,
-                deadline: Instant::now() + GNSS_PAIR_WAIT,
-            });
-            return result;
+        if sample.src != selected.src {
+            return Ok(());
         }
-        self.pending_gnss = Some(PendingGnss {
-            sample,
-            deadline: Instant::now() + GNSS_PAIR_WAIT,
-        });
-        Ok(())
-    }
-
-    fn flush_gnss(&mut self) -> Result<(), EstimatorError> {
-        if let Some(pending) = self.pending_gnss.take() {
-            self.fuse_single(pending.sample)?;
-        }
-        Ok(())
-    }
-
-    fn fuse_single(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
-        let mut pair = [None, None];
-        pair[sample.src.index()] = self.gnss_measurement(sample);
-        self.estimator.update_gnss(sample.ts.as_micros(), pair)?;
-        Ok(())
-    }
-
-    fn gnss_measurement(
-        &self,
-        sample: GnssSample,
-    ) -> Option<FilterGnssSample<VerticalGnssMeasurement>> {
-        let origin = self.gnss_reference_msl_m?;
-        let fix_tier = match sample.pvt.fix_type {
-            ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
-            _ => 0,
-        };
-        Some(gnss_measurement(GnssVerticalInput {
-            launch_height_msl_m: origin,
+        let mut measurements = [None, None];
+        measurements[selected.src.index()] = Some(gnss_measurement(GnssVerticalInput {
+            launch_height_msl_m: self.gnss_reference_msl_m.expect("GNSS MSL reference set"),
             height_msl_m: sample.pvt.height_msl,
             velocity_down_mps: sample.pvt.vel_down,
             vertical_accuracy_mm: sample.pvt.vert_accuracy,
             speed_accuracy_mps: sample.pvt.speed_accuracy_mps,
-            fix_tier,
+            fix_tier: 3,
             pdop_centi: sample.pvt.pdop,
-        }))
+        }));
+        self.estimator
+            .update_gnss(sample.ts.as_micros(), measurements)?;
+        Ok(())
     }
 
     fn publish(&mut self) {
@@ -347,40 +283,19 @@ pub async fn task() -> ! {
     let mut processor = Processor::new().expect("SEF-light configuration must be valid");
 
     loop {
-        if processor
-            .pending_gnss
-            .as_ref()
-            .is_some_and(|pending| Instant::now() >= pending.deadline)
-        {
-            processor.handle(Event::GnssTimeout);
-            continue;
-        }
-        let deadline = processor
-            .pending_gnss
-            .as_ref()
-            .map(|pending| pending.deadline);
-        let samples = select6(
+        let event = match select6(
             baro0.next_message_pure(),
             baro1.next_message_pure(),
             gnss0.next_message_pure(),
             gnss1.next_message_pure(),
             imu0.next_message_pure(),
             imu1.next_message_pure(),
-        );
-        let timeout = async {
-            if let Some(deadline) = deadline {
-                Timer::at(deadline).await;
-            } else {
-                pending::<()>().await;
-            }
-        };
-        let event = match select(samples, timeout).await {
-            Either::First(Either6::First(sample) | Either6::Second(sample)) => {
-                Event::Barometer(sample)
-            }
-            Either::First(Either6::Third(sample) | Either6::Fourth(sample)) => Event::Gnss(sample),
-            Either::First(Either6::Fifth(sample) | Either6::Sixth(sample)) => Event::Imu(sample),
-            Either::Second(()) => Event::GnssTimeout,
+        )
+        .await
+        {
+            Either6::First(sample) | Either6::Second(sample) => Event::Barometer(sample),
+            Either6::Third(sample) | Either6::Fourth(sample) => Event::Gnss(sample),
+            Either6::Fifth(sample) | Either6::Sixth(sample) => Event::Imu(sample),
         };
         processor.handle(event);
     }

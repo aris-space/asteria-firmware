@@ -6,7 +6,6 @@
 
 use embassy_time::Instant;
 use lsm6dso32::types::{Acceleration, AngularRate};
-use nalgebra::UnitQuaternion;
 
 use crate::sensors::{BarometerId, DhtId, GnssId, ImuId, MagnetometerId};
 
@@ -94,8 +93,7 @@ pub struct RawMagSample {
 }
 
 /// Calibrated magnetometer sample, board frame, nT.
-/// Output of the magnetic-field processing task; consumed by inertial
-/// fusion and the CAN layer.
+/// Output of magnetometer calibration.
 #[derive(Clone, Copy, Debug)]
 pub struct MagSample {
     pub src: MagnetometerId,
@@ -105,95 +103,18 @@ pub struct MagSample {
     pub z: f32,
 }
 
-/// GNSS PVT payload. Kept as a substruct of `GnssSample` because flattening
-/// 16 fields would bury the metadata.
+/// GNSS vertical position and velocity used by SEF-light.
 #[derive(Clone, Copy, Debug)]
 pub struct Pvt {
-    /// Receiver navigation epoch, GPS milliseconds of week.
-    pub epoch_ms: u32,
-    pub lon_deg: f64,
-    pub lat_deg: f64,
     pub fix_type: ublox::GpsFix,
     pub height_msl: f32,
-    pub num_satellites: u8,
-    pub heading_deg: f32,
-    pub heading_accuracy_estimate: f32,
-    pub heading_of_vehicle_deg: f32,
-    pub vel_north: f32,
-    pub vel_east: f32,
     pub vel_down: f32,
     pub pdop: u16,
     pub vert_accuracy: u32,
-    pub horiz_accuracy: u32,
     pub speed_accuracy_mps: f32,
-    pub magnetic_declination_deg: f32,
-    pub magnetic_declination_accuracy_deg: f32,
 }
 
-// Fused / derived signals. Board-internal types; conversion to CAN wire
-// formats lives in the CAN tx layer. Every type carries `ts`, propagated
-// from the input sample(s) that drove the update.
-
-#[derive(Clone, Copy, Debug)]
-pub struct Pressure {
-    pub ts: Instant,
-    pub mbar: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Orientation {
-    pub ts: Instant,
-    pub q: UnitQuaternion<f32>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Environment {
-    pub ts: Instant,
-    pub temperature_c: f32,
-    pub humidity_rh: f32,
-    pub pressure_mbar: f32,
-}
-
-/// Body-frame accel/gyro plus NED-rotated, gravity-compensated accel/gyro.
-#[derive(Clone, Copy, Debug)]
-pub struct Inertial {
-    pub ts: Instant,
-    pub body_accel_x: f32,
-    pub body_accel_y: f32,
-    pub body_accel_z: f32,
-    pub body_gyro_x: f32,
-    pub body_gyro_y: f32,
-    pub body_gyro_z: f32,
-    pub ned_accel_north: f32,
-    pub ned_accel_east: f32,
-    pub ned_accel_down: f32,
-    pub ned_gyro_north: f32,
-    pub ned_gyro_east: f32,
-    pub ned_gyro_down: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Position {
-    pub ts: Instant,
-    pub lat_deg: f64,
-    pub lon_deg: f64,
-    pub height_msl_m: f32,
-    pub horizontal_accuracy_m: f32,
-    pub vertical_accuracy_m: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Velocity {
-    pub ts: Instant,
-    pub body_x: f32,
-    pub body_y: f32,
-    pub body_z: f32,
-    pub ned_north: f32,
-    pub ned_east: f32,
-    pub ned_down: f32,
-}
-
-/// Launch-relative, up-positive SEF-light output.
+/// MSL altitude and up-positive vertical velocity from SEF-light.
 #[derive(Clone, Copy, Debug)]
 pub struct VerticalEstimate {
     pub ts: Instant,

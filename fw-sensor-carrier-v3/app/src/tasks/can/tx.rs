@@ -9,7 +9,6 @@ use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Duration, Instant, Ticker, with_timeout};
 use hermes_can::CanMessage;
 use hermes_can::messages::board_status::SensorStatus as CanSensorStatus;
-use nalgebra::Vector3;
 
 use super::CanTransmitter;
 use crate::sensors::{
@@ -30,13 +29,7 @@ const fn min_period(target_hz: f32) -> Duration {
     Duration::from_millis((1000.0 / (target_hz * (1.0 + ALPHA))) as u64)
 }
 
-const PRESSURE_MIN_PERIOD: Duration = min_period(40.0);
-const ENVIRONMENT_MIN_PERIOD: Duration = min_period(1.0);
-const ORIENTATION_MIN_PERIOD: Duration = min_period(40.0);
-const MAG_MIN_PERIOD: Duration = min_period(10.0);
-const POSITION_MIN_PERIOD: Duration = min_period(20.0);
-const VELOCITY_MIN_PERIOD: Duration = min_period(20.0);
-const INERTIAL_MIN_PERIOD: Duration = min_period(40.0);
+const VERTICAL_MIN_PERIOD: Duration = min_period(20.0);
 
 static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
 
@@ -47,14 +40,7 @@ pub fn spawn_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
         .expect("CAN TX init twice");
     let can_tx = CAN_TX.try_get().expect("CAN TX not yet initialized");
 
-    spawner.spawn(pressure_task(can_tx).expect("spawn can pressure"));
-    spawner.spawn(environment_task(can_tx).expect("spawn can env"));
-    spawner.spawn(orientation_task(can_tx).expect("spawn can orientation"));
-    spawner.spawn(mag_task(can_tx).expect("spawn can mag"));
-    spawner.spawn(position_task(can_tx).expect("spawn can position"));
-    spawner.spawn(velocity_task(can_tx).expect("spawn can velocity"));
     spawner.spawn(vertical_state_task(can_tx).expect("spawn can vertical state"));
-    spawner.spawn(inertial_task(can_tx).expect("spawn can inertial"));
     spawner.spawn(status_task(can_tx).expect("spawn can status"));
     spawner.spawn(build_information_task(can_tx).expect("spawn can build info"));
 }
@@ -96,104 +82,11 @@ macro_rules! watch_loop {
 }
 
 #[embassy_executor::task]
-async fn pressure_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::PressureData;
-    watch_loop!(signals::PRESSURE_WATCH, PRESSURE_MIN_PERIOD, |pressure| {
-        send(
-            can_tx,
-            PressureData {
-                pressure: pressure.mbar,
-            },
-        )
-        .await;
-    });
-}
-
-#[embassy_executor::task]
-async fn environment_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::EnvironmentalData;
-    watch_loop!(signals::ENVIRONMENT_WATCH, ENVIRONMENT_MIN_PERIOD, |env| {
-        let msg = EnvironmentalData {
-            temperature: env.temperature_c,
-            humidity: env.humidity_rh,
-            pressure: env.pressure_mbar,
-        };
-        send(can_tx, msg).await;
-    });
-}
-
-#[embassy_executor::task]
-async fn orientation_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::OrientationData;
-    watch_loop!(signals::ORIENTATION_WATCH, ORIENTATION_MIN_PERIOD, |o| {
-        let msg = OrientationData {
-            orientation_w: o.q.w,
-            orientation_x: o.q.i,
-            orientation_y: o.q.j,
-            orientation_z: o.q.k,
-        };
-        send(can_tx, msg).await;
-    });
-}
-
-#[embassy_executor::task]
-async fn mag_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::MagnetometerData;
-    let mut orientation_rx = signals::ORIENTATION_WATCH.anon_receiver();
-    watch_loop!(signals::MAG_WATCH, MAG_MIN_PERIOD, |field| {
-        let orientation = orientation_rx.try_get().map(|o| o.q).unwrap_or_default();
-        // nT -> uT. xyz is body-frame; orientation is body -> NED.
-        let xyz = Vector3::new(field.x * 1e-3, field.y * 1e-3, field.z * 1e-3);
-        let ned = orientation * xyz;
-        let msg = MagnetometerData {
-            magnetic_field_x: xyz.x,
-            magnetic_field_y: xyz.y,
-            magnetic_field_z: xyz.z,
-            magnetic_field_north: ned.x,
-            magnetic_field_east: ned.y,
-            magnetic_field_down: ned.z,
-        };
-        send(can_tx, msg).await;
-    });
-}
-
-#[embassy_executor::task]
-async fn position_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::PositionData;
-    watch_loop!(signals::POSITION_WATCH, POSITION_MIN_PERIOD, |pos| {
-        let msg = PositionData {
-            location_latitude: pos.lat_deg,
-            location_longitude: pos.lon_deg,
-            location_hamsl: pos.height_msl_m,
-            horizontal_accuracy: pos.horizontal_accuracy_m,
-            vertical_accuracy: pos.vertical_accuracy_m,
-        };
-        send(can_tx, msg).await;
-    });
-}
-
-#[embassy_executor::task]
-async fn velocity_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::VelocityData;
-    watch_loop!(signals::VELOCITY_WATCH, VELOCITY_MIN_PERIOD, |vel| {
-        let msg = VelocityData {
-            velocity_x: vel.body_x,
-            velocity_y: vel.body_y,
-            velocity_z: vel.body_z,
-            velocity_north: vel.ned_north,
-            velocity_east: vel.ned_east,
-            velocity_down: vel.ned_down,
-        };
-        send(can_tx, msg).await;
-    });
-}
-
-#[embassy_executor::task]
 async fn vertical_state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::VerticalStateData;
     watch_loop!(
         signals::VERTICAL_ESTIMATE_WATCH,
-        VELOCITY_MIN_PERIOD,
+        VERTICAL_MIN_PERIOD,
         |estimate| {
             let msg = VerticalStateData {
                 height_m: estimate.height_msl_m,
@@ -206,28 +99,6 @@ async fn vertical_state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'s
             send(can_tx, msg).await;
         }
     );
-}
-
-#[embassy_executor::task]
-async fn inertial_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::ImuData;
-    watch_loop!(signals::INERTIAL_WATCH, INERTIAL_MIN_PERIOD, |inertial| {
-        let msg = ImuData {
-            acceleration_x: inertial.body_accel_x,
-            acceleration_y: inertial.body_accel_y,
-            acceleration_z: inertial.body_accel_z,
-            angular_velocity_x: inertial.body_gyro_x,
-            angular_velocity_y: inertial.body_gyro_y,
-            angular_velocity_z: inertial.body_gyro_z,
-            acceleration_north: inertial.ned_accel_north,
-            acceleration_east: inertial.ned_accel_east,
-            acceleration_down: inertial.ned_accel_down,
-            angular_velocity_north: inertial.ned_gyro_north,
-            angular_velocity_east: inertial.ned_gyro_east,
-            angular_velocity_down: inertial.ned_gyro_down,
-        };
-        send(can_tx, msg).await;
-    });
 }
 
 #[embassy_executor::task]

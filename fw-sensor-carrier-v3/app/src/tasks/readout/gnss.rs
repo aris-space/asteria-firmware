@@ -170,29 +170,12 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                     src: self.id,
                                     ts: Instant::now(),
                                     pvt: Pvt {
-                                        epoch_ms: pvt.itow(),
-                                        lon_deg: pvt.lon_degrees(),
-                                        lat_deg: pvt.lat_degrees(),
                                         fix_type: pvt.fix_type(),
                                         height_msl: pvt.height_msl() as f32,
-                                        num_satellites: pvt.num_satellites(),
-                                        heading_deg: pvt.heading_degrees() as f32,
-                                        heading_accuracy_estimate: pvt.heading_accuracy_estimate()
-                                            as f32,
-                                        heading_of_vehicle_deg: pvt.heading_of_vehicle_degrees()
-                                            as f32,
-                                        vel_north: pvt.vel_north() as f32,
-                                        vel_east: pvt.vel_east() as f32,
                                         vel_down: pvt.vel_down() as f32,
                                         pdop: pvt.pdop(),
                                         vert_accuracy: pvt.vert_accuracy(),
-                                        horiz_accuracy: pvt.horiz_accuracy(),
                                         speed_accuracy_mps: pvt.speed_accuracy_estimate() as f32,
-                                        magnetic_declination_deg: pvt.magnetic_declination_degrees()
-                                            as f32,
-                                        magnetic_declination_accuracy_deg: pvt
-                                            .magnetic_declination_accuracy_degrees()
-                                            as f32,
                                     },
                                 };
                                 signals::submit_gnss_sample(calibration::gnss::apply_calibration(

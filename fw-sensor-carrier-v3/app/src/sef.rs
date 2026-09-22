@@ -93,20 +93,6 @@ pub fn gnss_measurement(input: GnssVerticalInput) -> GnssSample<VerticalGnssMeas
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct GnssEpoch {
-    pub receiver: usize,
-    pub epoch_ms: u32,
-    pub time_us: u64,
-}
-
-/// Only samples from distinct receivers and the same GNSS epoch may be blended.
-pub fn pairable_epoch(first: GnssEpoch, second: GnssEpoch, maximum_span_us: u64) -> bool {
-    first.receiver != second.receiver
-        && first.epoch_ms == second.epoch_ms
-        && first.time_us.abs_diff(second.time_us) <= maximum_span_us
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,50 +127,5 @@ mod tests {
         assert_eq!(sample.measurement.velocity_mps, 3.0);
         assert_eq!(sample.measurement.height_std_m, 2.5);
         assert_eq!(sample.measurement.velocity_std_mps, 1.0);
-    }
-
-    #[test]
-    fn pairing_requires_a_shared_navigation_epoch() {
-        let first = GnssEpoch {
-            receiver: 0,
-            epoch_ms: 10_000,
-            time_us: 1_000_000,
-        };
-        assert!(pairable_epoch(
-            first,
-            GnssEpoch {
-                receiver: 1,
-                epoch_ms: 10_000,
-                time_us: 1_120_000
-            },
-            150_000
-        ));
-        assert!(!pairable_epoch(
-            first,
-            GnssEpoch {
-                receiver: 1,
-                epoch_ms: 11_000,
-                time_us: 1_020_000
-            },
-            150_000
-        ));
-        assert!(!pairable_epoch(
-            first,
-            GnssEpoch {
-                receiver: 0,
-                epoch_ms: 10_000,
-                time_us: 1_020_000
-            },
-            150_000
-        ));
-        assert!(!pairable_epoch(
-            first,
-            GnssEpoch {
-                receiver: 1,
-                epoch_ms: 10_000,
-                time_us: 1_200_000
-            },
-            150_000
-        ));
     }
 }
