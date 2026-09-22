@@ -3,8 +3,25 @@
 //! Unit and epoch conversion at the SEF-light input boundary.
 
 use asteria_sef_light::{
-    GnssSample, ImuMeasurement, STANDARD_GRAVITY_MPS2, VerticalGnssMeasurement,
+    DualVerticalEstimator, EstimatorError, GnssSample, GnssSelectorConfig, ImuAttitudeConfig,
+    ImuMeasurement, STANDARD_GRAVITY_MPS2, SelectorConfig, VerticalEstimatorSelectorConfig,
+    VerticalFilterConfig, VerticalGnssMeasurement,
 };
+
+// Two 833 Hz IMUs produce about 667 events in 400 ms. The remaining capacity
+// covers barometers, GNSS, and interrupt scheduling jitter.
+pub const HISTORY_CAPACITY: usize = 768;
+pub const MAX_AIDING_DELAY_US: u64 = 400_000;
+pub type Estimator = DualVerticalEstimator<HISTORY_CAPACITY>;
+
+pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorError> {
+    let filter = VerticalFilterConfig::new(0.5, 5.0, [0.02, 0.02], 10.0, 3.0, [5.0, 5.0], 5.0)?;
+    let attitude = ImuAttitudeConfig::new(2.0, gyroscope_range_deg_s, 10.0, 300)?;
+    let selection = SelectorConfig::new(2.0, 250_000).ok_or(EstimatorError::OutOfRangeInput)?;
+    let selector = VerticalEstimatorSelectorConfig::new(0.95, 25.0, 10.0, 100_000, selection)?;
+    let gnss = GnssSelectorConfig::new(3, 4.0, 500_000).ok_or(EstimatorError::OutOfRangeInput)?;
+    Estimator::new(filter, [attitude; 2], selector, gnss, MAX_AIDING_DELAY_US)
+}
 
 #[derive(Clone, Copy)]
 pub struct BarometerReference {

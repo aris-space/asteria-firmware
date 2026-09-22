@@ -3,16 +3,14 @@
 use core::future::pending;
 
 use asteria_sef_light::{
-    DualVerticalEstimator, EstimatorError, GnssSample as FilterGnssSample, GnssSelectorConfig,
-    ImuAttitudeConfig, PressureMeasurement, SelectorConfig, VerticalEstimatorSelectorConfig,
-    VerticalFilterConfig, VerticalGnssMeasurement,
+    EstimatorError, GnssSample as FilterGnssSample, PressureMeasurement, VerticalGnssMeasurement,
 };
 use defmt::{Debug2Format, warn};
 use embassy_futures::select::{Either, Either6, select, select6};
 use embassy_time::{Duration, Instant, Timer};
 use sensor_carrier_sef_adapter::{
-    BarometerReference, GnssEpoch, GnssVerticalInput, gnss_measurement, imu_measurement,
-    pairable_epoch,
+    BarometerReference, Estimator, GnssEpoch, GnssVerticalInput, gnss_measurement, imu_measurement,
+    new_estimator, pairable_epoch,
 };
 
 use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, IMU_0, IMU_1};
@@ -20,16 +18,10 @@ use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::types::{BaroSample, GnssSample, ImuSample, VerticalEstimate};
 
-// Two 833 Hz IMUs produce about 667 events in 400 ms. The remaining capacity
-// covers barometers, GNSS, and interrupt scheduling jitter.
-const HISTORY_CAPACITY: usize = 768;
-const MAX_AIDING_DELAY_US: u64 = 400_000;
 const GNSS_PAIR_WAIT: Duration = Duration::from_millis(150);
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const BARO_HEIGHT_STD_M: f32 = 3.0;
-
-type Estimator = DualVerticalEstimator<HISTORY_CAPACITY>;
 
 enum Event {
     Imu(ImuSample),
@@ -54,14 +46,8 @@ struct Processor {
 
 impl Processor {
     fn new() -> Result<Self, EstimatorError> {
-        let filter = VerticalFilterConfig::new(0.5, 5.0, [0.02, 0.02], 10.0, 3.0, [5.0, 5.0], 5.0)?;
-        let attitude = ImuAttitudeConfig::new(2.0, GYRO_RANGE_DPS, 10.0, 300)?;
-        let selection = SelectorConfig::new(2.0, 250_000).ok_or(EstimatorError::OutOfRangeInput)?;
-        let selector = VerticalEstimatorSelectorConfig::new(0.95, 25.0, 10.0, 100_000, selection)?;
-        let gnss =
-            GnssSelectorConfig::new(3, 4.0, 500_000).ok_or(EstimatorError::OutOfRangeInput)?;
         Ok(Self {
-            estimator: Estimator::new(filter, [attitude; 2], selector, gnss, MAX_AIDING_DELAY_US)?,
+            estimator: new_estimator(GYRO_RANGE_DPS)?,
             baro_reference: [None; 2],
             launch_height_msl_m: None,
             pending_gnss: None,
