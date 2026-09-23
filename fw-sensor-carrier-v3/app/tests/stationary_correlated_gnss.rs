@@ -2,8 +2,8 @@
 
 use asteria_sef_light::{BARO_BUS_1, BARO_BUS_2, IMU_0, IMU_1, PressureMeasurement};
 use fw_sensor_carrier_v3::sef::{
-    GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement, imu_measurement,
-    new_estimator,
+    BarometerBiasTracker, GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement,
+    imu_measurement, new_estimator,
 };
 
 #[test]
@@ -65,6 +65,90 @@ fn stationary_barometers_reject_correlated_gnss_height_wander() {
         highest - lowest < 1.0,
         "stationary estimate wandered {} m, from {lowest} to {highest}",
         highest - lowest
+    );
+}
+
+#[test]
+fn stationary_height_survives_divergent_barometer_drift() {
+    let mut estimator = new_estimator(2_000.0).unwrap();
+    let mut bias_tracker = BarometerBiasTracker::default();
+    let imu = imu_measurement([0.0, 0.0, -1.006], [0.0; 3]);
+    let mut accepted_heights = 0;
+    let mut lowest = f32::INFINITY;
+    let mut highest = f32::NEG_INFINITY;
+
+    for step in 0..200_000_u64 {
+        let time_us = step * 1_200;
+        let time_s = time_us as f32 / 1_000_000.0;
+        estimator.update_imu(IMU_0, time_us, imu).unwrap();
+        estimator.update_imu(IMU_1, time_us, imu).unwrap();
+
+        if step.is_multiple_of(21) {
+            // The connected stationary board showed approximately these two
+            // pressure-altitude rates while its GNSS height stayed near 429 m.
+            for (index, (barometer, height_m)) in [
+                (BARO_BUS_1, 338.0 + 0.17 * time_s),
+                (BARO_BUS_2, 311.0 + 0.10 * time_s),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                estimator
+                    .update_pressure(
+                        time_us,
+                        barometer,
+                        PressureMeasurement {
+                            height_m,
+                            height_std_m: 1.5,
+                        },
+                    )
+                    .unwrap();
+                if let Some(walk_std) = bias_tracker.observe(index, time_us, height_m, 0.0) {
+                    estimator
+                        .set_barometer_bias_walk_std(barometer, walk_std)
+                        .unwrap();
+                }
+            }
+        }
+        if step.is_multiple_of(833) {
+            let gnss = gnss_measurement(GnssVerticalInput {
+                height_msl_m: 429.0,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm: 1_800,
+                speed_accuracy_mps: 0.15,
+                fix_tier: 3,
+                pdop_centi: 390,
+            });
+            let updates = estimator
+                .update_gnss(time_us, [None, Some(gnss)])
+                .unwrap()
+                .unwrap();
+            accepted_heights +=
+                u32::from(updates[estimator.selected_imu().index()].height.accepted);
+            if time_s >= 120.0 {
+                let height_m = estimator.selected_state().height_m;
+                lowest = lowest.min(height_m);
+                highest = highest.max(height_m);
+            }
+        }
+    }
+
+    let state = estimator.selected_state();
+    assert!(
+        accepted_heights > 230,
+        "GNSS corrections stopped: {accepted_heights}"
+    );
+    assert!(
+        (state.height_m - 429.0).abs() < 2.0,
+        "stationary height drifted: {state:?}"
+    );
+    assert!(
+        highest - lowest < 2.0,
+        "stationary height ranged from {lowest} to {highest}"
+    );
+    assert!(
+        state.velocity_mps.abs() < 0.1,
+        "stationary velocity: {state:?}"
     );
 }
 

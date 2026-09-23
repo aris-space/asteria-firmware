@@ -12,6 +12,11 @@ pub const HISTORY_CAPACITY: usize = 768;
 pub const MAX_AIDING_DELAY_US: u64 = 400_000;
 pub type Estimator = DualVerticalEstimator<HISTORY_CAPACITY>;
 pub const GNSS_HEIGHT_STD_FLOOR_M: f32 = 3.0;
+const STABLE_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.001;
+const DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.5;
+const BARO_TREND_WINDOW_US: u64 = 30_000_000;
+const BARO_DRIFT_START_M: f32 = 0.5;
+const BARO_DRIFT_STOP_M: f32 = 0.2;
 
 pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorError> {
     // At 833 Hz, per-sample acceleration uncertainty below a few m/s² makes the filter
@@ -21,9 +26,9 @@ pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorE
     // gives each barometer an absolute observation, and the bias states absorb
     // local sea-level pressure and sensor calibration offsets.
     let filter = VerticalFilterConfig::new(
-        10.0,           // healthy acceleration noise, m/s² per sample
-        20.0,           // degraded acceleration noise, m/s² per sample
-        [0.001, 0.001], // barometer-bias random walk, m/√s
+        10.0,                                    // healthy acceleration noise, m/s² per sample
+        20.0,                                    // degraded acceleration noise, m/s² per sample
+        [STABLE_BARO_BIAS_WALK_M_PER_SQRT_S; 2], // barometer-bias random walk, m/√s
         1_000.0,        // initial height uncertainty, m; GNSS establishes MSL
         3.0,            // initial vertical-velocity uncertainty, m/s
         [200.0, 200.0], // initial pressure-altitude bias uncertainty, m
@@ -58,6 +63,54 @@ pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorE
     )
     .ok_or(EstimatorError::OutOfRangeInput)?;
     Estimator::new(filter, [attitude; 2], selector, gnss, MAX_AIDING_DELAY_US)
+}
+
+/// Detects pressure-altitude change that GNSS vertical velocity cannot explain.
+/// It changes only the bias process noise; SEF-light still estimates both biases.
+#[derive(Default)]
+pub struct BarometerBiasTracker {
+    window_start: [Option<(u64, f32, f32)>; 2],
+    drifting: [bool; 2],
+}
+
+impl BarometerBiasTracker {
+    pub fn reset_windows(&mut self) {
+        self.window_start = [None; 2];
+    }
+
+    pub fn observe(
+        &mut self,
+        index: usize,
+        time_us: u64,
+        pressure_altitude_m: f32,
+        gnss_displacement_m: f32,
+    ) -> Option<f32> {
+        let Some((start_us, start_height_m, start_displacement_m)) = self.window_start[index]
+        else {
+            self.window_start[index] = Some((time_us, pressure_altitude_m, gnss_displacement_m));
+            return None;
+        };
+        if time_us.saturating_sub(start_us) < BARO_TREND_WINDOW_US {
+            return None;
+        }
+        self.window_start[index] = Some((time_us, pressure_altitude_m, gnss_displacement_m));
+        let unexplained_change_m =
+            (pressure_altitude_m - start_height_m) - (gnss_displacement_m - start_displacement_m);
+        let should_drift = if self.drifting[index] {
+            unexplained_change_m.abs() >= BARO_DRIFT_STOP_M
+        } else {
+            unexplained_change_m.abs() > BARO_DRIFT_START_M
+        };
+        if should_drift == self.drifting[index] {
+            return None;
+        }
+        self.drifting[index] = should_drift;
+        Some(if should_drift {
+            DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S
+        } else {
+            STABLE_BARO_BIAS_WALK_M_PER_SQRT_S
+        })
+    }
 }
 
 pub fn barometric_pressure_altitude_m(pressure_mbar: f32) -> Option<f32> {
@@ -204,6 +257,21 @@ mod tests {
         assert!(barometric_pressure_altitude_m(899.0).unwrap() > at_900_mbar + 9.0);
         assert_eq!(barometric_pressure_altitude_m(1_013.25), Some(0.0));
         assert_eq!(barometric_pressure_altitude_m(0.0), None);
+    }
+
+    #[test]
+    fn barometer_bias_tracking_uses_change_unexplained_by_gnss_motion() {
+        let mut tracker = BarometerBiasTracker::default();
+        assert_eq!(tracker.observe(0, 0, 300.0, 0.0), None);
+        assert_eq!(tracker.observe(0, 30_000_000, 302.0, 2.0), None);
+        assert_eq!(
+            tracker.observe(0, 60_000_000, 307.0, 2.0),
+            Some(DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S)
+        );
+        assert_eq!(
+            tracker.observe(0, 90_000_000, 309.0, 4.0),
+            Some(STABLE_BARO_BIAS_WALK_M_PER_SQRT_S)
+        );
     }
 
     #[test]

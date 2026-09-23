@@ -4,7 +4,7 @@ use asteria_sef_light::{EstimatorError, PressureMeasurement};
 use defmt::{Debug2Format, info, warn};
 use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
-    Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
+    BarometerBiasTracker, Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
     barometric_pressure_altitude_m, gnss_measurement, imu_measurement, new_estimator,
 };
 
@@ -18,6 +18,7 @@ const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
 const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
+const GNSS_VELOCITY_FRESH: Duration = Duration::from_secs(2);
 const GNSS_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
 // A four-satellite startup fix reported a misleading 2.7 m vAcc at PDOP 9.4.
 const GNSS_MAX_PDOP_CENTI: u16 = 600;
@@ -57,6 +58,9 @@ struct Processor {
     gnss_latest: [Option<GnssSample>; 2],
     selected_gnss: Option<GnssId>,
     last_gnss_fusion: Option<Instant>,
+    last_gnss_velocity: Option<(Instant, f32)>,
+    gnss_displacement_m: f32,
+    barometer_bias_tracker: BarometerBiasTracker,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
     last_state_log: Option<Instant>,
@@ -79,6 +83,9 @@ impl Processor {
             gnss_latest: [None; 2],
             selected_gnss: None,
             last_gnss_fusion: None,
+            last_gnss_velocity: None,
+            gnss_displacement_m: 0.0,
+            barometer_bias_tracker: BarometerBiasTracker::default(),
             last_output: None,
             last_status_log: None,
             last_state_log: None,
@@ -149,6 +156,24 @@ impl Processor {
                 height_std_m: BARO_HEIGHT_STD_M,
             },
         )?;
+        if self.gnss_ready
+            && self.last_gnss_velocity.is_some_and(|(last, _)| {
+                sample.ts.saturating_duration_since(last) <= GNSS_VELOCITY_FRESH
+            })
+        {
+            if let Some(walk_std) = self.barometer_bias_tracker.observe(
+                index,
+                sample.ts.as_micros(),
+                height_m,
+                self.gnss_displacement_m,
+            ) {
+                self.estimator
+                    .set_barometer_bias_walk_std(barometer, walk_std)?;
+                info!("SEF baro {}: bias walk={} m/sqrt(s)", sample.src, walk_std);
+            }
+        } else {
+            self.barometer_bias_tracker.reset_windows();
+        }
         Ok(())
     }
 
@@ -188,6 +213,9 @@ impl Processor {
             self.estimator = new_estimator(GYRO_RANGE_DPS)?;
             self.last_logged_state = [None; 2];
             self.gnss_anchor_ready = [false; 2];
+            self.last_gnss_velocity = None;
+            self.gnss_displacement_m = 0.0;
+            self.barometer_bias_tracker = BarometerBiasTracker::default();
         }
         // NavPVT arrives at 20 Hz, but adjacent GNSS heights are strongly
         // correlated. Fuse them at 1 Hz while retaining the full receiver rate.
@@ -233,6 +261,23 @@ impl Processor {
             if selected.height.accepted {
                 self.gnss_ready = true;
                 self.gnss_height_std_m = height_std_m;
+            }
+            if selected.velocity.accepted {
+                let velocity_mps = -best.pvt.vel_down;
+                if let Some((last, previous_velocity_mps)) = self.last_gnss_velocity {
+                    let elapsed = sample.ts.saturating_duration_since(last);
+                    if elapsed <= GNSS_VELOCITY_FRESH {
+                        self.gnss_displacement_m += 0.5
+                            * (previous_velocity_mps + velocity_mps)
+                            * (elapsed.as_micros() as f32 / 1_000_000.0);
+                    } else {
+                        self.barometer_bias_tracker.reset_windows();
+                    }
+                }
+                self.last_gnss_velocity = Some((sample.ts, velocity_mps));
+            } else {
+                self.last_gnss_velocity = None;
+                self.barometer_bias_tracker.reset_windows();
             }
             self.last_gnss_fusion = Some(sample.ts);
         }
