@@ -49,7 +49,8 @@ QUEUE = re.compile(
 )
 ATTITUDE = re.compile(
     r"SEF (?P<source>IMU_[01]): h=(?P<h>-?[\d.]+) dh=[^,]+, "
-    r"v=(?P<v>-?[\d.]+) dv=[^,]+, .*"
+    r"v=(?P<v>-?[\d.]+) dv=[^,]+, "
+    r"bias=\[(?P<b0>[^,]+),(?P<b1>[^]]+)\] m, .*"
     r"score=(?P<score>[\d.]+), q=\[(?P<q>[^]]+)\].*"
     r"mag_ignored=(?P<ignored>true|false)"
 )
@@ -188,6 +189,12 @@ def report(rows, start, end):
                 f"gyro_mean_dps={[round(value, 4) for value in gyro_mean]} "
                 f"max_gyro_rad_s={max(float(item['max_gyro']) for item in imu):.4f}"
             )
+    attitude = in_window(rows["attitude"], start, end, "IMU_0")
+    if attitude:
+        print(
+            "  IMU_0_barometer_bias_m",
+            [round(statistics.fmean(float(item[key]) for item in attitude), 3) for key in ("b0", "b1")],
+        )
     for source in ("MAG_BUS_1", "MAG_BUS_2"):
         mag = in_window(rows["mag"], start, end, source)
         if mag:
