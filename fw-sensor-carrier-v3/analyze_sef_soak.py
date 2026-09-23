@@ -10,7 +10,10 @@ import statistics
 from collections import defaultdict
 
 
-LINE = re.compile(r"^(?P<time>\d+\.\d+) \[[^]]+\] (?P<message>.*)$")
+LINE = re.compile(
+    r"^(?:\d{4}-\d\d-\d\dT\S+ )?"
+    r"(?P<time>\d+\.\d+) \[[^]]+\] (?P<message>.*)$"
+)
 STATE = re.compile(
     r"SEF-light: altitude_msl=(?P<h>-?[\d.]+)±[^ ]+ m, "
     r"v=(?P<v>-?[\d.]+)±[^ ]+ m/s, IMU=(?P<imu>IMU_[01])"
