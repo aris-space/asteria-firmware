@@ -19,10 +19,13 @@ const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
 const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
+const GNSS_BOOTSTRAP_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
+const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
 const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
 const IMU_DIAGNOSTIC_PERIOD: Duration = Duration::from_secs(10);
 const IMU_MERGE_HOLDBACK: Duration = Duration::from_millis(35);
-const BARO_HEIGHT_STD_M: f32 = 3.0;
+// Each stationary barometer varied by about 0.5 m in the bench run.
+const BARO_HEIGHT_STD_M: f32 = 1.5;
 
 enum Event {
     Imu(ImuSample),
@@ -148,7 +151,9 @@ impl Processor {
         let [first, second] = self.gnss_latest.map(|candidate| {
             candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
         });
-        let best = match (first, second) {
+        // Vertical accuracy estimates height error directly. Keep the current
+        // fresh receiver until another reports at least 1.5x better accuracy.
+        let candidate = match (first, second) {
             (Some(first), Some(second)) => {
                 if first.pvt.vert_accuracy < second.pvt.vert_accuracy {
                     first
@@ -160,13 +165,33 @@ impl Processor {
             (None, Some(second)) => second,
             (None, None) => return Ok(()),
         };
+        let best = match self
+            .selected_gnss
+            .and_then(|source| [first, second][source.index()])
+        {
+            Some(current)
+                if current.src != candidate.src
+                    && (candidate.pvt.vert_accuracy as f32) * GNSS_SWITCH_IMPROVEMENT
+                        >= current.pvt.vert_accuracy as f32 =>
+            {
+                current
+            }
+            _ => candidate,
+        };
+        // Establish the MSL datum from a usable fix. Indoors, the first
+        // receiver can report a 3D fix tens of metres away from the later,
+        // more precise receiver. A bad first datum makes that fix look like
+        // an outlier to the filter.
+        if !self.gnss_ready && best.pvt.vert_accuracy > GNSS_BOOTSTRAP_MAX_VERTICAL_ACCURACY_MM {
+            return Ok(());
+        }
         if sample.src != best.src {
             return Ok(());
         }
         if self.selected_gnss != Some(best.src) {
             info!(
-                "SEF GNSS source: {} (vAcc={} mm)",
-                best.src, best.pvt.vert_accuracy
+                "SEF GNSS source: {} (vAcc={} mm, PDOP={})",
+                best.src, best.pvt.vert_accuracy, best.pvt.pdop
             );
             self.selected_gnss = Some(best.src);
             self.last_gnss_fusion = None;
@@ -181,12 +206,12 @@ impl Processor {
         }
         let mut measurements = [None, None];
         measurements[best.src.index()] = Some(gnss_measurement(GnssVerticalInput {
-            height_msl_m: sample.pvt.height_msl,
-            velocity_down_mps: sample.pvt.vel_down,
-            vertical_accuracy_mm: sample.pvt.vert_accuracy,
-            speed_accuracy_mps: sample.pvt.speed_accuracy_mps,
+            height_msl_m: best.pvt.height_msl,
+            velocity_down_mps: best.pvt.vel_down,
+            vertical_accuracy_mm: best.pvt.vert_accuracy,
+            speed_accuracy_mps: best.pvt.speed_accuracy_mps,
             fix_tier: 3,
-            pdop_centi: sample.pvt.pdop,
+            pdop_centi: best.pvt.pdop,
         }));
         let height_std_m = measurements[best.src.index()]
             .expect("GNSS measurement set")
@@ -199,6 +224,11 @@ impl Processor {
             if updates.iter().any(|update| update.height.accepted) {
                 self.gnss_ready = true;
                 self.gnss_height_std_m = height_std_m;
+            } else if !self.gnss_ready {
+                warn!(
+                    "SEF GNSS bootstrap height rejected: {} m",
+                    best.pvt.height_msl
+                );
             }
             self.last_gnss_fusion = Some(sample.ts);
         }
@@ -226,7 +256,7 @@ impl Processor {
                 .last_status_log
                 .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
             {
-                info!("SEF-light: waiting for GNSS 3D fix to establish MSL altitude");
+                info!("SEF-light: waiting for usable GNSS fix to establish MSL altitude");
                 self.last_status_log = Some(now);
             }
             return;
