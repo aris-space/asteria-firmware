@@ -34,6 +34,8 @@ During the first 22 minutes of the longer stationary soak, both stored gyro cali
 
 An offline SEF-light replay held both barometer altitudes and both IMUs stationary while the reported GNSS height rose 10 m over 300 s with zero GNSS vertical velocity. The estimate moved 4.51 m from 30 s to 300 s with either zero barometer bias walk or the configured 0.001 m/√s; increasing the walk to 0.01 m/√s moved it 4.72 m. Varying barometer observation standard deviation from 0.3 m to 3 m likewise produced 4.50–4.58 m drift. Raising GNSS height uncertainty from 3 m to 20 m still produced 4.51–4.56 m drift; at 100 m, the initial height was less anchored and drift increased to 6.14 m. These fixed uncertainty adjustments do not reject a sustained correlated GNSS height error by themselves.
 
+In the same replay, forcing GNSS vertical-velocity uncertainty down from its representative 0.15 m/s to 0.01 m/s reduced the final velocity estimate from +0.018 m/s to +0.007 m/s but left the 4.51 m height drift unchanged. The indoor receiver reports speed accuracy near 0.15 m/s, so the tighter velocity weight is not justified by these measurements.
+
 ## Selection and output policy
 
 GNSS readout requires the UBX `GPS_FIX_OK` flag. Vertical fusion requires a 3D fix and `vAcc` at most 3 m. Among fresh receivers, lower `vAcc` wins; the selected receiver stays until the other is at least 1.5 times better. SEF-light receives only the chosen receiver, so it does not blend the two heights. `vAcc` measures the height dimension directly. PDOP is logged for diagnosis but does not gate fusion; `hAcc` would be relevant to a horizontal position estimator, which SEF-light does not provide.
