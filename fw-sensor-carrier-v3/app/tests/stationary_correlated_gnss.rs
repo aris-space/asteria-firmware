@@ -20,10 +20,10 @@ fn stationary_barometers_reject_correlated_gnss_height_wander() {
 
         // A 7 m peak-to-peak wander over four minutes is representative of
         // the stationary indoor receiver trace. Its reported vAcc was <1 m.
-        if step.is_multiple_of(833) {
+        if step.is_multiple_of(42) {
             let time_s = time_us as f32 / 1_000_000.0;
             let height_msl_m = 423.5 + 3.5 * (time_s * core::f32::consts::TAU / 240.0).cos();
-            let gnss = gnss_measurement(GnssVerticalInput {
+            let mut gnss = gnss_measurement(GnssVerticalInput {
                 height_msl_m,
                 velocity_down_mps: 0.0,
                 vertical_accuracy_mm: 600,
@@ -31,6 +31,7 @@ fn stationary_barometers_reject_correlated_gnss_height_wander() {
                 fix_tier: 3,
                 pdop_centi: 150,
             });
+            gnss.measurement.height_std_m *= libm::sqrtf(20.0);
             estimator.update_gnss(time_us, [None, Some(gnss)]).unwrap();
         }
         if step.is_multiple_of(21) {
@@ -48,7 +49,7 @@ fn stationary_barometers_reject_correlated_gnss_height_wander() {
             }
         }
 
-        if time_us >= 120_000_000 && step.is_multiple_of(833) {
+        if time_us >= 120_000_000 && step.is_multiple_of(42) {
             let height_m = estimator.selected_state().height_m;
             lowest = lowest.min(height_m);
             highest = highest.max(height_m);
@@ -72,10 +73,12 @@ fn stationary_barometers_reject_correlated_gnss_height_wander() {
 fn stationary_height_survives_divergent_barometer_drift() {
     let mut estimator = new_estimator(2_000.0).unwrap();
     let mut bias_tracker = BarometerBiasTracker::default();
-    let imu = imu_measurement([0.0, 0.0, -1.006], [0.0; 3]);
+    let imu = imu_measurement([0.0, 0.0, -1.02], [0.0; 3]);
     let mut accepted_heights = 0;
     let mut lowest = f32::INFINITY;
     let mut highest = f32::NEG_INFINITY;
+    let mut velocity_sum = 0.0;
+    let mut velocity_samples = 0;
 
     for step in 0..200_000_u64 {
         let time_us = step * 1_200;
@@ -110,8 +113,8 @@ fn stationary_height_survives_divergent_barometer_drift() {
                 }
             }
         }
-        if step.is_multiple_of(833) {
-            let gnss = gnss_measurement(GnssVerticalInput {
+        if step.is_multiple_of(42) {
+            let mut gnss = gnss_measurement(GnssVerticalInput {
                 height_msl_m: 429.0,
                 velocity_down_mps: 0.0,
                 vertical_accuracy_mm: 1_800,
@@ -119,6 +122,7 @@ fn stationary_height_survives_divergent_barometer_drift() {
                 fix_tier: 3,
                 pdop_centi: 390,
             });
+            gnss.measurement.height_std_m *= libm::sqrtf(20.0);
             let updates = estimator
                 .update_gnss(time_us, [None, Some(gnss)])
                 .unwrap()
@@ -129,13 +133,15 @@ fn stationary_height_survives_divergent_barometer_drift() {
                 let height_m = estimator.selected_state().height_m;
                 lowest = lowest.min(height_m);
                 highest = highest.max(height_m);
+                velocity_sum += estimator.selected_state().velocity_mps;
+                velocity_samples += 1;
             }
         }
     }
 
     let state = estimator.selected_state();
     assert!(
-        accepted_heights > 230,
+        accepted_heights > 1100,
         "GNSS corrections stopped: {accepted_heights}"
     );
     assert!(
@@ -150,6 +156,11 @@ fn stationary_height_survives_divergent_barometer_drift() {
         state.velocity_mps.abs() < 0.1,
         "stationary velocity: {state:?}"
     );
+    assert!(
+        (velocity_sum / velocity_samples as f32).abs() < 0.025,
+        "mean stationary velocity: {}",
+        velocity_sum / velocity_samples as f32
+    );
 }
 
 #[test]
@@ -159,16 +170,17 @@ fn one_metre_lift_changes_msl_height_with_barometer_bias() {
     for step in 0..15_000_u64 {
         let time_us = step * 1_200;
         let time_s = time_us as f32 / 1_000_000.0;
-        let (height_m, acceleration_up_mps2) = if time_s < 10.0 {
-            (0.0, 0.0)
+        let (height_m, velocity_up_mps, acceleration_up_mps2) = if time_s < 10.0 {
+            (0.0, 0.0, 0.0)
         } else if time_s < 11.0 {
             let phase = (time_s - 10.0) * core::f32::consts::PI;
             (
                 0.5 * (1.0 - phase.cos()),
+                0.5 * core::f32::consts::PI * phase.sin(),
                 0.5 * core::f32::consts::PI.powi(2) * phase.cos(),
             )
         } else {
-            (1.0, 0.0)
+            (1.0, 0.0, 0.0)
         };
         let imu = imu_measurement(
             [0.0, 0.0, -(9.80665 + acceleration_up_mps2) / 9.80665],
@@ -177,16 +189,17 @@ fn one_metre_lift_changes_msl_height_with_barometer_bias() {
         estimator.update_imu(IMU_0, time_us, imu).unwrap();
         estimator.update_imu(IMU_1, time_us, imu).unwrap();
 
-        if step.is_multiple_of(833) {
+        if step.is_multiple_of(42) {
             let height_msl_m = 420.0 + height_m;
-            let gnss = gnss_measurement(GnssVerticalInput {
+            let mut gnss = gnss_measurement(GnssVerticalInput {
                 height_msl_m,
-                velocity_down_mps: 0.0,
+                velocity_down_mps: -velocity_up_mps,
                 vertical_accuracy_mm: 600,
                 speed_accuracy_mps: 0.1,
                 fix_tier: 3,
                 pdop_centi: 150,
             });
+            gnss.measurement.height_std_m *= libm::sqrtf(20.0);
             estimator.update_gnss(time_us, [None, Some(gnss)]).unwrap();
         }
         if step.is_multiple_of(21) {

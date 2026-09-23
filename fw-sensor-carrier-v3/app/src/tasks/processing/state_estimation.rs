@@ -17,7 +17,8 @@ use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, StateEstimate};
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
-const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
+const GNSS_FUSION_PERIOD: Duration = Duration::from_millis(45);
+const GNSS_FUSIONS_PER_SECOND: f32 = 20.0;
 const GNSS_VELOCITY_FRESH: Duration = Duration::from_secs(2);
 const GNSS_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
 // A four-satellite startup fix reported a misleading 2.7 m vAcc at PDOP 9.4.
@@ -217,8 +218,10 @@ impl Processor {
             self.gnss_displacement_m = 0.0;
             self.barometer_bias_tracker = BarometerBiasTracker::default();
         }
-        // NavPVT arrives at 20 Hz, but adjacent GNSS heights are strongly
-        // correlated. Fuse them at 1 Hz while retaining the full receiver rate.
+        // NavPVT arrives at 20 Hz. Fuse its velocity at that rate to prevent
+        // a stationary accelerometer offset from building up between updates.
+        // Adjacent GNSS heights are correlated, so preserve roughly the same
+        // height information per second as the previous 1 Hz fusion.
         if self
             .last_gnss_fusion
             .is_some_and(|last| sample.ts.saturating_duration_since(last) < GNSS_FUSION_PERIOD)
@@ -226,18 +229,17 @@ impl Processor {
             return Ok(());
         }
         let mut measurements = [None, None];
-        measurements[best.src.index()] = Some(gnss_measurement(GnssVerticalInput {
+        let mut measurement = gnss_measurement(GnssVerticalInput {
             height_msl_m: best.pvt.height_msl,
             velocity_down_mps: best.pvt.vel_down,
             vertical_accuracy_mm: best.pvt.vert_accuracy,
             speed_accuracy_mps: best.pvt.speed_accuracy_mps,
             fix_tier: 3,
             pdop_centi: best.pvt.pdop,
-        }));
-        let height_std_m = measurements[best.src.index()]
-            .expect("GNSS measurement set")
-            .measurement
-            .height_std_m;
+        });
+        let height_std_m = measurement.measurement.height_std_m;
+        measurement.measurement.height_std_m *= libm::sqrtf(GNSS_FUSIONS_PER_SECOND);
+        measurements[best.src.index()] = Some(measurement);
         if let Some(updates) = self
             .estimator
             .update_gnss(sample.ts.as_micros(), measurements)?

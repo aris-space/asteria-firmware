@@ -56,10 +56,10 @@ fn firmware_units_track_arrival_timestamped_ascent() {
 
         // Model NavPVT arriving about 100 ms after its measurement epoch. The
         // firmware timestamps the received packet, so exercise that path here.
-        if step >= NAV_PVT_DELAY_STEPS && (step - NAV_PVT_DELAY_STEPS).is_multiple_of(166) {
+        if step >= NAV_PVT_DELAY_STEPS && (step - NAV_PVT_DELAY_STEPS).is_multiple_of(42) {
             let epoch_time_us = (step - NAV_PVT_DELAY_STEPS) * SAMPLE_PERIOD_US;
             let (epoch_height_m, epoch_velocity_mps, _) = truth(epoch_time_us);
-            let gnss = gnss_measurement(GnssVerticalInput {
+            let mut gnss = gnss_measurement(GnssVerticalInput {
                 height_msl_m: 1_600.0 + epoch_height_m,
                 velocity_down_mps: -epoch_velocity_mps,
                 vertical_accuracy_mm: 1_000,
@@ -67,6 +67,7 @@ fn firmware_units_track_arrival_timestamped_ascent() {
                 fix_tier: 3,
                 pdop_centi: 120,
             });
+            gnss.measurement.height_std_m *= libm::sqrtf(20.0);
             estimator
                 .update_gnss(time_us, [Some(gnss), Some(gnss)])
                 .unwrap();
