@@ -276,7 +276,7 @@ fn weak_receiver_after_good_fix_does_not_drag_stationary_height_far() {
             }
         }
         if step.is_multiple_of(42) {
-            let good_receiver = time_us < 120_000_000 || time_us >= 420_000_000;
+            let good_receiver = !(120_000_000..420_000_000).contains(&time_us);
             let (source, height, vacc, pdop) = if good_receiver {
                 (1, 415.0, 1_200, 313)
             } else {
