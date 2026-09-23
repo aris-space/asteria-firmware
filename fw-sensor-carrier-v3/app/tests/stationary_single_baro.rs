@@ -78,7 +78,7 @@ fn raw_pressure_altitudes_before_gnss_converge_to_msl_with_sef_biases() {
         barometric_pressure_altitude_m(979.0).unwrap(),
     ];
 
-    for step in 0..10_000_u64 {
+    for step in 0..30_000_u64 {
         let time_us = step * 1_200;
         estimator
             .update_imu(IMU_0, time_us, stationary_imu)
@@ -102,7 +102,7 @@ fn raw_pressure_altitudes_before_gnss_converge_to_msl_with_sef_biases() {
                     .unwrap();
             }
         }
-        if step == 833 {
+        if step == 8_333 {
             let gnss = gnss_measurement(GnssVerticalInput {
                 height_msl_m: 420.0,
                 velocity_down_mps: 0.0,
@@ -130,6 +130,25 @@ fn raw_pressure_altitudes_before_gnss_converge_to_msl_with_sef_biases() {
             "unexpected barometer bias: {state:?}"
         );
     }
+}
+
+#[test]
+fn delayed_first_fix_can_initialize_a_fresh_estimator() {
+    let mut estimator = new_estimator(2_000.0).unwrap();
+    let gnss = gnss_measurement(GnssVerticalInput {
+        height_msl_m: 420.0,
+        velocity_down_mps: 0.0,
+        vertical_accuracy_mm: 1_000,
+        speed_accuracy_mps: 0.15,
+        fix_tier: 3,
+        pdop_centi: 180,
+    });
+    let updates = estimator
+        .update_gnss(10_000_000, [Some(gnss), None])
+        .unwrap()
+        .unwrap();
+    assert!(updates.iter().all(|update| update.height.accepted));
+    assert!((estimator.selected_state().height_m - 420.0).abs() < 0.01);
 }
 
 #[test]

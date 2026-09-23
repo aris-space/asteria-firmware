@@ -66,8 +66,10 @@ pub struct ImuWindow {
     samples: u32,
     gravity_error_sum: f32,
     gravity_error_square_sum: f32,
+    max_acceleration_mps2: f32,
     gyro_sum: [f32; 3],
     gyro_square_sum: f32,
+    max_gyro_rad_s: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -75,8 +77,10 @@ pub struct ImuWindowSummary {
     pub samples: u32,
     pub gravity_error_mean_mps2: f32,
     pub gravity_error_noise_mps2: f32,
+    pub max_acceleration_mps2: f32,
     pub gyro_mean_rad_s: [f32; 3],
     pub gyro_noise_rad_s: f32,
+    pub max_gyro_rad_s: f32,
 }
 
 impl ImuWindow {
@@ -90,10 +94,13 @@ impl ImuWindow {
             .iter()
             .map(|value| value * value)
             .sum::<f32>();
-        let gravity_error = libm::sqrtf(acceleration_square) - STANDARD_GRAVITY_MPS2;
+        let acceleration = libm::sqrtf(acceleration_square);
+        let gravity_error = acceleration - STANDARD_GRAVITY_MPS2;
         self.samples += 1;
         self.gravity_error_sum += gravity_error;
         self.gravity_error_square_sum += gravity_error * gravity_error;
+        self.max_acceleration_mps2 = self.max_acceleration_mps2.max(acceleration);
+        let mut gyro_square = 0.0;
         for (sum, rate) in self
             .gyro_sum
             .iter_mut()
@@ -101,7 +108,9 @@ impl ImuWindow {
         {
             *sum += rate;
             self.gyro_square_sum += rate * rate;
+            gyro_square += rate * rate;
         }
+        self.max_gyro_rad_s = self.max_gyro_rad_s.max(libm::sqrtf(gyro_square));
     }
 
     pub fn summary(self) -> Option<ImuWindowSummary> {
@@ -119,10 +128,12 @@ impl ImuWindow {
                 (self.gravity_error_square_sum / count - gravity_error_mean * gravity_error_mean)
                     .max(0.0),
             ),
+            max_acceleration_mps2: self.max_acceleration_mps2,
             gyro_mean_rad_s: gyro_mean,
             gyro_noise_rad_s: libm::sqrtf(
                 (self.gyro_square_sum / count - gyro_mean_square).max(0.0),
             ),
+            max_gyro_rad_s: self.max_gyro_rad_s,
         })
     }
 }

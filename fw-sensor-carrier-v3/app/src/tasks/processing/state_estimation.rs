@@ -179,6 +179,12 @@ impl Processor {
         let Some(best) = self.select_gnss(sample) else {
             return Ok(());
         };
+        if !self.gnss_ready {
+            // An unanchored barometer/IMU startup can leave the vertical state
+            // too far from MSL for the innovation gate to accept the first fix.
+            self.estimator = new_estimator(GYRO_RANGE_DPS)?;
+            self.last_logged_state = [None; 2];
+        }
         // NavPVT arrives at 20 Hz, but adjacent GNSS heights are strongly
         // correlated. Fuse them at 1 Hz while retaining the full receiver rate.
         if self
@@ -396,15 +402,17 @@ impl Processor {
             let window_s = IMU_DIAGNOSTIC_PERIOD.as_secs() as f32;
             let free_height_drift_m = 0.5 * window_s * window_s * summary.gravity_error_mean_mps2;
             info!(
-                "IMU {} bench: n={}, gravity_error_mean={} m/s2, gravity_noise={} m/s2, gyro_mean=[{},{},{}] rad/s, gyro_noise={} rad/s, free_dh_10s={} m",
+                "IMU {} bench: n={}, gravity_error_mean={} m/s2, gravity_noise={} m/s2, max_accel={} m/s2, gyro_mean=[{},{},{}] rad/s, gyro_noise={} rad/s, max_gyro={} rad/s, free_dh_10s={} m",
                 id,
                 summary.samples,
                 summary.gravity_error_mean_mps2,
                 summary.gravity_error_noise_mps2,
+                summary.max_acceleration_mps2,
                 summary.gyro_mean_rad_s[0],
                 summary.gyro_mean_rad_s[1],
                 summary.gyro_mean_rad_s[2],
                 summary.gyro_noise_rad_s,
+                summary.max_gyro_rad_s,
                 free_height_drift_m,
             );
         }
