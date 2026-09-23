@@ -125,3 +125,66 @@ fn one_metre_lift_changes_msl_height_with_barometer_bias() {
         "lift estimate: {altitude_msl_m}"
     );
 }
+
+#[test]
+fn stationary_consistency_selects_the_better_imu_and_fails_over_if_it_stales() {
+    let mut estimator = new_estimator(2_000.0).unwrap();
+    let imu0 = imu_measurement([0.0, 0.0, -1.006], [0.0; 3]);
+    let imu1 = imu_measurement([0.0, 0.0, -1.03], [0.0; 3]);
+    let mut settled_switches = 0;
+    let mut previous = IMU_1;
+
+    for step in 0..25_000_u64 {
+        let time_us = step * 1_200;
+        // Begin with IMU_1 selected, then let common aiding compare the chains.
+        estimator.update_imu(IMU_1, time_us, imu1).unwrap();
+        estimator.update_imu(IMU_0, time_us, imu0).unwrap();
+        if step == 1 {
+            assert_eq!(estimator.selected_imu(), IMU_1);
+        }
+        if step.is_multiple_of(833) {
+            let gnss = gnss_measurement(GnssVerticalInput {
+                height_msl_m: 420.0,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm: 700,
+                speed_accuracy_mps: 0.15,
+                fix_tier: 3,
+                pdop_centi: 150,
+            });
+            estimator.update_gnss(time_us, [None, Some(gnss)]).unwrap();
+        }
+        if step.is_multiple_of(21) {
+            for (barometer, pressure_mbar) in [(BARO_BUS_1, 977.0), (BARO_BUS_2, 978.5)] {
+                estimator
+                    .update_pressure(
+                        time_us,
+                        barometer,
+                        PressureMeasurement {
+                            height_m: barometric_pressure_altitude_m(pressure_mbar).unwrap(),
+                            height_std_m: 1.5,
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        let selected = estimator.selected_imu();
+        if selected != previous {
+            if time_us >= 1_000_000 {
+                settled_switches += 1;
+            }
+            previous = selected;
+        }
+    }
+
+    assert_eq!(estimator.selected_imu(), IMU_0);
+    assert_eq!(
+        settled_switches, 1,
+        "selector switched {settled_switches} times after startup"
+    );
+
+    // A missing selected IMU must hand over without waiting for the quality dwell.
+    for step in 25_000..25_101_u64 {
+        estimator.update_imu(IMU_1, step * 1_200, imu1).unwrap();
+    }
+    assert_eq!(estimator.selected_imu(), IMU_1);
+}

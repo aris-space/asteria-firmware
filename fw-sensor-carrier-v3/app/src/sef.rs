@@ -15,7 +15,7 @@ pub const GNSS_HEIGHT_STD_FLOOR_M: f32 = 3.0;
 
 pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorError> {
     // At 833 Hz, per-sample acceleration uncertainty below a few m/s² makes the filter
-    // overconfident about velocity when an uncalibrated IMU has a persistent ~0.06 m/s² offset.
+    // overconfident about velocity with the measured persistent 0.06 and 0.14 m/s² offsets.
     // Keep enough process uncertainty for barometric and GNSS updates to correct that drift.
     // GNSS establishes absolute MSL height. A standard-atmosphere conversion
     // gives each barometer an absolute observation, and the bias states absorb
@@ -31,7 +31,11 @@ pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorE
     )?;
     let attitude = ImuAttitudeConfig::new(2.0, gyroscope_range_deg_s, 10.0, 300)?
         .with_magnetic_rejection(20.0)?;
-    let selection = SelectorConfig::new(2.0, 250_000).ok_or(EstimatorError::OutOfRangeInput)?;
+    // In stationary hardware runs healthy IMU consistency scores were near 0.03.
+    // A 0.003 margin exceeds observed reverse score excursions while allowing
+    // handover to the consistently lower-scoring chain. Wait beyond the 1 Hz
+    // GNSS correction interval so a single innovation cannot cause a round trip.
+    let selection = SelectorConfig::new(0.003, 1_500_000).ok_or(EstimatorError::OutOfRangeInput)?;
     let selector = VerticalEstimatorSelectorConfig::new(0.95, 25.0, 10.0, 100_000, selection)?;
     let gnss = GnssSelectorConfig::new(3, 4.0, 500_000).ok_or(EstimatorError::OutOfRangeInput)?;
     Estimator::new(filter, [attitude; 2], selector, gnss, MAX_AIDING_DELAY_US)
