@@ -8,7 +8,7 @@ use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDat
 
 use super::{I2C_RECOVERY_INTERVAL, MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
 use crate::calibration;
-use crate::resources::buses::{SharedI2c, SharedI2cBus};
+use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{MAGNETOMETER_STATUS, MagnetometerId, SensorStatus};
 use crate::signals;
 use crate::types::RawMagSample;
@@ -93,7 +93,7 @@ pub async fn init(bus: SharedI2cBus, id: MagnetometerId) -> Option<Sensor> {
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn read_task(mut sensor: Sensor, id: MagnetometerId) -> ! {
+pub async fn read_task(mut sensor: Sensor, bus: SharedI2cBus, id: MagnetometerId) -> ! {
     MAGNETOMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
     let mut errors: u8 = 0;
 
@@ -128,6 +128,7 @@ pub async fn read_task(mut sensor: Sensor, id: MagnetometerId) -> ! {
                         .store(SensorStatus::Disabled, Ordering::Relaxed);
                 }
                 if errors >= MAX_CONSECUTIVE_ERRORS {
+                    buses::recover(bus).await;
                     Timer::after(I2C_RECOVERY_INTERVAL).await;
                     continue;
                 }

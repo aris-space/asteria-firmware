@@ -8,7 +8,7 @@ use ms5607::{Ms5607, Oversampling};
 
 use super::{I2C_RECOVERY_INTERVAL, MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
 use crate::calibration;
-use crate::resources::buses::{SharedI2c, SharedI2cBus};
+use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{BAROMETER_STATUS, BarometerId, SensorStatus};
 use crate::signals;
 use crate::types::RawBaroSample;
@@ -47,7 +47,7 @@ pub async fn init(bus: SharedI2cBus, id: BarometerId) -> Option<Sensor> {
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn read_task(mut sensor: Sensor, id: BarometerId) -> ! {
+pub async fn read_task(mut sensor: Sensor, bus: SharedI2cBus, id: BarometerId) -> ! {
     BAROMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
     let mut errors: u8 = 0;
 
@@ -78,6 +78,7 @@ pub async fn read_task(mut sensor: Sensor, id: BarometerId) -> ! {
                     BAROMETER_STATUS[id.index()].store(SensorStatus::Disabled, Ordering::Relaxed);
                 }
                 if errors >= MAX_CONSECUTIVE_ERRORS {
+                    buses::recover(bus).await;
                     Timer::after(I2C_RECOVERY_INTERVAL).await;
                     continue;
                 }

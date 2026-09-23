@@ -1,3 +1,4 @@
+use embassy_embedded_hal::SetConfig;
 use embassy_stm32::i2c::mode::Master as I2cMaster;
 use embassy_stm32::mode::Async;
 use embassy_stm32::{bind_interrupts, i2c, peripherals};
@@ -9,6 +10,13 @@ use super::{Bus1, Bus2};
 
 pub type SharedI2c = embassy_stm32::i2c::I2c<'static, Async, I2cMaster>;
 pub type SharedI2cBus = &'static Mutex<CriticalSectionRawMutex, SharedI2c>;
+
+/// Reset a timed-out I2C controller while holding the shared bus lock.
+pub async fn recover(bus: SharedI2cBus) {
+    let mut i2c = bus.lock().await;
+    i2c.set_config(&config().frequency)
+        .expect("I2C timing configuration must be valid");
+}
 
 fn config() -> i2c::Config {
     let mut config = i2c::Config::default();
