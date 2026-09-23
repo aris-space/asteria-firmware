@@ -1,7 +1,8 @@
 //! Per-sensor calibration. Every submodule exposes `apply_calibration`, which
 //! turns a raw sample into a calibrated one using values it loads internally.
-//! `baro`/`dht`/`gnss` only apply a fixed read-latency offset. `imu` also
-//! applies a fixed sensor-to-board axis remap and flash-backed gyro offset;
+//! `dht`/`gnss` only apply a fixed read-latency offset. Barometer readout
+//! timestamps its pressure conversion directly. `imu` applies a fixed
+//! sensor-to-board axis remap and flash-backed gyro offset;
 //! `mag` applies a flash-backed field correction. Both flash-backed modules
 //! load at boot and expose caller-driven calibration routines.
 
@@ -9,7 +10,6 @@ use core::fmt;
 
 use serde::{Deserialize, Serialize};
 
-pub mod baro;
 pub mod dht;
 pub mod gnss;
 pub mod imu;

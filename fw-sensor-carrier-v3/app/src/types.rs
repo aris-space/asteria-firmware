@@ -27,18 +27,10 @@ pub struct RawImuSample {
     pub gyro: AngularRate,
 }
 
+/// Pressure and temperature in sensor units, timestamped near the pressure
+/// conversion by the barometer readout.
 #[derive(Clone, Copy, Debug)]
 pub struct BaroSample {
-    pub src: BarometerId,
-    pub ts: Instant,
-    pub pressure_mbar: f32,
-    pub temperature_c: f32,
-}
-
-/// Raw barometer sample. Built by the readout with `ts = Instant::now()`
-/// (read-completion time); calibration subtracts the per-sensor delay.
-#[derive(Clone, Copy, Debug)]
-pub struct RawBaroSample {
     pub src: BarometerId,
     pub ts: Instant,
     pub pressure_mbar: f32,
