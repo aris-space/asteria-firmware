@@ -74,8 +74,9 @@ async fn configure(i2c: BusDevice, id: MagnetometerId) -> Result<Sensor, ()> {
 
 /// Bring the magnetometer up, retrying a bounded number of times. Returns the live
 /// sensor, or `None` (and marks it `Disabled`) if it never answered. Call this
-/// sequentially at startup, before any read task runs, so a stuck bus can't starve
-/// a healthy one mid-transaction.
+/// sequentially at startup, before any read task runs, so healthy sensors
+/// get their first initialization attempt before background retries begin.
+/// The read task retries a failed initialization.
 pub async fn init(bus: SharedI2cBus, id: MagnetometerId) -> Option<Sensor> {
     for attempt in 1..=MAX_INIT_ATTEMPTS {
         debug!("{} initializing (attempt {})", id, attempt);
@@ -87,13 +88,19 @@ pub async fn init(bus: SharedI2cBus, id: MagnetometerId) -> Option<Sensor> {
             Timer::after(backoff(attempt)).await;
         }
     }
-    warn!("{} not detected; not polling", id);
+    warn!("{} not detected; retrying later", id);
     MAGNETOMETER_STATUS[id.index()].store(SensorStatus::Disabled, Ordering::Relaxed);
     None
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn read_task(mut sensor: Sensor, bus: SharedI2cBus, id: MagnetometerId) -> ! {
+pub async fn read_task(mut sensor: Option<Sensor>, bus: SharedI2cBus, id: MagnetometerId) -> ! {
+    while sensor.is_none() {
+        Timer::after(I2C_RECOVERY_INTERVAL).await;
+        buses::recover(bus).await;
+        sensor = init(bus, id).await;
+    }
+    let mut sensor = sensor.expect("magnetometer initialized before reading");
     MAGNETOMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
     let mut errors: u8 = 0;
 

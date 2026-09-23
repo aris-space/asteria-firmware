@@ -110,30 +110,22 @@ pub async fn spawn_tasks(
 
     // DHT readout is disabled for the height bench. Initializing DHT caused
     // both I2C barometers to time out; the barometers stay active without it.
-    if let Some(sensor) = mag1 {
-        level_0_spawner.spawn(
-            tasks::readout::magnetometer::read_task(sensor, board.sensors.bus1, MAG_BUS_1)
-                .expect("Failed to spawn magnetometer 0 task"),
-        );
-    }
-    if let Some(sensor) = baro1 {
-        level_0_spawner.spawn(
-            tasks::readout::barometer::read_task(sensor, board.sensors.bus1, BARO_BUS_1)
-                .expect("Failed to spawn barometer 0 task"),
-        );
-    }
-    if let Some(sensor) = mag2 {
-        level_0_spawner.spawn(
-            tasks::readout::magnetometer::read_task(sensor, board.sensors.bus2, MAG_BUS_2)
-                .expect("Failed to spawn magnetometer 1 task"),
-        );
-    }
-    if let Some(sensor) = baro2 {
-        level_0_spawner.spawn(
-            tasks::readout::barometer::read_task(sensor, board.sensors.bus2, BARO_BUS_2)
-                .expect("Failed to spawn barometer 1 task"),
-        );
-    }
+    level_0_spawner.spawn(
+        tasks::readout::magnetometer::read_task(mag1, board.sensors.bus1, MAG_BUS_1)
+            .expect("Failed to spawn magnetometer 0 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::barometer::read_task(baro1, board.sensors.bus1, BARO_BUS_1)
+            .expect("Failed to spawn barometer 0 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::magnetometer::read_task(mag2, board.sensors.bus2, MAG_BUS_2)
+            .expect("Failed to spawn magnetometer 1 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::barometer::read_task(baro2, board.sensors.bus2, BARO_BUS_2)
+            .expect("Failed to spawn barometer 1 task"),
+    );
     level_0_spawner.spawn(
         tasks::readout::gnss::task(board.sensors.gps1_rx, None, GNSS_0)
             .expect("Failed to spawn GNSS 0 task"),
