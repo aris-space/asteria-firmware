@@ -1,0 +1,17 @@
+[package]
+name = "asteria-sef-light"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Lightweight state estimation filter for Asteria flight computers"
+
+[features]
+default = []
+std = []
+
+[dependencies]
+asteria-estimator-selector = { path = "../asteria-estimator-selector" }
+fusion-ahrs = "0.7.0"
+heapless = { version = "0.9.3", default-features = false }
+libm = "0.2.16"
+nalgebra = { version = "0.35.0", default-features = false, features = ["libm"] }
