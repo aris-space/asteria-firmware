@@ -12,6 +12,10 @@ pub const HISTORY_CAPACITY: usize = 768;
 pub const MAX_AIDING_DELAY_US: u64 = 400_000;
 pub type Estimator = DualVerticalEstimator<HISTORY_CAPACITY>;
 pub const GNSS_HEIGHT_STD_FLOOR_M: f32 = 3.0;
+// The weak four-satellite bench fix reported 2.7 m vAcc at PDOP 9.4.
+// Use the good receiver's roughly 2.0 PDOP as the point where geometry
+// starts raising the uncertainty floor.
+const GNSS_PDOP_REFERENCE_CENTI: f32 = 200.0;
 const STABLE_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.001;
 const DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.5;
 const BARO_TREND_WINDOW_US: u64 = 30_000_000;
@@ -219,10 +223,18 @@ pub struct GnssVerticalInput {
     pub pdop_centi: u16,
 }
 
+pub fn gnss_height_std_m(vertical_accuracy_mm: u32, pdop_centi: u16) -> f32 {
+    // vAcc already includes receiver geometry. Use PDOP as an additional
+    // floor when vAcc looks too optimistic, rather than multiplying the two.
+    (vertical_accuracy_mm as f32 / 1_000.0)
+        .max(GNSS_HEIGHT_STD_FLOOR_M)
+        .max(GNSS_HEIGHT_STD_FLOOR_M * pdop_centi as f32 / GNSS_PDOP_REFERENCE_CENTI)
+}
+
 pub fn gnss_measurement(input: GnssVerticalInput) -> GnssSample<VerticalGnssMeasurement> {
     // Consecutive GNSS heights share atmospheric and multipath errors. A receiver's
     // reported vertical accuracy can understate those slowly changing errors.
-    let height_std_m = (input.vertical_accuracy_mm as f32 / 1000.0).max(GNSS_HEIGHT_STD_FLOOR_M);
+    let height_std_m = gnss_height_std_m(input.vertical_accuracy_mm, input.pdop_centi);
     let velocity_std_mps = if input.speed_accuracy_mps > 0.0 {
         input.speed_accuracy_mps.max(0.1)
     } else {
@@ -288,6 +300,49 @@ mod tests {
         assert_eq!(sample.measurement.velocity_mps, 3.0);
         assert_eq!(sample.measurement.height_std_m, 3.0);
         assert_eq!(sample.measurement.velocity_std_mps, 1.0);
+    }
+
+    #[test]
+    fn weaker_gnss_geometry_increases_uncertainty_without_discarding_height() {
+        assert_eq!(gnss_height_std_m(900, 180), 3.0);
+        assert_eq!(gnss_height_std_m(4_000, 180), 4.0);
+        assert!((gnss_height_std_m(2_700, 940) - 14.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn weak_3d_height_update_is_accepted_with_less_weight() {
+        fn corrected_height(vertical_accuracy_mm: u32, pdop_centi: u16) -> f32 {
+            let mut estimator = new_estimator(2_000.0).unwrap();
+            let mut anchor = gnss_measurement(GnssVerticalInput {
+                height_msl_m: 420.0,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm: 900,
+                speed_accuracy_mps: 0.1,
+                fix_tier: 3,
+                pdop_centi: 180,
+            });
+            anchor.measurement.height_std_m *= libm::sqrtf(20.0);
+            estimator.update_gnss(0, [Some(anchor), None]).unwrap();
+            let mut correction = gnss_measurement(GnssVerticalInput {
+                height_msl_m: 440.0,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm,
+                speed_accuracy_mps: 0.1,
+                fix_tier: 3,
+                pdop_centi,
+            });
+            correction.measurement.height_std_m *= libm::sqrtf(20.0);
+            let updates = estimator
+                .update_gnss(50_000, [Some(correction), None])
+                .unwrap()
+                .unwrap();
+            assert!(updates[0].height.accepted);
+            estimator.selected_state().height_m
+        }
+
+        let precise = corrected_height(900, 180);
+        let weak = corrected_height(4_400, 550);
+        assert!(precise > weak + 1.0, "precise={precise}, weak={weak}");
     }
 
     #[test]

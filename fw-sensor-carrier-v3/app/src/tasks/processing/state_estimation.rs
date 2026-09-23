@@ -5,7 +5,8 @@ use defmt::{Debug2Format, info, warn};
 use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
     BarometerBiasTracker, Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
-    barometric_pressure_altitude_m, gnss_measurement, imu_measurement, new_estimator,
+    barometric_pressure_altitude_m, gnss_height_std_m, gnss_measurement, imu_measurement,
+    new_estimator,
 };
 
 use crate::calibration;
@@ -20,9 +21,6 @@ const GNSS_FRESH: Duration = Duration::from_millis(500);
 const GNSS_FUSION_PERIOD: Duration = Duration::from_millis(45);
 const GNSS_FUSIONS_PER_SECOND: f32 = 20.0;
 const GNSS_VELOCITY_FRESH: Duration = Duration::from_secs(2);
-const GNSS_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
-// A four-satellite startup fix reported a misleading 2.7 m vAcc at PDOP 9.4.
-const GNSS_MAX_PDOP_CENTI: u16 = 600;
 const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
 const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
 const STATUS_LOG_PERIOD: Duration = Duration::from_secs(1);
@@ -238,6 +236,7 @@ impl Processor {
             pdop_centi: best.pvt.pdop,
         });
         let height_std_m = measurement.measurement.height_std_m;
+        let velocity_std_mps = measurement.measurement.velocity_std_mps;
         measurement.measurement.height_std_m *= libm::sqrtf(GNSS_FUSIONS_PER_SECOND);
         measurements[best.src.index()] = Some(measurement);
         if let Some(updates) = self
@@ -249,12 +248,14 @@ impl Processor {
             }
             let selected = &updates[self.estimator.selected_imu().index()];
             info!(
-                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
+                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, hStd={} m, vStd={} m/s, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
                 best.src,
                 best.pvt.height_msl,
                 best.pvt.vel_down,
                 best.pvt.vert_accuracy,
                 best.pvt.pdop,
+                height_std_m,
+                velocity_std_mps,
                 selected.height.accepted,
                 selected.height.innovation,
                 selected.height.normalized_innovation_squared,
@@ -291,11 +292,10 @@ impl Processor {
     }
 
     fn select_gnss(&mut self, sample: GnssSample) -> Option<GnssSample> {
-        // A poor 3D fix can be tens of metres from a later precise fix. Apply
-        // the same quality requirement to both receivers at every update.
+        // GNSS uncertainty determines weight; only an unusable solution is
+        // removed here. A weak 3D fix can still provide an absolute anchor.
         let valid = sample.pvt.height_msl.is_finite()
-            && sample.pvt.vert_accuracy <= GNSS_MAX_VERTICAL_ACCURACY_MM
-            && sample.pvt.pdop <= GNSS_MAX_PDOP_CENTI
+            && sample.pvt.vel_down.is_finite()
             && matches!(
                 sample.pvt.fix_type,
                 ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
@@ -309,11 +309,13 @@ impl Processor {
         let [first, second] = self.gnss_latest.map(|candidate| {
             candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
         });
-        // Vertical accuracy estimates height error directly. Keep the current
-        // fresh receiver until another reports at least 1.5x better accuracy.
+        // Keep the current fresh receiver until another has clearly lower
+        // height uncertainty, including the geometry-based floor.
         let candidate = match (first, second) {
             (Some(first), Some(second)) => {
-                if first.pvt.vert_accuracy < second.pvt.vert_accuracy {
+                if gnss_height_std_m(first.pvt.vert_accuracy, first.pvt.pdop)
+                    < gnss_height_std_m(second.pvt.vert_accuracy, second.pvt.pdop)
+                {
                     first
                 } else {
                     second
@@ -329,8 +331,9 @@ impl Processor {
         {
             Some(current)
                 if current.src != candidate.src
-                    && (candidate.pvt.vert_accuracy as f32) * GNSS_SWITCH_IMPROVEMENT
-                        >= current.pvt.vert_accuracy as f32 =>
+                    && gnss_height_std_m(candidate.pvt.vert_accuracy, candidate.pvt.pdop)
+                        * GNSS_SWITCH_IMPROVEMENT
+                        >= gnss_height_std_m(current.pvt.vert_accuracy, current.pvt.pdop) =>
             {
                 current
             }
