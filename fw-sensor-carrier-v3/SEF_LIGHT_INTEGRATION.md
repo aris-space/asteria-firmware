@@ -22,9 +22,13 @@ Five stationary logs showed healthy IMU consistency scores near 0.03. Their scor
 
 A regression replay with a biased but still valid IMU found that the old 250 ms dwell could switch on a brief GNSS innovation and switch back. The final dwell is 1.5 s; invalid IMUs still hand over immediately. In a 113 s board run with this setting, the selector switched once to IMU_0 at 5 s, all eleven queue reports had zero drops and late events, and there were no I²C timeouts or estimator errors. The selected vertical velocity averaged +0.039 m/s. GNSS_1 MSL height wandered from 417.0 m to 421.3 m indoors during this run, so its height standard deviation cannot serve as a physical-motion error measurement.
 
-The pinned Embassy I²C driver's async timeout cancels a DMA transfer without resetting the controller state machine. After ten consecutive read failures, each affected read task now resets its controller under the shared bus lock, then retries after one second. The change passed the host suite and release build. A one-minute `just run --release` board check after flashing showed both barometers and both magnetometers streaming normally. No timeout occurred in that run, so controller recovery itself remains unverified on hardware.
+The pinned Embassy I²C driver's async timeout cancels a DMA transfer without resetting the controller state machine. After ten consecutive read failures, each affected read task now resets its controller under the shared bus lock, then retries after one second. The change passed the host suite and release build. A one-minute `just run --release` board check after flashing showed both barometers and both magnetometers streaming normally. A later startup experiment caused both barometers to reach ten consecutive timeouts; both reported recovery after the controller reset and one-second retry, and their measurements resumed. The startup experiment was reverted because it made I²C readout less reliable.
 
 The GNSS status log now counts NAV-PVT packets and records the largest gap in GPS epoch time over each roughly one-second report. On the attached indoor board, GNSS_0 delivered 20–21 packets per report with 50 ms maximum gaps. GNSS_1 delivered 11–20 with occasional 100 ms epoch gaps despite its 50 ms rate command; after one startup overrun/checksum error, it had no further UART or parser errors. The skipped epochs originate before estimator input, but these logs do not distinguish receiver scheduling from silent loss of complete UART packets. GNSS_1 remained the selected receiver by vertical accuracy, and the estimator queue reported no dropped or late samples.
+
+A 313 s stationary soak on this build produced 31 queue reports with zero drops and late samples. After the first 30 s, selected MSL height averaged 414.21 m with a 0.73 m standard deviation and 413.08–415.33 m range; mean reported vertical velocity was +0.036 m/s. GNSS_1 itself ranged from 410.53 to 416.58 m indoors, so the absolute height change cannot be attributed to board motion. The selected IMU remained IMU_0. The only I²C errors were two barometer timeouts during the first second of startup.
+
+Restoring the original startup order and flashing again gave a 69 s final check with both barometers and magnetometers streaming, six queue reports with zero drops and late samples, and no I²C read errors after two first-second barometer timeouts. GNSS_0 and GNSS_1 each had one startup UART overrun and then initialized.
 
 ## Selection and output policy
 
@@ -36,7 +40,6 @@ Orientation is published once the selected IMU attitude is ready. Vertical CAN t
 
 ## Remaining verification
 
-- Exercise I²C read recovery after a real timeout. The new retry logic is deployed and normal readout was verified, but the failing branch has not recurred during the new build's run.
 - Calibrate both magnetometers while tumbling the board, reset, then verify AHRS reports accepted magnetic samples. This requires physical movement.
 - Measure a known vertical displacement and return to the start. Check MSL height response and recovery without changing the GNSS selection policy.
 - Observe actual CAN frames with a bus peer or analyzer. The firmware build verifies message construction, but no CAN bus was available for this run.
