@@ -138,6 +138,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
         let mut recv_buf = [0u8; 4096];
         let mut next_report = Instant::now() + Duration::from_secs(1);
         let mut pvt_count = 0_u32;
+        let mut status_count = 0_u32;
         let mut last_itow = None;
         let mut max_epoch_gap_ms = 0_u32;
 
@@ -157,9 +158,10 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                 let fix_ok = pvt.flags().contains(NavPvtFlags::GPS_FIX_OK);
                                 if Instant::now() >= next_report {
                                     info!(
-                                        "{} GNSS: PVT/s={}, max_epoch_gap={} ms, MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
+                                        "{} GNSS: PVT/s={}, STATUS/s={}, max_epoch_gap={} ms, MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
                                         self.id,
                                         pvt_count,
+                                        status_count,
                                         max_epoch_gap_ms,
                                         pvt.height_msl(),
                                         pvt.vert_accuracy(),
@@ -171,6 +173,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                         fix_ok,
                                     );
                                     pvt_count = 0;
+                                    status_count = 0;
                                     max_epoch_gap_ms = 0;
                                     next_report = Instant::now() + Duration::from_secs(1);
                                 }
@@ -195,6 +198,9 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                 signals::submit_gnss_sample(calibration::gnss::apply_calibration(
                                     raw,
                                 ));
+                            }
+                            Ok(PacketRef::NavStatus(_)) => {
+                                status_count = status_count.saturating_add(1);
                             }
                             Ok(_) => {}
                             Err(e) => {
