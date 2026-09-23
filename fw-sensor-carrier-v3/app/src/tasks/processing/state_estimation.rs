@@ -6,7 +6,7 @@ use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
     BarometerBiasTracker, Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
     barometric_pressure_altitude_m, correlated_gnss_height_std_m, gnss_height_std_m,
-    gnss_measurement, imu_measurement, new_estimator,
+    gnss_measurement, imu_measurement, new_estimator, weaker_gnss_disagreement_floor_m,
 };
 
 use crate::calibration;
@@ -54,6 +54,8 @@ struct Processor {
     gnss_anchor_ready: [bool; 2],
     gnss_height_std_m: f32,
     gnss_latest: [Option<GnssSample>; 2],
+    // Keep the last paired disagreement through a receiver dropout.
+    gnss_disagreement_floor_m: [f32; 2],
     selected_gnss: Option<GnssId>,
     last_gnss_fusion: Option<Instant>,
     last_gnss_velocity: Option<(Instant, f32)>,
@@ -79,6 +81,7 @@ impl Processor {
             gnss_anchor_ready: [false; 2],
             gnss_height_std_m: GNSS_HEIGHT_STD_FLOOR_M,
             gnss_latest: [None; 2],
+            gnss_disagreement_floor_m: [0.0; 2],
             selected_gnss: None,
             last_gnss_fusion: None,
             last_gnss_velocity: None,
@@ -233,7 +236,9 @@ impl Processor {
             fix_tier: 3,
             pdop_centi: best.pvt.pdop,
         });
-        let height_std_m = measurement.measurement.height_std_m;
+        let receiver_height_std_m = measurement.measurement.height_std_m;
+        let pair_floor_m = self.gnss_disagreement_floor_m[best.src.index()];
+        let height_std_m = receiver_height_std_m.max(pair_floor_m);
         let velocity_std_mps = measurement.measurement.velocity_std_mps;
         let interval_us = self
             .last_gnss_fusion
@@ -252,7 +257,7 @@ impl Processor {
             }
             let selected = &updates[self.estimator.selected_imu().index()];
             info!(
-                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, hStd={} m, vStd={} m/s, hFilterStd={} m, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
+                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, hStd={} m, vStd={} m/s, hFilterStd={} m, hPairFloor={} m, hOtherFloor={} m, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
                 best.src,
                 best.pvt.height_msl,
                 best.pvt.vel_down,
@@ -261,6 +266,8 @@ impl Processor {
                 height_std_m,
                 velocity_std_mps,
                 filter_height_std_m,
+                pair_floor_m,
+                self.gnss_disagreement_floor_m[1 - best.src.index()],
                 selected.height.accepted,
                 selected.height.innovation,
                 selected.height.normalized_innovation_squared,
@@ -314,6 +321,17 @@ impl Processor {
         let [first, second] = self.gnss_latest.map(|candidate| {
             candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
         });
+        if let (Some(first), Some(second)) = (first, second) {
+            // Only the less precise receiver inherits disagreement with the
+            // other fix. This is an uncertainty adjustment, not a height offset.
+            self.gnss_disagreement_floor_m = weaker_gnss_disagreement_floor_m(
+                [first.pvt.height_msl, second.pvt.height_msl],
+                [
+                    gnss_height_std_m(first.pvt.vert_accuracy, first.pvt.pdop),
+                    gnss_height_std_m(second.pvt.vert_accuracy, second.pvt.pdop),
+                ],
+            );
+        }
         // Keep the current fresh receiver until another has clearly lower
         // height uncertainty, including the geometry-based floor.
         let candidate = match (first, second) {

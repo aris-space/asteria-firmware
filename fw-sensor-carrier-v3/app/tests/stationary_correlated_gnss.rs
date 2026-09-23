@@ -2,8 +2,9 @@
 
 use asteria_sef_light::{BARO_BUS_1, BARO_BUS_2, IMU_0, IMU_1, PressureMeasurement};
 use fw_sensor_carrier_v3::sef::{
-    BarometerBiasTracker, GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement,
-    imu_measurement, new_estimator,
+    BarometerBiasTracker, GnssVerticalInput, barometric_pressure_altitude_m,
+    correlated_gnss_height_std_m, gnss_height_std_m, gnss_measurement, imu_measurement,
+    new_estimator, weaker_gnss_disagreement_floor_m,
 };
 
 #[test]
@@ -160,6 +161,87 @@ fn stationary_height_survives_divergent_barometer_drift() {
         (velocity_sum / velocity_samples as f32).abs() < 0.025,
         "mean stationary velocity: {}",
         velocity_sum / velocity_samples as f32
+    );
+}
+
+#[test]
+fn weak_receiver_after_good_fix_does_not_drag_stationary_height_far() {
+    let mut estimator = new_estimator(2_000.0).unwrap();
+    let imu = imu_measurement([0.0, 0.0, -1.006], [0.0; 3]);
+    let mut height_before_dropout = 0.0;
+    let mut height_after_weak_fix = 0.0;
+    let mut weak_updates = 0_u32;
+    let mut weak_height_accepted = 0_u32;
+    let mut weak_velocity_accepted = 0_u32;
+    let disagreement_floor = weaker_gnss_disagreement_floor_m(
+        [384.0, 415.0],
+        [gnss_height_std_m(3_700, 517), gnss_height_std_m(1_200, 313)],
+    );
+
+    for step in 0..400_000_u64 {
+        let time_us = step * 1_200;
+        estimator.update_imu(IMU_0, time_us, imu).unwrap();
+        estimator.update_imu(IMU_1, time_us, imu).unwrap();
+        if step.is_multiple_of(21) {
+            for (barometer, height_m) in [(BARO_BUS_1, 342.0), (BARO_BUS_2, 330.0)] {
+                estimator
+                    .update_pressure(
+                        time_us,
+                        barometer,
+                        PressureMeasurement {
+                            height_m,
+                            height_std_m: 1.5,
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        if step.is_multiple_of(42) {
+            let good_receiver = time_us < 120_000_000 || time_us >= 420_000_000;
+            let (source, height, vacc, pdop) = if good_receiver {
+                (1, 415.0, 1_200, 313)
+            } else {
+                (0, 384.0, 3_700, 517)
+            };
+            let mut fix = gnss_measurement(GnssVerticalInput {
+                height_msl_m: height,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm: vacc,
+                speed_accuracy_mps: 0.2,
+                fix_tier: 3,
+                pdop_centi: pdop,
+            });
+            fix.measurement.height_std_m = correlated_gnss_height_std_m(
+                fix.measurement.height_std_m.max(disagreement_floor[source]),
+                50_000,
+            );
+            let mut fixes = [None, None];
+            fixes[source] = Some(fix);
+            let updates = estimator.update_gnss(time_us, fixes).unwrap().unwrap();
+            if !good_receiver {
+                weak_updates += 1;
+                let update = &updates[estimator.selected_imu().index()];
+                weak_height_accepted += u32::from(update.height.accepted);
+                weak_velocity_accepted += u32::from(update.velocity.accepted);
+            }
+            if time_us < 120_000_000 {
+                height_before_dropout = estimator.selected_state().height_m;
+            } else if time_us < 420_000_000 {
+                height_after_weak_fix = estimator.selected_state().height_m;
+            }
+        }
+    }
+
+    assert!(
+        (height_after_weak_fix - height_before_dropout).abs() < 5.0,
+        "weak receiver pulled stationary MSL from {height_before_dropout} to {height_after_weak_fix}"
+    );
+    assert_eq!(weak_height_accepted, weak_updates);
+    assert_eq!(weak_velocity_accepted, weak_updates);
+    let height_after_good_fix_returns = estimator.selected_state().height_m;
+    assert!(
+        (height_after_good_fix_returns - 415.0).abs() < 2.0,
+        "height did not recover with the better receiver: {height_after_good_fix_returns}"
     );
 }
 

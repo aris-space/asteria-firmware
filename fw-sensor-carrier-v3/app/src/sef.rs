@@ -20,6 +20,20 @@ pub fn correlated_gnss_height_std_m(height_std_m: f32, interval_us: u64) -> f32 
     let interval_us = interval_us.clamp(50_000, 1_000_000);
     height_std_m * libm::sqrtf(1_000_000.0 / interval_us as f32)
 }
+
+/// When receivers disagree, retain that observed error as an uncertainty
+/// floor for the less precise receiver if it later becomes the only fix.
+/// Neither height is averaged or shifted.
+pub fn weaker_gnss_disagreement_floor_m(heights_m: [f32; 2], stds_m: [f32; 2]) -> [f32; 2] {
+    let disagreement_m = (heights_m[0] - heights_m[1]).abs();
+    if stds_m[0] < stds_m[1] {
+        [0.0, disagreement_m]
+    } else if stds_m[1] < stds_m[0] {
+        [disagreement_m, 0.0]
+    } else {
+        [disagreement_m; 2]
+    }
+}
 // The weak four-satellite bench fix reported 2.7 m vAcc at PDOP 9.4.
 // Use the good receiver's roughly 2.0 PDOP as the point where geometry
 // starts raising the uncertainty floor.
@@ -325,6 +339,22 @@ mod tests {
         assert!((20.0 / twenty_hz_std.powi(2) - 1.0 / one_hz_std.powi(2)).abs() < 1e-6);
         assert_eq!(correlated_gnss_height_std_m(6.0, 1_000_000), 6.0);
         assert!((correlated_gnss_height_std_m(6.0, 50_000) - 2.0 * twenty_hz_std).abs() < 1e-5);
+    }
+
+    #[test]
+    fn observed_receiver_disagreement_raises_only_the_weaker_height_uncertainty() {
+        assert_eq!(
+            weaker_gnss_disagreement_floor_m([384.0, 415.0], [7.8, 4.8]),
+            [31.0, 0.0]
+        );
+        assert_eq!(
+            weaker_gnss_disagreement_floor_m([384.0, 415.0], [4.8, 7.8]),
+            [0.0, 31.0]
+        );
+        assert_eq!(
+            weaker_gnss_disagreement_floor_m([384.0, 415.0], [4.8, 4.8]),
+            [31.0, 31.0]
+        );
     }
 
     #[test]

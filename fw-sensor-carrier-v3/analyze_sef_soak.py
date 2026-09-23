@@ -35,6 +35,7 @@ GNSS_UPDATE = re.compile(
 )
 GNSS_HEIGHT_STD = re.compile(r"hStd=(?P<std>[\d.]+) m")
 GNSS_FILTER_HEIGHT_STD = re.compile(r"hFilterStd=(?P<std>[\d.]+) m")
+GNSS_OTHER_HEIGHT_FLOOR = re.compile(r"hOtherFloor=(?P<std>[\d.]+) m")
 BARO = re.compile(
     r"SEF baro (?P<source>BARO_BUS_[12]): "
     r"pressure_altitude=(?P<h>-?[\d.]+) m, pressure=(?P<pressure>-?[\d.]+) mbar"
@@ -263,6 +264,13 @@ def main():
             ]
             if filter_height_stds:
                 print(f"{source} height_filter_std_m", mean_sd(filter_height_stds))
+            other_floors = [
+                float(match["std"])
+                for item in updates
+                if (match := GNSS_OTHER_HEIGHT_FLOOR.search(item["metadata"]))
+            ]
+            if other_floors:
+                print(f"{source} other_receiver_disagreement_floor_m", mean_sd(other_floors))
     for source in ("GNSS_0", "GNSS_1"):
         bad_run = 0
         longest_bad_run = 0
