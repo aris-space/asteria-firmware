@@ -3,7 +3,7 @@
 use asteria_sef_light::{BARO_BUS_1, BARO_BUS_2, IMU_0, IMU_1, PressureMeasurement};
 use fw_sensor_carrier_v3::sef::{
     GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement, imu_measurement,
-    new_estimator,
+    new_estimator, select_orientation_imu,
 };
 
 #[test]
@@ -66,6 +66,13 @@ fn stationary_barometers_reject_correlated_gnss_height_wander() {
         "stationary estimate wandered {} m, from {lowest} to {highest}",
         highest - lowest
     );
+}
+
+#[test]
+fn vertical_quality_handover_keeps_live_orientation_source() {
+    assert_eq!(select_orientation_imu(None, IMU_1, false), IMU_1);
+    assert_eq!(select_orientation_imu(Some(IMU_1), IMU_0, true), IMU_1);
+    assert_eq!(select_orientation_imu(Some(IMU_1), IMU_0, false), IMU_0);
 }
 
 #[test]

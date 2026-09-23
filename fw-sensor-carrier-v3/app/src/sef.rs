@@ -2,7 +2,7 @@
 
 use asteria_sef_light::{
     DualVerticalEstimator, EstimatorError, GnssSample, GnssSelectorConfig, ImuAttitudeConfig,
-    ImuMeasurement, STANDARD_GRAVITY_MPS2, SelectorConfig, VerticalEstimatorSelectorConfig,
+    ImuId, ImuMeasurement, STANDARD_GRAVITY_MPS2, SelectorConfig, VerticalEstimatorSelectorConfig,
     VerticalFilterConfig, VerticalGnssMeasurement,
 };
 
@@ -57,6 +57,18 @@ pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorE
     )
     .ok_or(EstimatorError::OutOfRangeInput)?;
     Estimator::new(filter, [attitude; 2], selector, gnss, MAX_AIDING_DELAY_US)
+}
+
+/// Keep a live attitude chain through vertical quality handovers. Its heading
+/// is otherwise unrelated to the other chain until magnetic aiding is calibrated.
+pub fn select_orientation_imu(
+    current: Option<ImuId>,
+    selected_vertical: ImuId,
+    current_is_fresh: bool,
+) -> ImuId {
+    current
+        .filter(|_| current_is_fresh)
+        .unwrap_or(selected_vertical)
 }
 
 pub fn barometric_pressure_altitude_m(pressure_mbar: f32) -> Option<f32> {
