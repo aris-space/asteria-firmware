@@ -30,6 +30,8 @@ A 313 s stationary soak on this build produced 31 queue reports with zero drops 
 
 Restoring the original startup order and flashing again gave a 69 s final check with both barometers and magnetometers streaming, six queue reports with zero drops and late samples, and no I²C read errors after two first-second barometer timeouts. GNSS_0 and GNSS_1 each had one startup UART overrun and then initialized.
 
+During the first 22 minutes of the longer stationary soak, both stored gyro calibrations loaded from flash, but their residual angular rates remained nonzero. Across the 20–1,250 s interval, IMU_0 averaged about `[-0.020, +0.051, +0.059]` °/s and IMU_1 about `[+0.040, +0.014, +0.051]` °/s. Their body-to-NED yaw angles changed by about 100° and 70°, respectively, over 22 minutes. All magnetic samples were ignored because neither magnetometer has a valid stored calibration. The observed yaw drift is consistent with the residual gyro rates; this stationary run cannot validate magnetic heading or correct the stored calibration without a new gyro calibration run.
+
 ## Selection and output policy
 
 GNSS readout requires the UBX `GPS_FIX_OK` flag. Vertical fusion requires a 3D fix and `vAcc` at most 3 m. Among fresh receivers, lower `vAcc` wins; the selected receiver stays until the other is at least 1.5 times better. SEF-light receives only the chosen receiver, so it does not blend the two heights. `vAcc` measures the height dimension directly. PDOP describes overall satellite geometry and remains an additional SEF validity check; `hAcc` would be relevant to a horizontal position estimator, which SEF-light does not provide.
