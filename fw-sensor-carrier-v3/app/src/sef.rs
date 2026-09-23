@@ -75,6 +75,10 @@ pub struct ImuWindowSummary {
 }
 
 impl ImuWindow {
+    pub fn samples(&self) -> u32 {
+        self.samples
+    }
+
     pub fn record(&mut self, measurement: ImuMeasurement) {
         let acceleration_square = measurement
             .acceleration_body_mps2

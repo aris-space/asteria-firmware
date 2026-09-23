@@ -40,7 +40,7 @@ macro_rules! define_sample_channels {
 }
 
 define_sample_channels!(IMU_CHANNELS, submit_imu_sample, submit_imu_sample_batch:
-    ImuSample, cap = 256, subs = 1, count = IMU_COUNT);
+    ImuSample, cap = 256, subs = 2, count = IMU_COUNT);
 
 define_sample_channels!(BARO_CHANNELS, submit_baro_sample, submit_baro_sample_batch:
     BaroSample, cap = 16, subs = 1, count = BAROMETER_COUNT);
