@@ -158,9 +158,11 @@ def report(rows, start, end):
     for source in ("GNSS_0", "GNSS_1"):
         gnss = in_window(rows["gnss"], start, end, source)
         if gnss:
-            rate = sum(int(item["pvt"]) for item in gnss) * 1000 / sum(int(item["ms"]) for item in gnss)
+            report_ms = sum(int(item["ms"]) for item in gnss)
+            pvt_rate = sum(int(item["pvt"]) for item in gnss) * 1000 / report_ms
+            status_rate = sum(int(item["status"]) for item in gnss) * 1000 / report_ms
             print(
-                f"  {source} PVT_Hz={rate:.2f} "
+                f"  {source} PVT_Hz={pvt_rate:.2f} STATUS_Hz={status_rate:.2f} "
                 f"max_gap_ms={max(int(item['gap']) for item in gnss)} "
                 f"vAcc_median_m={statistics.median(int(item['vacc']) for item in gnss)/1000:.2f} "
                 f"PDOP_median={statistics.median(int(item['pdop']) for item in gnss)/100:.2f} "
