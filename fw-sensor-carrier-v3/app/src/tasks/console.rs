@@ -13,10 +13,10 @@ use heapless::String;
 use noline::builder::EditorBuilder;
 use static_cell::StaticCell;
 
-use crate::calibration::{Name, mag};
+use crate::calibration::{Name, imu, mag};
 use crate::resources::flash;
 use crate::resources::usb::UsbDriver;
-use crate::sensors::MagnetometerId;
+use crate::sensors::{ImuId, MagnetometerId};
 use crate::storage::{self, Storage};
 
 type Class = CdcAcmClass<'static, UsbDriver>;
@@ -103,6 +103,7 @@ impl Write for ConsoleIo<'_> {
 const PROMPT: &str = "asteria> ";
 const HELP: &str = r"commands:
   cal mag <name>     run magnetometer calibration (label required)
+  cal imu <name>     measure gyro offsets while the board is still
   cal show           show stored calibrations
   flash info         show chip id and status register
   flash list         list the keys you can clear
@@ -193,9 +194,43 @@ async fn cmd_cal(
 ) {
     match args.next() {
         Some("mag") => cmd_cal_mag(class, args, storage).await,
+        Some("imu") => cmd_cal_imu(class, args, storage).await,
         Some("show") => cal_show(class, storage).await,
-        _ => say(class, paint!(red, "usage: cal <mag <name>|show>\n")).await,
+        _ => {
+            say(
+                class,
+                paint!(red, "usage: cal <mag <name>|imu <name>|show>\n"),
+            )
+            .await
+        }
     }
+}
+
+async fn cmd_cal_imu(
+    class: &mut ConsoleIo<'_>,
+    args: &mut SplitAsciiWhitespace<'_>,
+    storage: &Storage,
+) {
+    let Some(name) = cal_name_or_report(class, args, paint!(red, "usage: cal imu <name>\n")).await
+    else {
+        return;
+    };
+    say(class, "gyro cal: keep the board still for 5 seconds\n").await;
+    let mut cal = imu::ImuCal::new();
+    cal.collect().await;
+    let counts = cal.counts();
+    let mut s: String<80> = String::new();
+    let _ = writeln!(s, "collected {} / {} IMU samples", counts[0], counts[1]);
+    say(class, &s).await;
+    let reports = cal.finish(name, storage).await;
+    let mut stored = true;
+    for report in &reports {
+        let mut s: String<192> = String::new();
+        let _ = writeln!(s, "{report}");
+        say(class, &s).await;
+        stored &= report.stored();
+    }
+    report_outcome(class, stored).await;
 }
 
 async fn cmd_cal_mag(
@@ -233,7 +268,20 @@ async fn cmd_cal_mag(
 }
 
 async fn cal_show(class: &mut ConsoleIo<'_>, storage: &Storage) {
+    show_imu_cals(class, storage).await;
     show_mag_cals(class, storage).await;
+}
+
+async fn show_imu_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
+    let applied = imu::applied();
+    let stored = imu::stored(storage).await;
+    for id in ImuId::ALL {
+        let i = id.index();
+        let pending = stored[i]
+            .filter(|st| st.differs_from(&applied[i]))
+            .map(|st| st.name);
+        show_cal_slot(class, id.name(), applied[i], pending).await;
+    }
 }
 
 async fn show_mag_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
@@ -390,6 +438,11 @@ fn write_flash_identity(out: &mut impl fmt::Write, id: &flash::JedecId, status: 
 }
 
 async fn flash_list(class: &mut ConsoleIo<'_>) {
+    for id in ImuId::ALL {
+        let mut s: String<24> = String::new();
+        let _ = writeln!(s, "{}", id.name());
+        say(class, &s).await;
+    }
     for id in MagnetometerId::ALL {
         let mut s: String<24> = String::new();
         let _ = writeln!(s, "{}", id.name());
