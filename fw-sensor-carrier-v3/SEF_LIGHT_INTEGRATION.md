@@ -32,6 +32,8 @@ Restoring the original startup order and flashing again gave a 69 s final check 
 
 During the first 22 minutes of the longer stationary soak, both stored gyro calibrations loaded from flash, but their residual angular rates remained nonzero. Across the 20–1,250 s interval, IMU_0 averaged about `[-0.020, +0.051, +0.059]` °/s and IMU_1 about `[+0.040, +0.014, +0.051]` °/s. Their body-to-NED yaw angles changed by about 100° and 70°, respectively, over 22 minutes. All magnetic samples were ignored because neither magnetometer has a valid stored calibration. The observed yaw drift is consistent with the residual gyro rates; this stationary run cannot validate magnetic heading or correct the stored calibration without a new gyro calibration run.
 
+An offline SEF-light replay held both barometer altitudes and both IMUs stationary while the reported GNSS height rose 10 m over 300 s with zero GNSS vertical velocity. The estimate moved 4.51 m from 30 s to 300 s with either zero barometer bias walk or the configured 0.001 m/√s; increasing the walk to 0.01 m/√s moved it 4.72 m. Reducing barometer bias process noise alone therefore does not reject a sustained correlated GNSS height error.
+
 ## Selection and output policy
 
 GNSS readout requires the UBX `GPS_FIX_OK` flag. Vertical fusion requires a 3D fix and `vAcc` at most 3 m. Among fresh receivers, lower `vAcc` wins; the selected receiver stays until the other is at least 1.5 times better. SEF-light receives only the chosen receiver, so it does not blend the two heights. `vAcc` measures the height dimension directly. PDOP is logged for diagnosis but does not gate fusion; `hAcc` would be relevant to a horizontal position estimator, which SEF-light does not provide.
