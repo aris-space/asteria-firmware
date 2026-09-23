@@ -10,6 +10,11 @@ use defmt_rtt as _;
 use embassy_time::Timer;
 use panic_probe as _;
 
+#[defmt::panic_handler]
+fn defmt_panic() -> ! {
+    panic_probe::hard_fault()
+}
+
 #[macro_use]
 mod fmt;
 
