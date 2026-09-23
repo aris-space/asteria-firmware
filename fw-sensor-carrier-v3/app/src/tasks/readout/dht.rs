@@ -8,11 +8,10 @@ use embassy_time::{Delay, Duration, Instant, Timer};
 use sht4x::{Precision, Sht4xAsync};
 
 use super::{MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
-use crate::calibration;
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{DHT_STATUS, DhtId, SensorStatus};
 use crate::signals;
-use crate::types::RawDhtSample;
+use crate::types::DhtSample;
 
 pub const SAMPLE_HZ: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
@@ -64,13 +63,13 @@ pub async fn read_task(mut sensor: Sensor, id: DhtId) -> ! {
                 errors = 0;
                 let temperature_c: f32 = m.temperature_celsius().to_num();
                 let humidity_rh: f32 = m.humidity_percent().to_num();
-                let raw = RawDhtSample {
+                let sample = DhtSample {
                     src: id,
                     ts: Instant::now(),
                     temperature_c,
                     humidity_rh,
                 };
-                signals::submit_dht_sample(calibration::dht::apply_calibration(raw));
+                signals::submit_dht_sample(sample);
                 trace!("{} t={} c rh={} %", id, temperature_c, humidity_rh);
             }
             Err(e) => {

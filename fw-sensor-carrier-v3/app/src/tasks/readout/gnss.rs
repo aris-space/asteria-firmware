@@ -13,10 +13,9 @@ use ublox::{
 use core::sync::atomic::Ordering;
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
-use crate::calibration;
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
-use crate::types::{Pvt, RawGnssSample};
+use crate::types::{GnssSample, Pvt};
 
 fn log_configuration_packet(id: GnssId, packet: &PacketRef<'_>) {
     match packet {
@@ -233,7 +232,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                     continue;
                                 }
                                 self.errors = 0;
-                                let raw = RawGnssSample {
+                                let sample = GnssSample {
                                     src: self.id,
                                     ts: Instant::now(),
                                     pvt: Pvt {
@@ -245,9 +244,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                         speed_accuracy_mps: pvt.speed_accuracy_estimate() as f32,
                                     },
                                 };
-                                signals::submit_gnss_sample(calibration::gnss::apply_calibration(
-                                    raw,
-                                ));
+                                signals::submit_gnss_sample(sample);
                             }
                             Ok(PacketRef::NavStatus(_)) => {
                                 status_count = status_count.saturating_add(1);
