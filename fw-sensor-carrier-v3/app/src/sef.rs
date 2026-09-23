@@ -21,23 +21,41 @@ pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorE
     // gives each barometer an absolute observation, and the bias states absorb
     // local sea-level pressure and sensor calibration offsets.
     let filter = VerticalFilterConfig::new(
-        10.0,
-        20.0,
-        [0.001, 0.001],
-        1_000.0,
-        3.0,
-        [200.0, 200.0],
-        5.0,
+        10.0,           // healthy acceleration noise, m/s² per sample
+        20.0,           // degraded acceleration noise, m/s² per sample
+        [0.001, 0.001], // barometer-bias random walk, m/√s
+        1_000.0,        // initial height uncertainty, m; GNSS establishes MSL
+        3.0,            // initial vertical-velocity uncertainty, m/s
+        [200.0, 200.0], // initial pressure-altitude bias uncertainty, m
+        5.0,            // measurement innovation gate, standard deviations
     )?;
-    let attitude = ImuAttitudeConfig::new(2.0, gyroscope_range_deg_s, 10.0, 300)?
-        .with_magnetic_rejection(20.0)?;
-    // In stationary hardware runs healthy IMU consistency scores were near 0.03.
-    // A 0.003 margin exceeds observed reverse score excursions while allowing
-    // handover to the consistently lower-scoring chain. Wait beyond the 1 Hz
-    // GNSS correction interval so a single innovation cannot cause a round trip.
-    let selection = SelectorConfig::new(0.003, 1_500_000).ok_or(EstimatorError::OutOfRangeInput)?;
-    let selector = VerticalEstimatorSelectorConfig::new(0.95, 25.0, 10.0, 100_000, selection)?;
-    let gnss = GnssSelectorConfig::new(3, 4.0, 500_000).ok_or(EstimatorError::OutOfRangeInput)?;
+    let attitude = ImuAttitudeConfig::new(
+        2.0, // AHRS feedback gain
+        gyroscope_range_deg_s,
+        10.0, // accelerometer rejection angle, degrees
+        300,  // rejected samples before acceleration recovery
+    )?
+    .with_magnetic_rejection(20.0)?;
+    // Healthy chains have similar stationary scores. Require an improvement
+    // before switching, and limit how quickly a handover can reverse.
+    let selection = SelectorConfig::new(
+        0.003,     // IMU score improvement required for a handover
+        1_500_000, // minimum time between handovers, µs
+    )
+    .ok_or(EstimatorError::OutOfRangeInput)?;
+    let selector = VerticalEstimatorSelectorConfig::new(
+        0.95,    // previous score weight
+        25.0,    // maximum contribution from one innovation
+        10.0,    // degraded acceleration penalty
+        100_000, // maximum IMU sample age, µs
+        selection,
+    )?;
+    let gnss = GnssSelectorConfig::new(
+        3,       // minimum fix tier
+        4.0,     // inter-receiver consistency gate, standard deviations
+        500_000, // minimum time between receiver handovers, µs
+    )
+    .ok_or(EstimatorError::OutOfRangeInput)?;
     Estimator::new(filter, [attitude; 2], selector, gnss, MAX_AIDING_DELAY_US)
 }
 
