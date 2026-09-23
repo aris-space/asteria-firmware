@@ -42,7 +42,8 @@ QUEUE = re.compile(
     r"late=\[(?P<late>[^]]+)\], max_imu_backlog=\[(?P<backlog>[^]]+)\]"
 )
 ATTITUDE = re.compile(
-    r"SEF (?P<source>IMU_[01]): h=(?P<h>-?[\d.]+).*v=(?P<v>-?[\d.]+).*"
+    r"SEF (?P<source>IMU_[01]): h=(?P<h>-?[\d.]+) dh=[^,]+, "
+    r"v=(?P<v>-?[\d.]+) dv=[^,]+, .*"
     r"score=(?P<score>[\d.]+), q=\[(?P<q>[^]]+)\].*"
     r"mag_ignored=(?P<ignored>true|false)"
 )
@@ -66,6 +67,12 @@ def mean_sd(values):
 def yaw_deg(quaternion):
     w, x, y, z = quaternion
     return math.degrees(math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
+
+
+def quaternion_separation_deg(first, second):
+    dot = sum(a * b for a, b in zip(first, second))
+    norm = math.sqrt(sum(value * value for value in first) * sum(value * value for value in second))
+    return math.degrees(2 * math.acos(min(1.0, abs(dot) / norm)))
 
 
 def unwrap_degrees(values):
@@ -230,14 +237,32 @@ def main():
             f"mag_ignored={ignored}/{len(attitude)}"
         )
     paired_scores = []
+    paired_attitudes = []
     for (first_time, first), (second_time, second) in zip(rows["attitude"][::2], rows["attitude"][1::2]):
         if first["source"] == "IMU_0" and second["source"] == "IMU_1" and second_time - first_time < 0.01:
             paired_scores.append(float(second["score"]) - float(first["score"]))
+            paired_attitudes.append((second_time, first, second))
     if paired_scores:
         print(
             f"imu_score_delta_1_minus_0 median={statistics.median(paired_scores):+.4f} "
             f"min={min(paired_scores):+.4f} max={max(paired_scores):+.4f} "
             f"IMU_1_better_by_0.003={sum(delta < -0.003 for delta in paired_scores)}/{len(paired_scores)}"
+        )
+    for switch_time, selected_imu in switches:
+        if not paired_attitudes:
+            break
+        pair_time, first, second = min(paired_attitudes, key=lambda pair: abs(pair[0] - switch_time))
+        if abs(pair_time - switch_time) > 0.3:
+            continue
+        first_q = [float(value) for value in first["q"].split(",")]
+        second_q = [float(value) for value in second["q"].split(",")]
+        angle = quaternion_separation_deg(first_q, second_q)
+        height = abs(float(first["h"]) - float(second["h"]))
+        velocity = abs(float(first["v"]) - float(second["v"]))
+        print(
+            f"handover t={switch_time:.1f}s to={selected_imu} "
+            f"orientation_separation={angle:.2f}deg "
+            f"height_separation={height:.3f}m velocity_separation={velocity:.3f}m/s"
         )
     for start in range(0, int(end) + 1, 600):
         report(rows, start, start + 600)
