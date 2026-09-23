@@ -4,8 +4,9 @@ use asteria_sef_light::{EstimatorError, PressureMeasurement};
 use defmt::{Debug2Format, info, warn};
 use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
-    Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
-    barometric_pressure_altitude_m, gnss_measurement, imu_measurement, new_estimator,
+    BarometerBiasTracker, Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
+    barometric_pressure_altitude_m, correlated_gnss_height_std_m, gnss_height_std_m,
+    gnss_measurement, imu_measurement, new_estimator, weaker_gnss_disagreement_floor_m,
 };
 
 use crate::calibration;
@@ -17,10 +18,8 @@ use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, StateEstimate};
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
-const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
-const GNSS_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
-// A four-satellite startup fix reported a misleading 2.7 m vAcc at PDOP 9.4.
-const GNSS_MAX_PDOP_CENTI: u16 = 600;
+const GNSS_FUSION_PERIOD: Duration = Duration::from_millis(45);
+const GNSS_VELOCITY_FRESH: Duration = Duration::from_secs(2);
 const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
 const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
 const STATUS_LOG_PERIOD: Duration = Duration::from_secs(1);
@@ -51,10 +50,17 @@ impl Event {
 struct Processor {
     estimator: Estimator,
     gnss_ready: bool,
+    // A later IMU handover must not publish an unanchored chain as MSL.
+    gnss_anchor_ready: [bool; 2],
     gnss_height_std_m: f32,
     gnss_latest: [Option<GnssSample>; 2],
+    // Keep the last paired disagreement through a receiver dropout.
+    gnss_disagreement_floor_m: [f32; 2],
     selected_gnss: Option<GnssId>,
     last_gnss_fusion: Option<Instant>,
+    last_gnss_velocity: Option<(Instant, f32)>,
+    gnss_displacement_m: f32,
+    barometer_bias_tracker: BarometerBiasTracker,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
     last_state_log: Option<Instant>,
@@ -72,10 +78,15 @@ impl Processor {
         Ok(Self {
             estimator: new_estimator(GYRO_RANGE_DPS)?,
             gnss_ready: false,
+            gnss_anchor_ready: [false; 2],
             gnss_height_std_m: GNSS_HEIGHT_STD_FLOOR_M,
             gnss_latest: [None; 2],
+            gnss_disagreement_floor_m: [0.0; 2],
             selected_gnss: None,
             last_gnss_fusion: None,
+            last_gnss_velocity: None,
+            gnss_displacement_m: 0.0,
+            barometer_bias_tracker: BarometerBiasTracker::default(),
             last_output: None,
             last_status_log: None,
             last_state_log: None,
@@ -131,8 +142,8 @@ impl Processor {
             .is_none_or(|last| sample.ts.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
         {
             info!(
-                "SEF baro {}: pressure_altitude={} m, pressure={} mbar",
-                sample.src, height_m, sample.pressure_mbar
+                "SEF baro {}: pressure_altitude={} m, pressure={} mbar, temperature={} C",
+                sample.src, height_m, sample.pressure_mbar, sample.temperature_c
             );
             self.last_baro_log[index] = Some(sample.ts);
         }
@@ -146,6 +157,24 @@ impl Processor {
                 height_std_m: BARO_HEIGHT_STD_M,
             },
         )?;
+        if self.gnss_ready
+            && self.last_gnss_velocity.is_some_and(|(last, _)| {
+                sample.ts.saturating_duration_since(last) <= GNSS_VELOCITY_FRESH
+            })
+        {
+            if let Some(walk_std) = self.barometer_bias_tracker.observe(
+                index,
+                sample.ts.as_micros(),
+                height_m,
+                self.gnss_displacement_m,
+            ) {
+                self.estimator
+                    .set_barometer_bias_walk_std(barometer, walk_std)?;
+                info!("SEF baro {}: bias walk={} m/sqrt(s)", sample.src, walk_std);
+            }
+        } else {
+            self.barometer_bias_tracker.reset_windows();
+        }
         Ok(())
     }
 
@@ -179,8 +208,19 @@ impl Processor {
         let Some(best) = self.select_gnss(sample) else {
             return Ok(());
         };
-        // NavPVT arrives at 20 Hz, but adjacent GNSS heights are strongly
-        // correlated. Fuse them at 1 Hz while retaining the full receiver rate.
+        if !self.gnss_ready {
+            // An unanchored barometer/IMU startup can leave the vertical state
+            // too far from MSL for the innovation gate to accept the first fix.
+            self.estimator = new_estimator(GYRO_RANGE_DPS)?;
+            self.last_logged_state = [None; 2];
+            self.gnss_anchor_ready = [false; 2];
+            self.last_gnss_velocity = None;
+            self.gnss_displacement_m = 0.0;
+            self.barometer_bias_tracker = BarometerBiasTracker::default();
+        }
+        // Fuse every available NavPVT epoch, up to the receiver's 20 Hz rate.
+        // Adjacent heights are correlated; scale their information by the
+        // actual interval so a 1 Hz receiver is not weakened like a 20 Hz one.
         if self
             .last_gnss_fusion
             .is_some_and(|last| sample.ts.saturating_duration_since(last) < GNSS_FUSION_PERIOD)
@@ -188,25 +228,75 @@ impl Processor {
             return Ok(());
         }
         let mut measurements = [None, None];
-        measurements[best.src.index()] = Some(gnss_measurement(GnssVerticalInput {
+        let mut measurement = gnss_measurement(GnssVerticalInput {
             height_msl_m: best.pvt.height_msl,
             velocity_down_mps: best.pvt.vel_down,
             vertical_accuracy_mm: best.pvt.vert_accuracy,
             speed_accuracy_mps: best.pvt.speed_accuracy_mps,
             fix_tier: 3,
             pdop_centi: best.pvt.pdop,
-        }));
-        let height_std_m = measurements[best.src.index()]
-            .expect("GNSS measurement set")
-            .measurement
-            .height_std_m;
+        });
+        let receiver_height_std_m = measurement.measurement.height_std_m;
+        let pair_floor_m = self.gnss_disagreement_floor_m[best.src.index()];
+        let height_std_m = receiver_height_std_m.max(pair_floor_m);
+        let velocity_std_mps = measurement.measurement.velocity_std_mps;
+        let interval_us = self
+            .last_gnss_fusion
+            .map(|last| sample.ts.saturating_duration_since(last).as_micros())
+            .unwrap_or(1_000_000);
+        measurement.measurement.height_std_m =
+            correlated_gnss_height_std_m(height_std_m, interval_us);
+        let filter_height_std_m = measurement.measurement.height_std_m;
+        measurements[best.src.index()] = Some(measurement);
         if let Some(updates) = self
             .estimator
             .update_gnss(sample.ts.as_micros(), measurements)?
         {
-            if updates.iter().any(|update| update.height.accepted) {
+            for (ready, update) in self.gnss_anchor_ready.iter_mut().zip(updates.iter()) {
+                *ready |= update.height.accepted;
+            }
+            let selected = &updates[self.estimator.selected_imu().index()];
+            info!(
+                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, hStd={} m, vStd={} m/s, hFilterStd={} m, hPairFloor={} m, hOtherFloor={} m, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
+                best.src,
+                best.pvt.height_msl,
+                best.pvt.vel_down,
+                best.pvt.vert_accuracy,
+                best.pvt.pdop,
+                height_std_m,
+                velocity_std_mps,
+                filter_height_std_m,
+                pair_floor_m,
+                self.gnss_disagreement_floor_m[1 - best.src.index()],
+                selected.height.accepted,
+                selected.height.innovation,
+                selected.height.normalized_innovation_squared,
+                selected.velocity.accepted,
+                selected.velocity.innovation,
+                selected.velocity.normalized_innovation_squared,
+                self.gnss_anchor_ready[0],
+                self.gnss_anchor_ready[1],
+            );
+            if selected.height.accepted {
                 self.gnss_ready = true;
                 self.gnss_height_std_m = height_std_m;
+            }
+            if selected.velocity.accepted {
+                let velocity_mps = -best.pvt.vel_down;
+                if let Some((last, previous_velocity_mps)) = self.last_gnss_velocity {
+                    let elapsed = sample.ts.saturating_duration_since(last);
+                    if elapsed <= GNSS_VELOCITY_FRESH {
+                        self.gnss_displacement_m += 0.5
+                            * (previous_velocity_mps + velocity_mps)
+                            * (elapsed.as_micros() as f32 / 1_000_000.0);
+                    } else {
+                        self.barometer_bias_tracker.reset_windows();
+                    }
+                }
+                self.last_gnss_velocity = Some((sample.ts, velocity_mps));
+            } else {
+                self.last_gnss_velocity = None;
+                self.barometer_bias_tracker.reset_windows();
             }
             self.last_gnss_fusion = Some(sample.ts);
         }
@@ -214,11 +304,10 @@ impl Processor {
     }
 
     fn select_gnss(&mut self, sample: GnssSample) -> Option<GnssSample> {
-        // A poor 3D fix can be tens of metres from a later precise fix. Apply
-        // the same quality requirement to both receivers at every update.
+        // GNSS uncertainty determines weight; only an unusable solution is
+        // removed here. A weak 3D fix can still provide an absolute anchor.
         let valid = sample.pvt.height_msl.is_finite()
-            && sample.pvt.vert_accuracy <= GNSS_MAX_VERTICAL_ACCURACY_MM
-            && sample.pvt.pdop <= GNSS_MAX_PDOP_CENTI
+            && sample.pvt.vel_down.is_finite()
             && matches!(
                 sample.pvt.fix_type,
                 ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
@@ -232,11 +321,26 @@ impl Processor {
         let [first, second] = self.gnss_latest.map(|candidate| {
             candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
         });
-        // Vertical accuracy estimates height error directly. Keep the current
-        // fresh receiver until another reports at least 1.5x better accuracy.
+        if let (Some(first), Some(second)) = (first, second) {
+            // Only the less precise receiver inherits disagreement with the
+            // other fix. This is an uncertainty adjustment, not a height offset.
+            self.gnss_disagreement_floor_m = weaker_gnss_disagreement_floor_m(
+                [first.pvt.height_msl, second.pvt.height_msl],
+                [first.pvt.vel_down, second.pvt.vel_down],
+                [first.ts.as_micros(), second.ts.as_micros()],
+                [
+                    gnss_height_std_m(first.pvt.vert_accuracy, first.pvt.pdop),
+                    gnss_height_std_m(second.pvt.vert_accuracy, second.pvt.pdop),
+                ],
+            );
+        }
+        // Keep the current fresh receiver until another has clearly lower
+        // height uncertainty, including the geometry-based floor.
         let candidate = match (first, second) {
             (Some(first), Some(second)) => {
-                if first.pvt.vert_accuracy < second.pvt.vert_accuracy {
+                if gnss_height_std_m(first.pvt.vert_accuracy, first.pvt.pdop)
+                    < gnss_height_std_m(second.pvt.vert_accuracy, second.pvt.pdop)
+                {
                     first
                 } else {
                     second
@@ -252,8 +356,9 @@ impl Processor {
         {
             Some(current)
                 if current.src != candidate.src
-                    && (candidate.pvt.vert_accuracy as f32) * GNSS_SWITCH_IMPROVEMENT
-                        >= current.pvt.vert_accuracy as f32 =>
+                    && gnss_height_std_m(candidate.pvt.vert_accuracy, candidate.pvt.pdop)
+                        * GNSS_SWITCH_IMPROVEMENT
+                        >= gnss_height_std_m(current.pvt.vert_accuracy, current.pvt.pdop) =>
             {
                 current
             }
@@ -296,9 +401,10 @@ impl Processor {
         let altitude_msl_m = state.height_m;
         let height_std_m = libm::sqrtf(uncertainty.height_variance_m2).max(self.gnss_height_std_m);
         let selected_imu = if imu.index() == 0 { IMU_0 } else { IMU_1 };
+        let msl_ready = self.gnss_anchor_ready[imu.index()];
         signals::STATE_ESTIMATE_WATCH.sender().send(StateEstimate {
             ts,
-            msl_ready: self.gnss_ready,
+            msl_ready,
             height_msl_m: altitude_msl_m,
             velocity_mps: state.velocity_mps,
             height_std_m,
@@ -313,7 +419,7 @@ impl Processor {
             .last_status_log
             .is_none_or(|last| now.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
         {
-            if self.gnss_ready {
+            if msl_ready {
                 info!(
                     "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
                     altitude_msl_m,
@@ -396,15 +502,17 @@ impl Processor {
             let window_s = IMU_DIAGNOSTIC_PERIOD.as_secs() as f32;
             let free_height_drift_m = 0.5 * window_s * window_s * summary.gravity_error_mean_mps2;
             info!(
-                "IMU {} bench: n={}, gravity_error_mean={} m/s2, gravity_noise={} m/s2, gyro_mean=[{},{},{}] rad/s, gyro_noise={} rad/s, free_dh_10s={} m",
+                "IMU {} bench: n={}, gravity_error_mean={} m/s2, gravity_noise={} m/s2, max_accel={} m/s2, gyro_mean=[{},{},{}] rad/s, gyro_noise={} rad/s, max_gyro={} rad/s, free_dh_10s={} m",
                 id,
                 summary.samples,
                 summary.gravity_error_mean_mps2,
                 summary.gravity_error_noise_mps2,
+                summary.max_acceleration_mps2,
                 summary.gyro_mean_rad_s[0],
                 summary.gyro_mean_rad_s[1],
                 summary.gyro_mean_rad_s[2],
                 summary.gyro_noise_rad_s,
+                summary.max_gyro_rad_s,
                 free_height_drift_m,
             );
         }

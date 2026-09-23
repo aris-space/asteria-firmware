@@ -13,8 +13,7 @@ debug = ["dep:panic-probe"]
 
 [dependencies]
 # The host-testable SEF configuration and unit conversions live in this package.
-# Local SEF-light integration branch; this checkout expects the sibling repository.
-asteria-sef-light = { path = "../../../../asteria-state-estimation/crates/sef-light" }
+asteria-sef-light = { path = "../../crates/asteria-sef-light" }
 libm = "0.2.11"
 
 [target.'cfg(target_os = "none")'.dependencies]

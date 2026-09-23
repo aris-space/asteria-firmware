@@ -47,66 +47,30 @@ pub async fn task() -> ! {
     let mut max_imu_backlog = [0_u64; 2];
     let mut queue_report_at = Instant::now() + IMU_DIAGNOSTIC_PERIOD;
 
+    macro_rules! poll_head {
+        ($head:expr, $subscriber:expr, $event:ident, $dropped:expr) => {
+            if $head.is_none() {
+                match $subscriber.try_next_message() {
+                    Some(WaitResult::Message(sample)) => $head = Some(Event::$event(sample)),
+                    Some(WaitResult::Lagged(count)) => $dropped += count,
+                    None => {}
+                }
+            }
+        };
+    }
+
     loop {
         max_imu_backlog[0] = max_imu_backlog[0].max(imu0.available());
         max_imu_backlog[1] = max_imu_backlog[1].max(imu1.available());
 
-        if heads[0].is_none() {
-            match imu0.try_next_message() {
-                Some(WaitResult::Message(sample)) => heads[0] = Some(Event::Imu(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_imu[0] += count,
-                None => {}
-            }
-        }
-        if heads[1].is_none() {
-            match imu1.try_next_message() {
-                Some(WaitResult::Message(sample)) => heads[1] = Some(Event::Imu(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_imu[1] += count,
-                None => {}
-            }
-        }
-        if heads[2].is_none() {
-            match baro0.try_next_message() {
-                Some(WaitResult::Message(sample)) => heads[2] = Some(Event::Barometer(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[0] += count,
-                None => {}
-            }
-        }
-        if heads[3].is_none() {
-            match baro1.try_next_message() {
-                Some(WaitResult::Message(sample)) => heads[3] = Some(Event::Barometer(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[1] += count,
-                None => {}
-            }
-        }
-        if heads[4].is_none() {
-            match gnss0.try_next_message() {
-                Some(WaitResult::Message(sample)) => heads[4] = Some(Event::Gnss(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[2] += count,
-                None => {}
-            }
-        }
-        if heads[5].is_none() {
-            match gnss1.try_next_message() {
-                Some(WaitResult::Message(sample)) => heads[5] = Some(Event::Gnss(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[3] += count,
-                None => {}
-            }
-        }
-        if heads[6].is_none() {
-            match mag0.try_next_message() {
-                Some(WaitResult::Message(sample)) => heads[6] = Some(Event::Magnetometer(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[4] += count,
-                None => {}
-            }
-        }
-        if heads[7].is_none() {
-            match mag1.try_next_message() {
-                Some(WaitResult::Message(sample)) => heads[7] = Some(Event::Magnetometer(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[5] += count,
-                None => {}
-            }
-        }
+        poll_head!(heads[0], imu0, Imu, dropped_imu[0]);
+        poll_head!(heads[1], imu1, Imu, dropped_imu[1]);
+        poll_head!(heads[2], baro0, Barometer, dropped_aiding[0]);
+        poll_head!(heads[3], baro1, Barometer, dropped_aiding[1]);
+        poll_head!(heads[4], gnss0, Gnss, dropped_aiding[2]);
+        poll_head!(heads[5], gnss1, Gnss, dropped_aiding[3]);
+        poll_head!(heads[6], mag0, Magnetometer, dropped_aiding[4]);
+        poll_head!(heads[7], mag1, Magnetometer, dropped_aiding[5]);
 
         // Feed all eight streams in timestamp order. In-order aiding avoids a
         // full SEF history replay at each 40 Hz barometer observation.
