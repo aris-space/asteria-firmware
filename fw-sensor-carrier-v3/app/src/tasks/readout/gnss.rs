@@ -67,11 +67,14 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
         let mut status_packets = 0u32;
         let mut pvt_packets = 0u32;
         let mut received_bytes = 0u32;
+        let mut link_active = false;
 
         loop {
             if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                 self.attempt = self.attempt.saturating_add(1);
                 consecutive_errors = 0;
+                link_active = false;
+                GNSS_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
                 debug!("{} re-initializing", self.id);
                 embassy_time::Timer::after(backoff(self.attempt)).await;
             }
@@ -93,6 +96,12 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                 while let Some(msg) = parsed.next() {
                     if let Ok(ref packet) = msg {
                         log_configuration_packet(self.id, packet);
+                        if !link_active {
+                            GNSS_STATUS[self.id.index()]
+                                .store(SensorStatus::Active, Ordering::Relaxed);
+                            info!("{} UBX link active", self.id);
+                            link_active = true;
+                        }
                     }
                     match msg {
                         Ok(PacketRef::NavStatus(_)) => {
