@@ -269,6 +269,7 @@ async fn run_inner<'a, RX: embedded_io_async::Read>(
     rx: RX,
     parser: Parser<ublox::FixedLinearBuffer<'a>>,
     id: GnssId,
+    mut tx: Option<UartTx<'static, Async>>,
 ) -> ! {
     let mut inactive = Inactive {
         rx,
@@ -279,6 +280,11 @@ async fn run_inner<'a, RX: embedded_io_async::Read>(
 
     loop {
         let active = inactive.run().await;
+        if let Some(tx) = tx.as_mut() {
+            // Poll after the receive loop has survived startup UART errors.
+            embassy_time::Timer::after_millis(100).await;
+            poll_gnss_1_configuration(tx).await;
+        }
         GNSS_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
         inactive = active.run().await;
         GNSS_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
@@ -324,15 +330,7 @@ async fn configure_gnss_1_messages(tx: &mut UartTx<'static, Async>) {
     .into_packet_bytes();
     let status = CfgMsgSinglePortBuilder::set_rate_for::<NavStatus>(1).into_packet_bytes();
     let pvt = CfgMsgSinglePortBuilder::set_rate_for::<NavPvt>(1).into_packet_bytes();
-    let poll_rate = UbxPacketRequest::request_for::<CfgRate>().into_packet_bytes();
-    let poll_version = UbxPacketRequest::request_for::<MonVer>().into_packet_bytes();
-    for packet in [
-        &rate[..],
-        &status[..],
-        &pvt[..],
-        &poll_rate[..],
-        &poll_version[..],
-    ] {
+    for packet in [&rate[..], &status[..], &pvt[..]] {
         if let Err(e) = tx.write(packet).await {
             warn!(
                 "GNSS_1 message configuration failed: {:?}",
@@ -343,6 +341,17 @@ async fn configure_gnss_1_messages(tx: &mut UartTx<'static, Async>) {
         embassy_time::Timer::after_millis(20).await;
     }
     info!("GNSS_1 UBX configuration sent at 921600 baud");
+}
+
+async fn poll_gnss_1_configuration(tx: &mut UartTx<'static, Async>) {
+    let poll_rate = UbxPacketRequest::request_for::<CfgRate>().into_packet_bytes();
+    let poll_version = UbxPacketRequest::request_for::<MonVer>().into_packet_bytes();
+    for packet in [&poll_rate[..], &poll_version[..]] {
+        if let Err(e) = tx.write(packet).await {
+            warn!("GNSS_1 configuration poll failed: {:?}", Debug2Format(&e));
+        }
+        embassy_time::Timer::after_millis(20).await;
+    }
 }
 
 #[embassy_executor::task(pool_size = 2)]
@@ -368,5 +377,5 @@ pub async fn task(
     let linear_buf = ublox::FixedLinearBuffer::new(&mut parse_buf);
     let parser = Parser::new(linear_buf);
 
-    run_inner(rx, parser, id).await
+    run_inner(rx, parser, id, tx).await
 }
