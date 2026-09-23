@@ -8,6 +8,8 @@
 
 ## Current measurements
 
+Run `python3 fw-sensor-carrier-v3/analyze_sef_soak.py LOG_PATH` to reproduce the ten-minute sensor, selector, and queue summaries from a firmware log.
+
 The stationary indoor run in `/private/tmp/asteria-reception-order-run.log` lasted 236 s. Every 10 s queue report showed zero dropped and zero late IMU or aiding events. The two barometric pressure altitudes had standard deviations of about 0.27 m and 0.30 m; a 1.5 m observation standard deviation leaves margin for unmeasured effects. Their raw pressure altitudes were about 305 m and 295 m. SEF-light's bias states reconcile them with GNSS MSL height.
 
 GNSS_0 ranged from 391 m to 428 m MSL indoors. GNSS_1 ranged from 418 m to 426 m while the carrier was stationary. The selected estimate moved from 425 m to 422 m. The receiver's reported `vAcc` did not capture all of this slow indoor drift, so the filter uses a 3 m GNSS height uncertainty floor. This run proves timing and short-term stability; it cannot establish outdoor absolute accuracy.
