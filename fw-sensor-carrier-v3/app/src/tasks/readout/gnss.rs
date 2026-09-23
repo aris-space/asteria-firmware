@@ -91,6 +91,9 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                     match msg {
                         Ok(PacketRef::NavStatus(stat)) => {
                             status_packets = status_packets.saturating_add(1);
+                            valid_packets = valid_packets.saturating_add(1);
+                            self.attempt = 0;
+                            consecutive_errors = 0;
                             match stat.fix_type() {
                                 GpsFix::Fix2D
                                 | GpsFix::Fix3D
@@ -98,13 +101,8 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                                 | GpsFix::TimeOnlyFix => {
                                     fix_type = stat.fix_type();
                                     got_fix = true;
-                                    break;
                                 }
-                                _ => {
-                                    valid_packets = valid_packets.saturating_add(1);
-                                    self.attempt = 0;
-                                    consecutive_errors = 0;
-                                }
+                                _ => {}
                             }
                         }
                         Ok(PacketRef::NavPvt(_)) => {
