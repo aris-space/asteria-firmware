@@ -1,17 +1,15 @@
-//! Per-sensor calibration. Every submodule exposes `apply_calibration`, which
-//! turns a raw sample into a calibrated one using values it loads internally.
-//! `baro`/`dht`/`gnss` only apply a fixed read-latency offset. `imu` also
+//! Per-sensor calibration. IMU and magnetometer calibration turn raw samples
+//! into board-frame measurements using values loaded from flash. Barometer
+//! readout timestamps its pressure conversion directly; GNSS and humidity
+//! readouts retain reception and completion timestamps. The IMU calibration
 //! applies a fixed sensor-to-board axis remap and flash-backed gyro offset;
-//! `mag` applies a flash-backed field correction. Both flash-backed modules
-//! load at boot and expose caller-driven calibration routines.
+//! magnetometer calibration applies a flash-backed field correction. Both
+//! flash-backed modules load at boot and expose caller-driven routines.
 
 use core::fmt;
 
 use serde::{Deserialize, Serialize};
 
-pub mod baro;
-pub mod dht;
-pub mod gnss;
 pub mod imu;
 pub mod mag;
 

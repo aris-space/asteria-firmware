@@ -27,6 +27,8 @@ pub struct RawImuSample {
     pub gyro: AngularRate,
 }
 
+/// Pressure and temperature in sensor units, timestamped near the pressure
+/// conversion by the barometer readout.
 #[derive(Clone, Copy, Debug)]
 pub struct BaroSample {
     pub src: BarometerId,
@@ -35,16 +37,7 @@ pub struct BaroSample {
     pub temperature_c: f32,
 }
 
-/// Raw barometer sample. Built by the readout with `ts = Instant::now()`
-/// (read-completion time); calibration subtracts the per-sensor delay.
-#[derive(Clone, Copy, Debug)]
-pub struct RawBaroSample {
-    pub src: BarometerId,
-    pub ts: Instant,
-    pub pressure_mbar: f32,
-    pub temperature_c: f32,
-}
-
+/// Humidity and temperature from the readout, timestamped on completion.
 #[derive(Clone, Copy, Debug)]
 pub struct DhtSample {
     pub src: DhtId,
@@ -53,27 +46,9 @@ pub struct DhtSample {
     pub humidity_rh: f32,
 }
 
-/// Raw DHT sample. Built by the readout with `ts = Instant::now()`
-/// (read-completion time); calibration subtracts the per-sensor delay.
-#[derive(Clone, Copy, Debug)]
-pub struct RawDhtSample {
-    pub src: DhtId,
-    pub ts: Instant,
-    pub temperature_c: f32,
-    pub humidity_rh: f32,
-}
-
+/// GNSS navigation data, timestamped when its packet is received.
 #[derive(Clone, Copy, Debug)]
 pub struct GnssSample {
-    pub src: GnssId,
-    pub ts: Instant,
-    pub pvt: Pvt,
-}
-
-/// Raw GNSS sample. Built by the readout with `ts = Instant::now()`
-/// (read-completion time); calibration subtracts the per-sensor delay.
-#[derive(Clone, Copy, Debug)]
-pub struct RawGnssSample {
     pub src: GnssId,
     pub ts: Instant,
     pub pvt: Pvt,
