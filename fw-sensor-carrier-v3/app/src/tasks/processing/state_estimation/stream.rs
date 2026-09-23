@@ -4,9 +4,11 @@ use defmt::info;
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Timer};
 
-use super::{EVENT_HOLDBACK, Event, IMU_DIAGNOSTIC_PERIOD, Processor};
+use super::{Event, IMU_DIAGNOSTIC_PERIOD, Processor};
 use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, IMU_0, IMU_1, MAG_BUS_1, MAG_BUS_2};
 use crate::signals;
+
+const EVENT_HOLDBACK: Duration = Duration::from_millis(35);
 
 #[embassy_executor::task]
 pub async fn task() -> ! {

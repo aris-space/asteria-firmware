@@ -21,17 +21,15 @@ const MIN_SAMPLES: u32 = 1_000;
 const MAX_GYRO_NOISE_RAD_S: f32 = 0.01;
 const MAX_ACCEL_NOISE_MPS2: f32 = 0.3;
 
-/// How long ago (relative to read-completion time) the physical
-/// measurement actually happened.
-const DELAY: Duration = Duration::from_millis(0);
-
+// Measurement latency has not been measured, so retain the read-completion
+// timestamp rather than applying an assumed offset.
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
     let [ax, ay, az] = sensor_to_board([raw.accel.x, raw.accel.y, raw.accel.z]);
     let [gx, gy, gz] = sensor_to_board([raw.gyro.x, raw.gyro.y, raw.gyro.z]);
     let bias = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].gyro_bias_dps;
     ImuSample {
         src: raw.src,
-        ts: raw.ts - DELAY,
+        ts: raw.ts,
         accel: Acceleration {
             x: ax,
             y: ay,

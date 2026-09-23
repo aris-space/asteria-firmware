@@ -21,9 +21,10 @@ const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
 const GNSS_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
 const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
 const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
+const STATUS_LOG_PERIOD: Duration = Duration::from_secs(1);
 const IMU_DIAGNOSTIC_PERIOD: Duration = Duration::from_secs(10);
-const EVENT_HOLDBACK: Duration = Duration::from_millis(35);
-// Each stationary barometer varied by about 0.5 m in the bench run.
+// Both stationary barometers varied by about 0.3 m in the bench run; this
+// larger uncertainty allows for pressure changes and correlated samples.
 const BARO_HEIGHT_STD_M: f32 = 1.5;
 
 #[derive(Clone, Copy)]
@@ -97,7 +98,7 @@ impl Processor {
             let now = Instant::now();
             if self
                 .last_warning
-                .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
+                .is_none_or(|last| now.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
             {
                 warn!("SEF-light update failed: {:?}", Debug2Format(&error));
                 self.last_warning = Some(now);
@@ -125,7 +126,7 @@ impl Processor {
         let height_m = barometric_pressure_altitude_m(sample.pressure_mbar)
             .ok_or(EstimatorError::OutOfRangeInput)?;
         if self.last_baro_log[index]
-            .is_none_or(|last| sample.ts.saturating_duration_since(last) >= Duration::from_secs(1))
+            .is_none_or(|last| sample.ts.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
         {
             info!(
                 "SEF baro {}: pressure_altitude={} m, pressure={} mbar",
@@ -152,7 +153,7 @@ impl Processor {
         let field_nt = libm::sqrtf(field.iter().map(|value| value * value).sum());
         let calibration = calibration::mag::applied()[index];
         if self.last_mag_log[index]
-            .is_none_or(|last| sample.ts.saturating_duration_since(last) >= Duration::from_secs(1))
+            .is_none_or(|last| sample.ts.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
         {
             info!(
                 "SEF mag {}: field={} nT, calibrated={}, accepted={}",
@@ -307,7 +308,7 @@ impl Processor {
         self.log_full_state(now);
         if self
             .last_status_log
-            .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
+            .is_none_or(|last| now.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
         {
             if self.gnss_ready {
                 info!(
@@ -389,9 +390,10 @@ impl Processor {
             };
             // This drift proxy applies only when the carrier is stationary and
             // the gravity-norm error projects onto the vertical axis.
-            let free_height_drift_10s_m = 50.0 * summary.gravity_error_mean_mps2;
+            let window_s = IMU_DIAGNOSTIC_PERIOD.as_secs() as f32;
+            let free_height_drift_m = 0.5 * window_s * window_s * summary.gravity_error_mean_mps2;
             info!(
-                "IMU {} bench: n={}, gravity_error_mean={} m/s2, gravity_noise={} m/s2, gyro_mean=[{},{},{}] rad/s, gyro_noise={} rad/s, free_dh_10s={} m, category={}",
+                "IMU {} bench: n={}, gravity_error_mean={} m/s2, gravity_noise={} m/s2, gyro_mean=[{},{},{}] rad/s, gyro_noise={} rad/s, free_dh_10s={} m",
                 id,
                 summary.samples,
                 summary.gravity_error_mean_mps2,
@@ -400,8 +402,7 @@ impl Processor {
                 summary.gyro_mean_rad_s[1],
                 summary.gyro_mean_rad_s[2],
                 summary.gyro_noise_rad_s,
-                free_height_drift_10s_m,
-                summary.category(),
+                free_height_drift_m,
             );
         }
         self.last_imu_report = now;

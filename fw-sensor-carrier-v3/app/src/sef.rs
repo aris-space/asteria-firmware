@@ -123,24 +123,6 @@ impl ImuWindow {
     }
 }
 
-impl ImuWindowSummary {
-    pub fn category(self) -> &'static str {
-        let gyro_mean_norm = libm::sqrtf(
-            self.gyro_mean_rad_s
-                .iter()
-                .map(|rate| rate * rate)
-                .sum::<f32>(),
-        );
-        if self.gravity_error_noise_mps2 > 0.2 || self.gyro_noise_rad_s > 0.02 {
-            "unsteady"
-        } else if gyro_mean_norm > 0.01 || self.gravity_error_mean_mps2.abs() > 0.1 {
-            "quiet_offset_suspect"
-        } else {
-            "quiet"
-        }
-    }
-}
-
 pub struct GnssVerticalInput {
     pub height_msl_m: f32,
     pub velocity_down_mps: f32,
@@ -220,6 +202,5 @@ mod tests {
         assert_eq!(summary.samples, 100);
         assert!((summary.gravity_error_mean_mps2 - 0.2).abs() < 1e-4);
         assert!((summary.gravity_error_noise_mps2 - 0.02).abs() < 1e-3);
-        assert_eq!(summary.category(), "quiet_offset_suspect");
     }
 }

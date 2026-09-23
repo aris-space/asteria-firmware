@@ -14,13 +14,15 @@ use crate::signals::RAW_MAG_CHANNELS;
 use crate::storage::Storage;
 use crate::types::{MagSample, RawMagSample};
 
+// The delay between a physical measurement and read completion is unknown,
+// so use the read-completion timestamp without an assumed offset.
 pub fn apply_calibration(raw: RawMagSample) -> MagSample {
     let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].correction;
     let board = sensor_to_board([raw.x, raw.y, raw.z]).map(|c| c as f32 * LSB_TO_NT);
     let corrected = cal.correct_board_field(Vector3::from(board));
     MagSample {
         src: raw.src,
-        ts: raw.ts - DELAY,
+        ts: raw.ts,
         x: corrected.x,
         y: corrected.y,
         z: corrected.z,
@@ -50,10 +52,6 @@ pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT
 static CAL: OnceLock<[StoredCal; MAGNETOMETER_COUNT]> = OnceLock::new();
 
 const DEFAULTS: [StoredCal; MAGNETOMETER_COUNT] = [StoredCal::DEFAULT; MAGNETOMETER_COUNT];
-
-/// How long ago (relative to read-completion time) the physical
-/// measurement actually happened.
-const DELAY: Duration = Duration::from_millis(0);
 
 async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
     match storage.load::<StoredCal>(&id.key()).await {
