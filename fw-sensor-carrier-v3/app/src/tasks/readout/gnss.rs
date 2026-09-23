@@ -95,27 +95,24 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                         log_configuration_packet(self.id, packet);
                     }
                     match msg {
-                        Ok(PacketRef::NavStatus(stat)) => {
+                        Ok(PacketRef::NavStatus(_)) => {
                             status_packets = status_packets.saturating_add(1);
                             valid_packets = valid_packets.saturating_add(1);
                             self.attempt = 0;
                             consecutive_errors = 0;
-                            match stat.fix_type() {
-                                GpsFix::Fix2D
-                                | GpsFix::Fix3D
-                                | GpsFix::GPSPlusDeadReckoning
-                                | GpsFix::TimeOnlyFix => {
-                                    fix_type = stat.fix_type();
-                                    got_fix = true;
-                                }
-                                _ => {}
-                            }
                         }
-                        Ok(PacketRef::NavPvt(_)) => {
+                        Ok(PacketRef::NavPvt(pvt)) => {
                             pvt_packets = pvt_packets.saturating_add(1);
                             valid_packets = valid_packets.saturating_add(1);
                             self.attempt = 0;
                             consecutive_errors = 0;
+                            // NAV-PVT alone is enough to establish a usable link and fix.
+                            if pvt.flags().contains(NavPvtFlags::GPS_FIX_OK)
+                                && matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D)
+                            {
+                                fix_type = pvt.fix_type();
+                                got_fix = true;
+                            }
                         }
                         Ok(_) => {
                             valid_packets = valid_packets.saturating_add(1);
