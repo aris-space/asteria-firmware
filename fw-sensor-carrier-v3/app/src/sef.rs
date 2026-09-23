@@ -36,11 +36,12 @@ pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorE
         300,  // rejected samples before acceleration recovery
     )?
     .with_magnetic_rejection(20.0)?;
-    // Healthy chains have similar stationary scores. Require a sustained
-    // improvement before switching to avoid brief attitude discontinuities.
+    // Healthy chains have similar stationary scores. The board log showed a
+    // 44-degree unaided heading difference at a marginal quality handover.
+    // Require a clearer, sustained advantage before changing the full state.
     let selection = SelectorConfig::new(
-        0.001,     // IMU score improvement required for a handover
-        1_500_000, // required improvement duration and minimum time between handovers, µs
+        0.0025,    // IMU score improvement required for a handover
+        5_000_000, // required improvement duration and minimum time between handovers, µs
     )
     .ok_or(EstimatorError::OutOfRangeInput)?;
     let selector = VerticalEstimatorSelectorConfig::new(
