@@ -5,8 +5,8 @@ use defmt::{Debug2Format, info, warn};
 use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
     BarometerBiasTracker, Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
-    barometric_pressure_altitude_m, gnss_height_std_m, gnss_measurement, imu_measurement,
-    new_estimator,
+    barometric_pressure_altitude_m, correlated_gnss_height_std_m, gnss_height_std_m,
+    gnss_measurement, imu_measurement, new_estimator,
 };
 
 use crate::calibration;
@@ -19,7 +19,6 @@ const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
 const GNSS_FUSION_PERIOD: Duration = Duration::from_millis(45);
-const GNSS_FUSIONS_PER_SECOND: f32 = 20.0;
 const GNSS_VELOCITY_FRESH: Duration = Duration::from_secs(2);
 const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
 const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
@@ -216,10 +215,9 @@ impl Processor {
             self.gnss_displacement_m = 0.0;
             self.barometer_bias_tracker = BarometerBiasTracker::default();
         }
-        // NavPVT arrives at 20 Hz. Fuse its velocity at that rate to prevent
-        // a stationary accelerometer offset from building up between updates.
-        // Adjacent GNSS heights are correlated, so preserve roughly the same
-        // height information per second as the previous 1 Hz fusion.
+        // Fuse every available NavPVT epoch, up to the receiver's 20 Hz rate.
+        // Adjacent heights are correlated; scale their information by the
+        // actual interval so a 1 Hz receiver is not weakened like a 20 Hz one.
         if self
             .last_gnss_fusion
             .is_some_and(|last| sample.ts.saturating_duration_since(last) < GNSS_FUSION_PERIOD)
@@ -237,7 +235,13 @@ impl Processor {
         });
         let height_std_m = measurement.measurement.height_std_m;
         let velocity_std_mps = measurement.measurement.velocity_std_mps;
-        measurement.measurement.height_std_m *= libm::sqrtf(GNSS_FUSIONS_PER_SECOND);
+        let interval_us = self
+            .last_gnss_fusion
+            .map(|last| sample.ts.saturating_duration_since(last).as_micros())
+            .unwrap_or(1_000_000);
+        measurement.measurement.height_std_m =
+            correlated_gnss_height_std_m(height_std_m, interval_us);
+        let filter_height_std_m = measurement.measurement.height_std_m;
         measurements[best.src.index()] = Some(measurement);
         if let Some(updates) = self
             .estimator
@@ -248,7 +252,7 @@ impl Processor {
             }
             let selected = &updates[self.estimator.selected_imu().index()];
             info!(
-                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, hStd={} m, vStd={} m/s, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
+                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, hStd={} m, vStd={} m/s, hFilterStd={} m, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
                 best.src,
                 best.pvt.height_msl,
                 best.pvt.vel_down,
@@ -256,6 +260,7 @@ impl Processor {
                 best.pvt.pdop,
                 height_std_m,
                 velocity_std_mps,
+                filter_height_std_m,
                 selected.height.accepted,
                 selected.height.innovation,
                 selected.height.normalized_innovation_squared,

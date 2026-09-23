@@ -12,6 +12,14 @@ pub const HISTORY_CAPACITY: usize = 768;
 pub const MAX_AIDING_DELAY_US: u64 = 400_000;
 pub type Estimator = DualVerticalEstimator<HISTORY_CAPACITY>;
 pub const GNSS_HEIGHT_STD_FLOOR_M: f32 = 3.0;
+
+/// Keep roughly one independent GNSS height observation per second when a
+/// receiver sends correlated fixes faster than that. A slower receiver keeps
+/// its reported per-fix weight instead of receiving a fixed 20 Hz penalty.
+pub fn correlated_gnss_height_std_m(height_std_m: f32, interval_us: u64) -> f32 {
+    let interval_us = interval_us.clamp(50_000, 1_000_000);
+    height_std_m * libm::sqrtf(1_000_000.0 / interval_us as f32)
+}
 // The weak four-satellite bench fix reported 2.7 m vAcc at PDOP 9.4.
 // Use the good receiver's roughly 2.0 PDOP as the point where geometry
 // starts raising the uncertainty floor.
@@ -307,6 +315,16 @@ mod tests {
         assert_eq!(gnss_height_std_m(900, 180), 3.0);
         assert_eq!(gnss_height_std_m(4_000, 180), 4.0);
         assert!((gnss_height_std_m(2_700, 940) - 14.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn gnss_height_weight_tracks_fix_interval_and_quality() {
+        let one_hz_std = correlated_gnss_height_std_m(3.0, 1_000_000);
+        let twenty_hz_std = correlated_gnss_height_std_m(3.0, 50_000);
+        assert_eq!(one_hz_std, 3.0);
+        assert!((20.0 / twenty_hz_std.powi(2) - 1.0 / one_hz_std.powi(2)).abs() < 1e-6);
+        assert_eq!(correlated_gnss_height_std_m(6.0, 1_000_000), 6.0);
+        assert!((correlated_gnss_height_std_m(6.0, 50_000) - 2.0 * twenty_hz_std).abs() < 1e-5);
     }
 
     #[test]
