@@ -29,9 +29,11 @@ GNSS = re.compile(
 GNSS_SOURCE = re.compile(r"SEF GNSS source: (?P<source>GNSS_[01])")
 GNSS_UPDATE = re.compile(
     r"SEF GNSS update (?P<source>GNSS_[01]): "
+    r"(?P<metadata>.*?)"
     r"h accepted=(?P<haccepted>true|false), innovation=(?P<hinnovation>[^ ]+) m, nis=(?P<hnis>[^,]+), "
     r"v accepted=(?P<vaccepted>true|false), innovation=(?P<vinnovation>[^ ]+) m/s, nis=(?P<vnis>[^ ]+)"
 )
+GNSS_HEIGHT_STD = re.compile(r"hStd=(?P<std>[\d.]+) m")
 BARO = re.compile(
     r"SEF baro (?P<source>BARO_BUS_[12]): "
     r"pressure_altitude=(?P<h>-?[\d.]+) m, pressure=(?P<pressure>-?[\d.]+) mbar"
@@ -122,12 +124,10 @@ def in_window(rows, start, end, source=None):
     ]
 
 
-def gnss_qualified(item):
+def gnss_usable(item):
     return (
         item["fixok"] == "true"
         and item["fix"] in ("Fix3D", "GPSPlusDeadReckoning")
-        and int(item["vacc"]) <= 3_000
-        and int(item["pdop"]) <= 600
     )
 
 
@@ -172,8 +172,8 @@ def report(rows, start, end):
                 f"PDOP_median={statistics.median(int(item['pdop']) for item in gnss)/100:.2f} "
                 f"sats_median={statistics.median(int(item['sats']) for item in gnss):.1f}"
             )
-            qualified = sum(gnss_qualified(item) for item in gnss)
-            print(f"  {source}_quality_reports={qualified}/{len(gnss)}")
+            usable = sum(gnss_usable(item) for item in gnss)
+            print(f"  {source}_usable_fix_reports={usable}/{len(gnss)}")
             print(f"  {source}_msl_m", mean_sd([float(item["h"]) for item in gnss]))
             print(f"  {source}_vup_mps", mean_sd([-float(item["vdown"]) for item in gnss]))
             source_rows = [(time, item) for time, item in rows["gnss"] if item["source"] == source]
@@ -246,17 +246,24 @@ def main():
                 f"velocity_accepted={sum(item['vaccepted'] == 'true' for item in updates)} "
                 f"height_innovation_m={mean_sd([float(item['hinnovation']) for item in updates])}"
             )
+            height_stds = [
+                float(match["std"])
+                for item in updates
+                if (match := GNSS_HEIGHT_STD.search(item["metadata"]))
+            ]
+            if height_stds:
+                print(f"{source} height_observation_std_m", mean_sd(height_stds))
     for source in ("GNSS_0", "GNSS_1"):
         bad_run = 0
         longest_bad_run = 0
         reports = [(time, item) for time, item in rows["gnss"] if item["source"] == source]
         for _, item in reports:
-            bad_run = 0 if gnss_qualified(item) else bad_run + 1
+            bad_run = 0 if gnss_usable(item) else bad_run + 1
             longest_bad_run = max(longest_bad_run, bad_run)
-        qualified = sum(gnss_qualified(item) for _, item in reports)
+        usable = sum(gnss_usable(item) for _, item in reports)
         print(
-            f"{source} qualified_reports={qualified}/{len(reports)} "
-            f"longest_unqualified_reports={longest_bad_run}"
+            f"{source} usable_fix_reports={usable}/{len(reports)} "
+            f"longest_unusable_reports={longest_bad_run}"
         )
     selected = [(time, item["imu"]) for time, item in rows["state"]]
     switches = [(time, imu) for (time, imu), (_, old) in zip(selected[1:], selected[:-1]) if imu != old]

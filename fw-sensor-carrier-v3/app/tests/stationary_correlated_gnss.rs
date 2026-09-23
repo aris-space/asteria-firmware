@@ -285,3 +285,31 @@ fn stationary_consistency_selects_the_better_imu_and_fails_over_if_it_stales() {
     }
     assert_eq!(estimator.selected_imu(), IMU_1);
 }
+
+#[test]
+fn calibrated_magnetic_field_reaches_one_attitude_chain() {
+    let mut estimator = new_estimator(2_000.0).unwrap();
+    let stationary_imu = imu_measurement([0.0, 0.0, -1.0], [0.0; 3]);
+
+    for step in 0..5_000_u64 {
+        let time_us = step * 1_200;
+        if step.is_multiple_of(42) {
+            estimator
+                .update_magnetometer(IMU_0, time_us, [20_000.0, 0.0, 40_000.0])
+                .unwrap();
+        }
+        estimator
+            .update_imu(IMU_0, time_us, stationary_imu)
+            .unwrap();
+        estimator
+            .update_imu(IMU_1, time_us, stationary_imu)
+            .unwrap();
+    }
+
+    let status = estimator.imu_status(IMU_0);
+    assert!(
+        !status.magnetometer_ignored,
+        "magnetic sample was ignored: {status:?}"
+    );
+    assert!(estimator.imu_status(IMU_1).magnetometer_ignored);
+}
