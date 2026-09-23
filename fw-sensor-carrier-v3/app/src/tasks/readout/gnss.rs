@@ -136,7 +136,8 @@ struct Active<'a, RX> {
 impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
     async fn run(mut self) -> Inactive<'a, RX> {
         let mut recv_buf = [0u8; 4096];
-        let mut next_report = Instant::now() + Duration::from_secs(1);
+        let mut report_started_at = Instant::now();
+        let mut next_report = report_started_at + Duration::from_secs(1);
         let mut pvt_count = 0_u32;
         let mut status_count = 0_u32;
         let mut last_itow = None;
@@ -156,12 +157,15 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                 }
                                 last_itow = Some(pvt.itow());
                                 let fix_ok = pvt.flags().contains(NavPvtFlags::GPS_FIX_OK);
-                                if Instant::now() >= next_report {
+                                let now = Instant::now();
+                                if now >= next_report {
                                     info!(
-                                        "{} GNSS: PVT/s={}, STATUS/s={}, max_epoch_gap={} ms, MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
+                                        "{} GNSS: PVT={}, STATUS={}, report_ms={}, max_epoch_gap={} ms, MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
                                         self.id,
                                         pvt_count,
                                         status_count,
+                                        now.saturating_duration_since(report_started_at)
+                                            .as_millis(),
                                         max_epoch_gap_ms,
                                         pvt.height_msl(),
                                         pvt.vert_accuracy(),
@@ -175,7 +179,8 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                     pvt_count = 0;
                                     status_count = 0;
                                     max_epoch_gap_ms = 0;
-                                    next_report = Instant::now() + Duration::from_secs(1);
+                                    report_started_at = now;
+                                    next_report = now + Duration::from_secs(1);
                                 }
                                 if !fix_ok
                                     || !matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D)
