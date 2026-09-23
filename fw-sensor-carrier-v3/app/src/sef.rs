@@ -53,6 +53,10 @@ const DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.5;
 const BARO_TREND_WINDOW_US: u64 = 30_000_000;
 const BARO_DRIFT_START_M: f32 = 0.5;
 const BARO_DRIFT_STOP_M: f32 = 0.2;
+// A stationary board showed >2 m of unexplained pressure-altitude change in
+// five seconds; a 236 s quiet trace stayed below 1.2 m over five seconds.
+const BARO_FAST_TREND_WINDOW_US: u64 = 5_000_000;
+const BARO_FAST_DRIFT_START_M: f32 = 2.0;
 
 pub fn new_estimator(gyroscope_range_deg_s: f32) -> Result<Estimator, EstimatorError> {
     // At 833 Hz, per-sample acceleration uncertainty below a few m/s² makes the filter
@@ -126,12 +130,21 @@ impl BarometerBiasTracker {
             self.window_start[index] = Some((time_us, pressure_altitude_m, gnss_displacement_m));
             return None;
         };
-        if time_us.saturating_sub(start_us) < BARO_TREND_WINDOW_US {
+        let elapsed_us = time_us.saturating_sub(start_us);
+        if elapsed_us < BARO_FAST_TREND_WINDOW_US {
+            return None;
+        }
+        let unexplained_change_m =
+            (pressure_altitude_m - start_height_m) - (gnss_displacement_m - start_displacement_m);
+        if !self.drifting[index] && unexplained_change_m.abs() > BARO_FAST_DRIFT_START_M {
+            self.window_start[index] = Some((time_us, pressure_altitude_m, gnss_displacement_m));
+            self.drifting[index] = true;
+            return Some(DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S);
+        }
+        if elapsed_us < BARO_TREND_WINDOW_US {
             return None;
         }
         self.window_start[index] = Some((time_us, pressure_altitude_m, gnss_displacement_m));
-        let unexplained_change_m =
-            (pressure_altitude_m - start_height_m) - (gnss_displacement_m - start_displacement_m);
         let should_drift = if self.drifting[index] {
             unexplained_change_m.abs() >= BARO_DRIFT_STOP_M
         } else {
@@ -307,6 +320,7 @@ mod tests {
     fn barometer_bias_tracking_uses_change_unexplained_by_gnss_motion() {
         let mut tracker = BarometerBiasTracker::default();
         assert_eq!(tracker.observe(0, 0, 300.0, 0.0), None);
+        assert_eq!(tracker.observe(0, 5_000_000, 301.1, 0.0), None);
         assert_eq!(tracker.observe(0, 30_000_000, 302.0, 2.0), None);
         assert_eq!(
             tracker.observe(0, 60_000_000, 307.0, 2.0),
@@ -315,6 +329,13 @@ mod tests {
         assert_eq!(
             tracker.observe(0, 90_000_000, 309.0, 4.0),
             Some(STABLE_BARO_BIAS_WALK_M_PER_SQRT_S)
+        );
+
+        let mut fast_tracker = BarometerBiasTracker::default();
+        assert_eq!(fast_tracker.observe(1, 0, 300.0, 0.0), None);
+        assert_eq!(
+            fast_tracker.observe(1, 5_000_000, 303.0, 0.0),
+            Some(DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S)
         );
     }
 

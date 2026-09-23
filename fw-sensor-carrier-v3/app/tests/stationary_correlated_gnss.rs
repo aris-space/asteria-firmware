@@ -78,6 +78,7 @@ fn stationary_height_survives_divergent_barometer_drift() {
     let mut accepted_heights = 0;
     let mut lowest = f32::INFINITY;
     let mut highest = f32::NEG_INFINITY;
+    let mut early_peak_height_error_m = 0.0_f32;
     let mut velocity_sum = 0.0;
     let mut velocity_samples = 0;
 
@@ -88,11 +89,11 @@ fn stationary_height_survives_divergent_barometer_drift() {
         estimator.update_imu(IMU_1, time_us, imu).unwrap();
 
         if step.is_multiple_of(21) {
-            // The connected stationary board showed approximately these two
-            // pressure-altitude rates while its GNSS height stayed near 429 m.
+            // A stationary board showed approximately these two fast
+            // pressure-altitude rates while its GNSS height stayed near MSL.
             for (index, (barometer, height_m)) in [
-                (BARO_BUS_1, 338.0 + 0.17 * time_s),
-                (BARO_BUS_2, 311.0 + 0.10 * time_s),
+                (BARO_BUS_1, 338.0 + 0.55 * time_s),
+                (BARO_BUS_2, 311.0 + 0.38 * time_s),
             ]
             .into_iter()
             .enumerate()
@@ -130,6 +131,10 @@ fn stationary_height_survives_divergent_barometer_drift() {
                 .unwrap();
             accepted_heights +=
                 u32::from(updates[estimator.selected_imu().index()].height.accepted);
+            if (5.0..30.0).contains(&time_s) {
+                early_peak_height_error_m = early_peak_height_error_m
+                    .max((estimator.selected_state().height_m - 429.0).abs());
+            }
             if time_s >= 120.0 {
                 let height_m = estimator.selected_state().height_m;
                 lowest = lowest.min(height_m);
@@ -141,6 +146,10 @@ fn stationary_height_survives_divergent_barometer_drift() {
     }
 
     let state = estimator.selected_state();
+    assert!(
+        early_peak_height_error_m < 2.0,
+        "fast barometer drift moved the estimate {early_peak_height_error_m} m before 30 s"
+    );
     assert!(
         accepted_heights > 1100,
         "GNSS corrections stopped: {accepted_heights}"
