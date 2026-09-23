@@ -7,6 +7,7 @@ use fw_sensor_carrier_v3::sef::{
 };
 
 const SAMPLE_PERIOD_US: u64 = 1_200;
+const NAV_PVT_DELAY_STEPS: u64 = 83;
 const LAUNCH_TIME_S: f32 = 3.0;
 const ACCELERATION_UP_MPS2: f32 = 20.0;
 const PRESSURE_REFERENCE_MBAR: f32 = 900.0;
@@ -27,7 +28,7 @@ fn truth(time_us: u64) -> (f32, f32, f32) {
 }
 
 #[test]
-fn firmware_units_track_a_delayed_aided_ascent() {
+fn firmware_units_track_arrival_timestamped_ascent() {
     let mut estimator = new_estimator(2_000.0).unwrap();
     for step in 0..=3_500_u64 {
         let time_us = step * SAMPLE_PERIOD_US;
@@ -53,10 +54,10 @@ fn firmware_units_track_a_delayed_aided_ascent() {
                 .unwrap();
         }
 
-        // The firmware timestamps the physical GNSS epoch about 100 ms before
-        // it can submit that solution to SEF-light.
-        if step >= 83 && (step - 83).is_multiple_of(166) {
-            let epoch_time_us = (step - 83) * SAMPLE_PERIOD_US;
+        // Model NavPVT arriving about 100 ms after its measurement epoch. The
+        // firmware timestamps the received packet, so exercise that path here.
+        if step >= NAV_PVT_DELAY_STEPS && (step - NAV_PVT_DELAY_STEPS).is_multiple_of(166) {
+            let epoch_time_us = (step - NAV_PVT_DELAY_STEPS) * SAMPLE_PERIOD_US;
             let (epoch_height_m, epoch_velocity_mps, _) = truth(epoch_time_us);
             let gnss = gnss_measurement(GnssVerticalInput {
                 height_msl_m: 1_600.0 + epoch_height_m,
@@ -67,16 +68,18 @@ fn firmware_units_track_a_delayed_aided_ascent() {
                 pdop_centi: 120,
             });
             estimator
-                .update_gnss(epoch_time_us, [Some(gnss), Some(gnss)])
+                .update_gnss(time_us, [Some(gnss), Some(gnss)])
                 .unwrap();
         }
     }
 
     let (expected_height_m, expected_velocity_mps, _) = truth(3_500 * SAMPLE_PERIOD_US);
     let state = estimator.selected_state();
+    let delay_distance_m =
+        expected_velocity_mps * NAV_PVT_DELAY_STEPS as f32 * SAMPLE_PERIOD_US as f32 / 1_000_000.0;
     assert!(estimator.redundancy_ready());
     assert!(
-        (state.height_m - (1_600.0 + expected_height_m)).abs() < 2.0,
+        (state.height_m - (1_600.0 + expected_height_m)).abs() < delay_distance_m + 0.5,
         "height estimate: {} m",
         state.height_m
     );

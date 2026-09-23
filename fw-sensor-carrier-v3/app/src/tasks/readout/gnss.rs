@@ -197,7 +197,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                 let now = Instant::now();
                                 if now >= next_report {
                                     info!(
-                                        "{} GNSS: PVT={}, STATUS={}, report_ms={}, max_epoch_gap={} ms, MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
+                                        "{} GNSS: PVT={}, STATUS={}, report_ms={}, max_epoch_gap={} ms, MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}, utc={}-{}-{}T{}:{}:{} ns={}, iTOW={} ms",
                                         self.id,
                                         pvt_count,
                                         status_count,
@@ -212,6 +212,14 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                         pvt.num_satellites(),
                                         Debug2Format(&pvt.fix_type()),
                                         fix_ok,
+                                        pvt.year(),
+                                        pvt.month(),
+                                        pvt.day(),
+                                        pvt.hour(),
+                                        pvt.min(),
+                                        pvt.sec(),
+                                        pvt.nanosecond(),
+                                        pvt.itow(),
                                     );
                                     pvt_count = 0;
                                     status_count = 0;
