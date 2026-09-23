@@ -249,8 +249,12 @@ impl Processor {
             }
             let selected = &updates[self.estimator.selected_imu().index()];
             info!(
-                "SEF GNSS update {}: h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
+                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
                 best.src,
+                best.pvt.height_msl,
+                best.pvt.vel_down,
+                best.pvt.vert_accuracy,
+                best.pvt.pdop,
                 selected.height.accepted,
                 selected.height.innovation,
                 selected.height.normalized_innovation_squared,
