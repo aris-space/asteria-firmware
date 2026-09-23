@@ -71,10 +71,17 @@ const FIFO_WATERMARK: u16 = 26;
 /// Max wait for the FIFO watermark interrupt before retrying. Roughly
 /// 2x the expected period, to catch a missed/stuck interrupt.
 const LOOP_TIMEOUT: Duration = Duration::from_millis(30);
+// ST AN5473 specifies 70 ms gyro turn-on plus three samples at 833 Hz.
+const GYRO_SETTLE_TIME: Duration = Duration::from_millis(75);
 
 async fn configure<SPI: embedded_hal_async::spi::SpiDevice>(
     sensor: &mut Lsm6dso32<Lsm6Dso32SpiInterface<SPI>, Initialised>,
 ) -> Result<(), ()> {
+    // Clear data left in the FIFO across an MCU-only reset before enabling ODR.
+    sensor
+        .set_fifo_mode(FifoMode::Bypass)
+        .await
+        .map_err(|_| ())?;
     sensor
         .set_accelerometer_odr_and_full_scale(Some(ACCEL_ODR), Some(ACCEL_FULL_SCALE))
         .await
@@ -83,7 +90,6 @@ async fn configure<SPI: embedded_hal_async::spi::SpiDevice>(
         .set_gyroscope_odr_and_full_scale(Some(GYRO_ODR), Some(GYRO_FULL_SCALE))
         .await
         .map_err(|_| ())?;
-    sensor.set_fifo_mode(FifoMode::Fifo).await.map_err(|_| ())?;
     sensor
         .set_fifo_batch_data_rates(
             Some(ACCEL_BDR),
@@ -97,6 +103,8 @@ async fn configure<SPI: embedded_hal_async::spi::SpiDevice>(
         .configure_fifo(FIFO_WATERMARK, false)
         .await
         .map_err(|_| ())?;
+    Timer::after(GYRO_SETTLE_TIME).await;
+    sensor.set_fifo_mode(FifoMode::Fifo).await.map_err(|_| ())?;
     sensor
         .configure_interrupts(
             Some(Int1Config {
