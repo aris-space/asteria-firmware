@@ -12,7 +12,7 @@ from collections import defaultdict
 
 LINE = re.compile(
     r"^(?:\d{4}-\d\d-\d\dT\S+ )?"
-    r"(?P<time>\d+\.\d+) \[[^]]+\] (?P<message>.*)$"
+    r"(?P<time>\d+\.\d+) (?:\[[^]]+\]|[A-Z]+)\s+(?P<message>.*)$"
 )
 STATE = re.compile(
     r"SEF-light: altitude_msl=(?P<h>-?[\d.]+)±[^ ]+ m, "
@@ -34,6 +34,7 @@ GNSS_UPDATE = re.compile(
     r"v accepted=(?P<vaccepted>true|false), innovation=(?P<vinnovation>[^ ]+) m/s, nis=(?P<vnis>[^ ]+)"
 )
 GNSS_HEIGHT_STD = re.compile(r"hStd=(?P<std>[\d.]+) m")
+GNSS_FILTER_HEIGHT_STD = re.compile(r"hFilterStd=(?P<std>[\d.]+) m")
 BARO = re.compile(
     r"SEF baro (?P<source>BARO_BUS_[12]): "
     r"pressure_altitude=(?P<h>-?[\d.]+) m, pressure=(?P<pressure>-?[\d.]+) mbar"
@@ -240,11 +241,13 @@ def main():
     for source in ("GNSS_0", "GNSS_1"):
         updates = in_window(rows["gnss_update"], 0, end + 1, source)
         if updates:
+            innovations = [float(item["hinnovation"]) for item in updates]
             print(
                 f"{source} fusion_updates={len(updates)} "
                 f"height_accepted={sum(item['haccepted'] == 'true' for item in updates)} "
                 f"velocity_accepted={sum(item['vaccepted'] == 'true' for item in updates)} "
-                f"height_innovation_m={mean_sd([float(item['hinnovation']) for item in updates])}"
+                f"first_height_innovation_m={innovations[0]:.3f} "
+                f"later_height_innovation_m={mean_sd(innovations[1:])}"
             )
             height_stds = [
                 float(match["std"])
@@ -253,6 +256,13 @@ def main():
             ]
             if height_stds:
                 print(f"{source} height_observation_std_m", mean_sd(height_stds))
+            filter_height_stds = [
+                float(match["std"])
+                for item in updates
+                if (match := GNSS_FILTER_HEIGHT_STD.search(item["metadata"]))
+            ]
+            if filter_height_stds:
+                print(f"{source} height_filter_std_m", mean_sd(filter_height_stds))
     for source in ("GNSS_0", "GNSS_1"):
         bad_run = 0
         longest_bad_run = 0
