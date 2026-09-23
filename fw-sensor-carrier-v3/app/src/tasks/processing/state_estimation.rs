@@ -131,8 +131,8 @@ impl Processor {
             .is_none_or(|last| sample.ts.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
         {
             info!(
-                "SEF baro {}: pressure_altitude={} m, pressure={} mbar",
-                sample.src, height_m, sample.pressure_mbar
+                "SEF baro {}: pressure_altitude={} m, pressure={} mbar, temperature={} C",
+                sample.src, height_m, sample.pressure_mbar, sample.temperature_c
             );
             self.last_baro_log[index] = Some(sample.ts);
         }

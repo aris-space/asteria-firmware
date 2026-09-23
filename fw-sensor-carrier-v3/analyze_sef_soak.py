@@ -35,6 +35,7 @@ GNSS_UPDATE = re.compile(
 BARO = re.compile(
     r"SEF baro (?P<source>BARO_BUS_[12]): "
     r"pressure_altitude=(?P<h>-?[\d.]+) m, pressure=(?P<pressure>-?[\d.]+) mbar"
+    r"(?:, temperature=(?P<temperature>-?[\d.]+) C)?"
 )
 IMU = re.compile(
     r"IMU (?P<source>IMU_[01]) bench: n=(?P<n>\d+), "
@@ -180,6 +181,9 @@ def report(rows, start, end):
     for source in ("BARO_BUS_1", "BARO_BUS_2"):
         baro = in_window(rows["baro"], start, end, source)
         print(f"  {source}_pressure_alt_m", mean_sd([float(item["h"]) for item in baro]))
+        temperatures = [float(item["temperature"]) for item in baro if item["temperature"] is not None]
+        if temperatures:
+            print(f"  {source}_temperature_c", mean_sd(temperatures))
         source_rows = [(time, item) for time, item in rows["baro"] if item["source"] == source]
         print(f"  {source}_motion", window_motion(source_rows, start, end, "h"))
     for source in ("IMU_0", "IMU_1"):
