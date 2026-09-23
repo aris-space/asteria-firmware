@@ -163,6 +163,9 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
         let mut fifo_buf = [FifoDataOut::new_with_zero(); FIFO_BUFFER_SIZE];
         let mut this_data_end = Instant::now();
         let mut errors: u8 = 0;
+        let mut pairs_since_report: u32 = 0;
+        let mut max_fifo_entries: usize = 0;
+        let mut report_at = Instant::now() + Duration::from_secs(10);
 
         loop {
             let _ = with_timeout(LOOP_TIMEOUT, self.int1.wait_for_rising_edge()).await;
@@ -183,6 +186,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             this_data_end = Instant::now();
 
             let fifo_entries = (fifo_level as usize).min(fifo_buf.len()) & !1;
+            max_fifo_entries = max_fifo_entries.max(fifo_level as usize);
             if fifo_entries == 0 {
                 warn!("{} FIFO empty", self.id);
                 errors = errors.saturating_add(1);
@@ -254,6 +258,16 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             }
 
             signals::submit_imu_sample_batch(&samples);
+            pairs_since_report = pairs_since_report.saturating_add(samples.len() as u32);
+            if Instant::now() >= report_at {
+                info!(
+                    "{} produced {} IMU pairs/10s, max_fifo_entries={}",
+                    self.id, pairs_since_report, max_fifo_entries
+                );
+                pairs_since_report = 0;
+                max_fifo_entries = 0;
+                report_at = Instant::now() + Duration::from_secs(10);
+            }
             errors = 0;
             trace!("{} FIFO {} pairs, dt={} us", self.id, num_pairs, avg_dt_us);
         }

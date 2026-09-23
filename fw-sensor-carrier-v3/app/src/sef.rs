@@ -54,6 +54,88 @@ pub fn imu_measurement(acceleration_g: [f32; 3], angular_rate_deg_s: [f32; 3]) -
     }
 }
 
+/// Short-window IMU diagnostics. Mean angular rate estimates gyro bias only
+/// while the carrier is known to be stationary.
+#[derive(Clone, Copy, Default)]
+pub struct ImuWindow {
+    samples: u32,
+    gravity_error_sum: f32,
+    gravity_error_square_sum: f32,
+    gyro_sum: [f32; 3],
+    gyro_square_sum: f32,
+}
+
+#[derive(Clone, Copy)]
+pub struct ImuWindowSummary {
+    pub samples: u32,
+    pub gravity_error_mean_mps2: f32,
+    pub gravity_error_noise_mps2: f32,
+    pub gyro_mean_rad_s: [f32; 3],
+    pub gyro_noise_rad_s: f32,
+}
+
+impl ImuWindow {
+    pub fn record(&mut self, measurement: ImuMeasurement) {
+        let acceleration_square = measurement
+            .acceleration_body_mps2
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>();
+        let gravity_error = libm::sqrtf(acceleration_square) - STANDARD_GRAVITY_MPS2;
+        self.samples += 1;
+        self.gravity_error_sum += gravity_error;
+        self.gravity_error_square_sum += gravity_error * gravity_error;
+        for (sum, rate) in self
+            .gyro_sum
+            .iter_mut()
+            .zip(measurement.angular_rate_body_rad_s)
+        {
+            *sum += rate;
+            self.gyro_square_sum += rate * rate;
+        }
+    }
+
+    pub fn summary(self) -> Option<ImuWindowSummary> {
+        if self.samples == 0 {
+            return None;
+        }
+        let count = self.samples as f32;
+        let gravity_error_mean = self.gravity_error_sum / count;
+        let gyro_mean = self.gyro_sum.map(|sum| sum / count);
+        let gyro_mean_square = gyro_mean.iter().map(|rate| rate * rate).sum::<f32>();
+        Some(ImuWindowSummary {
+            samples: self.samples,
+            gravity_error_mean_mps2: gravity_error_mean,
+            gravity_error_noise_mps2: libm::sqrtf(
+                (self.gravity_error_square_sum / count - gravity_error_mean * gravity_error_mean)
+                    .max(0.0),
+            ),
+            gyro_mean_rad_s: gyro_mean,
+            gyro_noise_rad_s: libm::sqrtf(
+                (self.gyro_square_sum / count - gyro_mean_square).max(0.0),
+            ),
+        })
+    }
+}
+
+impl ImuWindowSummary {
+    pub fn category(self) -> &'static str {
+        let gyro_mean_norm = libm::sqrtf(
+            self.gyro_mean_rad_s
+                .iter()
+                .map(|rate| rate * rate)
+                .sum::<f32>(),
+        );
+        if self.gravity_error_noise_mps2 > 0.2 || self.gyro_noise_rad_s > 0.02 {
+            "unsteady"
+        } else if gyro_mean_norm > 0.01 || self.gravity_error_mean_mps2.abs() > 0.1 {
+            "quiet_offset_suspect"
+        } else {
+            "quiet"
+        }
+    }
+}
+
 pub struct GnssVerticalInput {
     pub height_msl_m: f32,
     pub velocity_down_mps: f32,
@@ -117,5 +199,22 @@ mod tests {
         assert_eq!(sample.measurement.velocity_mps, 3.0);
         assert_eq!(sample.measurement.height_std_m, 3.0);
         assert_eq!(sample.measurement.velocity_std_mps, 1.0);
+    }
+
+    #[test]
+    fn imu_window_separates_stationary_offset_from_noise() {
+        let mut window = ImuWindow::default();
+        for index in 0_u32..100 {
+            let perturbation = if index.is_multiple_of(2) { 0.02 } else { -0.02 };
+            window.record(ImuMeasurement {
+                acceleration_body_mps2: [0.0, 0.0, -STANDARD_GRAVITY_MPS2 - 0.2 - perturbation],
+                angular_rate_body_rad_s: [0.001, 0.0, 0.0],
+            });
+        }
+        let summary = window.summary().unwrap();
+        assert_eq!(summary.samples, 100);
+        assert!((summary.gravity_error_mean_mps2 - 0.2).abs() < 1e-4);
+        assert!((summary.gravity_error_noise_mps2 - 0.02).abs() < 1e-3);
+        assert_eq!(summary.category(), "quiet_offset_suspect");
     }
 }

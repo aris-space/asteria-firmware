@@ -2,11 +2,12 @@
 
 use asteria_sef_light::{EstimatorError, PressureMeasurement};
 use defmt::{Debug2Format, info, warn};
-use embassy_futures::select::{Either6, select6};
-use embassy_time::{Duration, Instant};
+use embassy_futures::select::{Either, Either6, select, select6};
+use embassy_sync::pubsub::WaitResult;
+use embassy_time::{Duration, Instant, Timer};
 use fw_sensor_carrier_v3::sef::{
-    Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, barometric_pressure_altitude_m,
-    gnss_measurement, imu_measurement, new_estimator,
+    Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
+    barometric_pressure_altitude_m, gnss_measurement, imu_measurement, new_estimator,
 };
 
 use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, GnssId, IMU_0, IMU_1};
@@ -18,6 +19,9 @@ const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
 const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
+const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
+const IMU_DIAGNOSTIC_PERIOD: Duration = Duration::from_secs(10);
+const IMU_MERGE_HOLDBACK: Duration = Duration::from_millis(35);
 const BARO_HEIGHT_STD_M: f32 = 3.0;
 
 enum Event {
@@ -35,6 +39,10 @@ struct Processor {
     last_gnss_fusion: Option<Instant>,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
+    last_state_log: Option<Instant>,
+    last_logged_state: [Option<(f32, f32)>; 2],
+    imu_windows: [ImuWindow; 2],
+    last_imu_report: Instant,
     last_baro_log: [Option<Instant>; 2],
     last_warning: Option<Instant>,
     published_since_status: u32,
@@ -51,6 +59,10 @@ impl Processor {
             last_gnss_fusion: None,
             last_output: None,
             last_status_log: None,
+            last_state_log: None,
+            last_logged_state: [None; 2],
+            imu_windows: [ImuWindow::default(); 2],
+            last_imu_report: Instant::now(),
             last_baro_log: [None; 2],
             last_warning: None,
             published_since_status: 0,
@@ -74,6 +86,7 @@ impl Processor {
             }
         }
         self.publish();
+        self.report_imu_diagnostics();
     }
 
     fn update_imu(&mut self, sample: ImuSample) -> Result<(), EstimatorError> {
@@ -85,6 +98,7 @@ impl Processor {
         );
         self.estimator
             .update_imu(imu, sample.ts.as_micros(), measurement)?;
+        self.imu_windows[sample.src.index()].record(measurement);
         Ok(())
     }
 
@@ -234,6 +248,7 @@ impl Processor {
                 redundancy_ready: self.estimator.redundancy_ready(),
             });
         self.published_since_status = self.published_since_status.saturating_add(1);
+        self.log_full_state(now);
         if self
             .last_status_log
             .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
@@ -252,6 +267,82 @@ impl Processor {
             self.last_status_log = Some(now);
         }
         self.last_output = Some(now);
+    }
+
+    fn log_full_state(&mut self, now: Instant) {
+        if self
+            .last_state_log
+            .is_some_and(|last| now.saturating_duration_since(last) < STATE_LOG_PERIOD)
+        {
+            return;
+        }
+        let scores = self.estimator.consistency_scores();
+        for (index, id) in [IMU_0, IMU_1].into_iter().enumerate() {
+            let imu = asteria_sef_light::ImuId::from_index(index)
+                .expect("firmware IMU ID must map to SEF-light");
+            let state = self.estimator.state(imu);
+            let uncertainty = self.estimator.uncertainty(imu);
+            let attitude = self.estimator.imu_status(imu);
+            let q = self.estimator.orientation_body_to_ned_wxyz(imu);
+            let previous =
+                self.last_logged_state[index].unwrap_or((state.height_m, state.velocity_mps));
+            info!(
+                "SEF {}: h={} dh={} m, v={} dv={} m/s, bias=[{},{}] m, std=[{},{},{},{}], cov_hv={}, score={}, q=[{},{},{},{}], attitude_error={} rad, ignored={}, flags=[{},{},{}]",
+                id,
+                state.height_m,
+                state.height_m - previous.0,
+                state.velocity_mps,
+                state.velocity_mps - previous.1,
+                state.barometer_bias_m[0],
+                state.barometer_bias_m[1],
+                libm::sqrtf(uncertainty.height_variance_m2),
+                libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
+                libm::sqrtf(uncertainty.barometer_bias_variance_m2[0]),
+                libm::sqrtf(uncertainty.barometer_bias_variance_m2[1]),
+                uncertainty.height_velocity_covariance_m2_per_s,
+                scores[index],
+                q[0],
+                q[1],
+                q[2],
+                q[3],
+                attitude.acceleration_error_rad,
+                attitude.accelerometer_ignored,
+                attitude.flags.initialising(),
+                attitude.flags.angular_rate_recovery(),
+                attitude.flags.acceleration_recovery(),
+            );
+            self.last_logged_state[index] = Some((state.height_m, state.velocity_mps));
+        }
+        self.last_state_log = Some(now);
+    }
+
+    fn report_imu_diagnostics(&mut self) {
+        let now = Instant::now();
+        if now.saturating_duration_since(self.last_imu_report) < IMU_DIAGNOSTIC_PERIOD {
+            return;
+        }
+        for (index, id) in [IMU_0, IMU_1].into_iter().enumerate() {
+            let Some(summary) = core::mem::take(&mut self.imu_windows[index]).summary() else {
+                continue;
+            };
+            // This drift proxy applies only when the carrier is stationary and
+            // the gravity-norm error projects onto the vertical axis.
+            let free_height_drift_10s_m = 50.0 * summary.gravity_error_mean_mps2;
+            info!(
+                "IMU {} bench: n={}, gravity_error_mean={} m/s2, gravity_noise={} m/s2, gyro_mean=[{},{},{}] rad/s, gyro_noise={} rad/s, free_dh_10s={} m, category={}",
+                id,
+                summary.samples,
+                summary.gravity_error_mean_mps2,
+                summary.gravity_error_noise_mps2,
+                summary.gyro_mean_rad_s[0],
+                summary.gyro_mean_rad_s[1],
+                summary.gyro_mean_rad_s[2],
+                summary.gyro_noise_rad_s,
+                free_height_drift_10s_m,
+                summary.category(),
+            );
+        }
+        self.last_imu_report = now;
     }
 }
 
@@ -276,22 +367,124 @@ pub async fn task() -> ! {
         .subscriber()
         .expect("SEF GNSS 1 subscriber");
     let mut processor = Processor::new().expect("SEF-light configuration must be valid");
+    let mut pending_imu: [Option<ImuSample>; 2] = [None, None];
+    let mut dropped_imu = [0_u64; 2];
+    let mut late_imu = 0_u32;
+    let mut last_imu_time: Option<Instant> = None;
+    let mut max_imu_backlog = [0_u64; 2];
+    let mut queue_report_at = Instant::now() + IMU_DIAGNOSTIC_PERIOD;
 
     loop {
-        let event = match select6(
+        max_imu_backlog[0] = max_imu_backlog[0].max(imu0.available());
+        max_imu_backlog[1] = max_imu_backlog[1].max(imu1.available());
+
+        if pending_imu[0].is_none() {
+            match imu0.try_next_message() {
+                Some(WaitResult::Message(sample)) => pending_imu[0] = Some(sample),
+                Some(WaitResult::Lagged(count)) => dropped_imu[0] += count,
+                None => {}
+            }
+        }
+        if pending_imu[1].is_none() {
+            match imu1.try_next_message() {
+                Some(WaitResult::Message(sample)) => pending_imu[1] = Some(sample),
+                Some(WaitResult::Lagged(count)) => dropped_imu[1] += count,
+                None => {}
+            }
+        }
+
+        // FIFO batches are published separately. Feed their samples in time
+        // order so SEF does not replay its whole history for every other IMU.
+        let ready_imu = match pending_imu {
+            [Some(first), Some(second)] => Some(if first.ts <= second.ts { 0 } else { 1 }),
+            [Some(sample), None]
+                if Instant::now().saturating_duration_since(sample.ts) >= IMU_MERGE_HOLDBACK =>
+            {
+                Some(0)
+            }
+            [None, Some(sample)]
+                if Instant::now().saturating_duration_since(sample.ts) >= IMU_MERGE_HOLDBACK =>
+            {
+                Some(1)
+            }
+            _ => None,
+        };
+        if let Some(index) = ready_imu {
+            let sample = pending_imu[index].take().expect("ready IMU sample");
+            if last_imu_time.is_some_and(|last| sample.ts < last) {
+                late_imu = late_imu.saturating_add(1);
+            }
+            last_imu_time = Some(sample.ts);
+            processor.handle(Event::Imu(sample));
+            if Instant::now() >= queue_report_at {
+                info!(
+                    "SEF IMU queues/10s: dropped=[{},{}], late={}, max_backlog=[{},{}]",
+                    dropped_imu[0],
+                    dropped_imu[1],
+                    late_imu,
+                    max_imu_backlog[0],
+                    max_imu_backlog[1],
+                );
+                dropped_imu = [0; 2];
+                late_imu = 0;
+                max_imu_backlog = [0; 2];
+                queue_report_at = Instant::now() + IMU_DIAGNOSTIC_PERIOD;
+            }
+            continue;
+        }
+
+        let waiting_imu0 = pending_imu[0].is_some();
+        let waiting_imu1 = pending_imu[1].is_some();
+        let pending_deadline = pending_imu[0]
+            .or(pending_imu[1])
+            .map(|sample| sample.ts + IMU_MERGE_HOLDBACK);
+        let next = select6(
             baro0.next_message_pure(),
             baro1.next_message_pure(),
             gnss0.next_message_pure(),
             gnss1.next_message_pure(),
-            imu0.next_message_pure(),
-            imu1.next_message_pure(),
-        )
-        .await
-        {
-            Either6::First(sample) | Either6::Second(sample) => Event::Barometer(sample),
-            Either6::Third(sample) | Either6::Fourth(sample) => Event::Gnss(sample),
-            Either6::Fifth(sample) | Either6::Sixth(sample) => Event::Imu(sample),
+            async {
+                if waiting_imu0 {
+                    core::future::pending().await
+                } else {
+                    imu0.next_message().await
+                }
+            },
+            async {
+                if waiting_imu1 {
+                    core::future::pending().await
+                } else {
+                    imu1.next_message().await
+                }
+            },
+        );
+        let timeout = async {
+            if let Some(deadline) = pending_deadline {
+                Timer::at(deadline).await;
+            } else {
+                core::future::pending::<()>().await;
+            }
         };
-        processor.handle(event);
+        match select(next, timeout).await {
+            Either::First(Either6::First(sample) | Either6::Second(sample)) => {
+                processor.handle(Event::Barometer(sample));
+            }
+            Either::First(Either6::Third(sample) | Either6::Fourth(sample)) => {
+                processor.handle(Event::Gnss(sample));
+            }
+            Either::First(Either6::Fifth(WaitResult::Message(sample))) => {
+                pending_imu[0] = Some(sample);
+            }
+            Either::First(Either6::Sixth(WaitResult::Message(sample))) => {
+                pending_imu[1] = Some(sample);
+            }
+            Either::First(Either6::Fifth(WaitResult::Lagged(count))) => {
+                dropped_imu[0] += count;
+            }
+            Either::First(Either6::Sixth(WaitResult::Lagged(count))) => {
+                dropped_imu[1] += count;
+            }
+            Either::Second(()) => {}
+        }
     }
 }
