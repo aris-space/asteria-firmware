@@ -19,6 +19,8 @@ const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
 const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
 const GNSS_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
+// A four-satellite startup fix reported a misleading 2.7 m vAcc at PDOP 9.4.
+const GNSS_MAX_PDOP_CENTI: u16 = 600;
 const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
 const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
 const STATUS_LOG_PERIOD: Duration = Duration::from_secs(1);
@@ -216,6 +218,7 @@ impl Processor {
         // the same quality requirement to both receivers at every update.
         let valid = sample.pvt.height_msl.is_finite()
             && sample.pvt.vert_accuracy <= GNSS_MAX_VERTICAL_ACCURACY_MM
+            && sample.pvt.pdop <= GNSS_MAX_PDOP_CENTI
             && matches!(
                 sample.pvt.fix_type,
                 ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
