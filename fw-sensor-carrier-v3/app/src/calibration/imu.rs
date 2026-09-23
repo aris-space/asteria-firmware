@@ -3,16 +3,14 @@ use lsm6dso32::{Acceleration, AngularRate};
 
 use crate::types::{ImuSample, RawImuSample};
 
-/// How long ago (relative to read-completion time) the physical
-/// measurement actually happened.
-const DELAY: Duration = Duration::from_millis(0);
-
+// Measurement latency has not been measured, so retain the read-completion
+// timestamp rather than applying an assumed offset.
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
     let [ax, ay, az] = sensor_to_board([raw.accel.x, raw.accel.y, raw.accel.z]);
     let [gx, gy, gz] = sensor_to_board([raw.gyro.x, raw.gyro.y, raw.gyro.z]);
     ImuSample {
         src: raw.src,
-        ts: raw.ts - DELAY,
+        ts: raw.ts,
         accel: Acceleration {
             x: ax,
             y: ay,

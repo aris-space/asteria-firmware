@@ -43,19 +43,14 @@ use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
 use crate::types::{ImuSample, RawImuSample};
 
-/// Accelerometer output data rate. Should match [`IMU_ODR_HZ`]
+/// Accelerometer output data rate. Keep both ODRs and BDRs at 833 Hz.
 const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
-/// Gyroscope output data rate. Should match [`IMU_ODR_HZ`]
+/// Gyroscope output data rate. Keep both ODRs and BDRs at 833 Hz.
 const GYRO_ODR: GyroscopeOdr = GyroscopeOdr::Hz833;
 /// Accelerometer batch data rate. Should match [`ACCEL_ODR`]
 const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
 /// Gyroscope batch data rate. Should match [`GYRO_ODR`]
 const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
-/// IMU output data rate in Hz. MUST match the above ODR and BDR settings.
-/// Do not change without also updating the above settings!
-pub const IMU_ODR_HZ: u32 = 833;
-/// Target IMU loop data rate
-pub const IMU_TARGET_DT: f32 = 1.0 / IMU_ODR_HZ as f32;
 /// Accelerometer full-scale range
 const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G8;
 /// Gyroscope full-scale range
@@ -168,6 +163,9 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
         let mut fifo_buf = [FifoDataOut::new_with_zero(); FIFO_BUFFER_SIZE];
         let mut this_data_end = Instant::now();
         let mut errors: u8 = 0;
+        let mut pairs_since_report: u32 = 0;
+        let mut max_fifo_entries: usize = 0;
+        let mut report_at = Instant::now() + Duration::from_secs(10);
 
         loop {
             let _ = with_timeout(LOOP_TIMEOUT, self.int1.wait_for_rising_edge()).await;
@@ -188,6 +186,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             this_data_end = Instant::now();
 
             let fifo_entries = (fifo_level as usize).min(fifo_buf.len()) & !1;
+            max_fifo_entries = max_fifo_entries.max(fifo_level as usize);
             if fifo_entries == 0 {
                 warn!("{} FIFO empty", self.id);
                 errors = errors.saturating_add(1);
@@ -259,6 +258,16 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             }
 
             signals::submit_imu_sample_batch(&samples);
+            pairs_since_report = pairs_since_report.saturating_add(samples.len() as u32);
+            if Instant::now() >= report_at {
+                info!(
+                    "{} produced {} IMU pairs/10s, max_fifo_entries={}",
+                    self.id, pairs_since_report, max_fifo_entries
+                );
+                pairs_since_report = 0;
+                max_fifo_entries = 0;
+                report_at = Instant::now() + Duration::from_secs(10);
+            }
             errors = 0;
             trace!("{} FIFO {} pairs, dt={} us", self.id, num_pairs, avg_dt_us);
         }

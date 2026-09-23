@@ -1,10 +1,12 @@
-//! A stationary bench replay with one barometer and a plausible accelerometer offset.
+//! Stationary bench replays with barometers and a plausible accelerometer offset.
 
 use asteria_sef_light::{
-    BARO_BUS_1, IMU_0, IMU_1, ImuAttitudeConfig, ImuMeasurement, ImuVerticalizer,
+    BARO_BUS_1, BARO_BUS_2, IMU_0, IMU_1, ImuAttitudeConfig, ImuMeasurement, ImuVerticalizer,
     PressureMeasurement, STANDARD_GRAVITY_MPS2,
 };
-use fw_sensor_carrier_v3::sef::new_estimator;
+use fw_sensor_carrier_v3::sef::{
+    GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement, new_estimator,
+};
 
 #[test]
 fn stationary_bias_remains_within_reported_velocity_uncertainty() {
@@ -22,13 +24,24 @@ fn stationary_bias_remains_within_reported_velocity_uncertainty() {
         estimator
             .update_imu(IMU_1, time_us, stationary_imu)
             .unwrap();
+        if step == 0 {
+            let gnss = gnss_measurement(GnssVerticalInput {
+                height_msl_m: 420.0,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm: 600,
+                speed_accuracy_mps: 0.1,
+                fix_tier: 3,
+                pdop_centi: 150,
+            });
+            estimator.update_gnss(time_us, [Some(gnss), None]).unwrap();
+        }
         if step.is_multiple_of(21) {
             estimator
                 .update_pressure(
                     time_us,
                     BARO_BUS_1,
                     PressureMeasurement {
-                        height_m: 0.0,
+                        height_m: barometric_pressure_altitude_m(978.0).unwrap(),
                         height_std_m: 3.0,
                     },
                 )
@@ -42,7 +55,7 @@ fn stationary_bias_remains_within_reported_velocity_uncertainty() {
         .velocity_variance_m2_per_s2
         .sqrt();
     assert!(
-        state.height_m.abs() < 0.3,
+        (state.height_m - 420.0).abs() < 0.3,
         "unexpected stationary height: {state:?}"
     );
     assert!(
@@ -51,6 +64,72 @@ fn stationary_bias_remains_within_reported_velocity_uncertainty() {
     );
     assert!(state.velocity_mps.abs() < velocity_std_mps);
     assert!(estimator.redundancy_ready());
+}
+
+#[test]
+fn raw_pressure_altitudes_before_gnss_converge_to_msl_with_sef_biases() {
+    let mut estimator = new_estimator(2_000.0).unwrap();
+    let stationary_imu = ImuMeasurement {
+        acceleration_body_mps2: [0.0, 0.0, -STANDARD_GRAVITY_MPS2],
+        angular_rate_body_rad_s: [0.0; 3],
+    };
+    let pressure_altitudes = [
+        barometric_pressure_altitude_m(977.7).unwrap(),
+        barometric_pressure_altitude_m(979.0).unwrap(),
+    ];
+
+    for step in 0..10_000_u64 {
+        let time_us = step * 1_200;
+        estimator
+            .update_imu(IMU_0, time_us, stationary_imu)
+            .unwrap();
+        estimator
+            .update_imu(IMU_1, time_us, stationary_imu)
+            .unwrap();
+        if step.is_multiple_of(21) {
+            for (barometer, height_m) in
+                [BARO_BUS_1, BARO_BUS_2].into_iter().zip(pressure_altitudes)
+            {
+                estimator
+                    .update_pressure(
+                        time_us,
+                        barometer,
+                        PressureMeasurement {
+                            height_m,
+                            height_std_m: 1.5,
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        if step == 833 {
+            let gnss = gnss_measurement(GnssVerticalInput {
+                height_msl_m: 420.0,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm: 600,
+                speed_accuracy_mps: 0.1,
+                fix_tier: 3,
+                pdop_centi: 150,
+            });
+            let updates = estimator
+                .update_gnss(time_us, [Some(gnss), None])
+                .unwrap()
+                .unwrap();
+            assert!(updates[0].height.accepted);
+        }
+    }
+
+    let state = estimator.selected_state();
+    assert!(
+        (state.height_m - 420.0).abs() < 0.5,
+        "unexpected MSL height: {state:?}"
+    );
+    for (bias, pressure_height) in state.barometer_bias_m.into_iter().zip(pressure_altitudes) {
+        assert!(
+            (bias - (pressure_height - 420.0)).abs() < 0.5,
+            "unexpected barometer bias: {state:?}"
+        );
+    }
 }
 
 #[test]

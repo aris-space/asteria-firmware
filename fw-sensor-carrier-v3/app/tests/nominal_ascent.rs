@@ -2,7 +2,8 @@ use asteria_sef_light::{
     BARO_BUS_1, BARO_BUS_2, IMU_0, IMU_1, PressureMeasurement, STANDARD_GRAVITY_MPS2,
 };
 use fw_sensor_carrier_v3::sef::{
-    BarometerReference, GnssVerticalInput, gnss_measurement, imu_measurement, new_estimator,
+    GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement, imu_measurement,
+    new_estimator,
 };
 
 const SAMPLE_PERIOD_US: u64 = 1_200;
@@ -28,8 +29,6 @@ fn truth(time_us: u64) -> (f32, f32, f32) {
 #[test]
 fn firmware_units_track_a_delayed_aided_ascent() {
     let mut estimator = new_estimator(2_000.0).unwrap();
-    let reference = BarometerReference::new(PRESSURE_REFERENCE_MBAR, TEMPERATURE_C).unwrap();
-
     for step in 0..=3_500_u64 {
         let time_us = step * SAMPLE_PERIOD_US;
         let (height_m, _, acceleration_up_mps2) = truth(time_us);
@@ -39,9 +38,9 @@ fn firmware_units_track_a_delayed_aided_ascent() {
         estimator.update_imu(IMU_0, time_us, imu).unwrap();
         estimator.update_imu(IMU_1, time_us, imu).unwrap();
 
-        if step.is_multiple_of(21) {
+        if step > 83 && step.is_multiple_of(21) {
             let pressure_mbar = PRESSURE_REFERENCE_MBAR * libm::expf(-height_m / SCALE_HEIGHT_M);
-            let barometric_height_m = reference.height_m(pressure_mbar).unwrap();
+            let barometric_height_m = barometric_pressure_altitude_m(pressure_mbar).unwrap();
             let pressure = PressureMeasurement {
                 height_m: barometric_height_m,
                 height_std_m: 3.0,
@@ -60,7 +59,6 @@ fn firmware_units_track_a_delayed_aided_ascent() {
             let epoch_time_us = (step - 83) * SAMPLE_PERIOD_US;
             let (epoch_height_m, epoch_velocity_mps, _) = truth(epoch_time_us);
             let gnss = gnss_measurement(GnssVerticalInput {
-                launch_height_msl_m: 1_600.0,
                 height_msl_m: 1_600.0 + epoch_height_m,
                 velocity_down_mps: -epoch_velocity_mps,
                 vertical_accuracy_mm: 1_000,
@@ -78,7 +76,7 @@ fn firmware_units_track_a_delayed_aided_ascent() {
     let state = estimator.selected_state();
     assert!(estimator.redundancy_ready());
     assert!(
-        (state.height_m - expected_height_m).abs() < 2.0,
+        (state.height_m - (1_600.0 + expected_height_m)).abs() < 2.0,
         "height estimate: {} m",
         state.height_m
     );
