@@ -106,6 +106,16 @@ impl StoredCal {
         *self == Self::DEFAULT
     }
 
+    /// An identity fallback has no measured hard- or soft-iron correction.
+    pub fn is_calibrated(&self) -> bool {
+        !self.is_default()
+    }
+
+    /// Accept only calibrated samples with a plausible Earth-field magnitude.
+    pub fn accepts_field(&self, field_nt: f32) -> bool {
+        self.is_calibrated() && (MIN_VALID_NT..=MAX_VALID_NT).contains(&field_nt)
+    }
+
     /// Whether applying this stored cal would change the live one: only the
     /// label and correction are applied, so fit metadata is ignored.
     pub fn differs_from(&self, applied: &Self) -> bool {

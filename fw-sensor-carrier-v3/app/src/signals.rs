@@ -10,7 +10,7 @@ use embassy_sync::watch::Watch;
 
 use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
 use crate::types::{
-    BaroSample, DhtSample, GnssSample, ImuSample, MagSample, RawMagSample, VerticalEstimate,
+    BaroSample, DhtSample, GnssSample, ImuSample, MagSample, RawMagSample, StateEstimate,
 };
 
 macro_rules! define_sample_channels {
@@ -59,5 +59,4 @@ define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_ba
 define_sample_channels!(DHT_CHANNELS, submit_dht_sample, submit_dht_sample_batch:
     DhtSample, cap = 8, subs = 1, count = DHT_COUNT);
 
-pub static VERTICAL_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, VerticalEstimate, 1> =
-    Watch::new();
+pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 1> = Watch::new();

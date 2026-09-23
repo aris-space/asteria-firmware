@@ -114,14 +114,17 @@ pub struct Pvt {
     pub speed_accuracy_mps: f32,
 }
 
-/// MSL altitude and up-positive vertical velocity from SEF-light.
+/// Selected SEF-light state, including MSL height and body-to-NED attitude.
 #[derive(Clone, Copy, Debug)]
-pub struct VerticalEstimate {
+pub struct StateEstimate {
     pub ts: Instant,
+    /// Height and vertical velocity may be sent as MSL telemetry once true.
+    pub msl_ready: bool,
     pub height_msl_m: f32,
     pub velocity_mps: f32,
     pub height_std_m: f32,
     pub velocity_std_mps: f32,
+    pub orientation_body_to_ned_wxyz: [f32; 4],
     pub selected_imu: ImuId,
     pub redundancy_ready: bool,
 }

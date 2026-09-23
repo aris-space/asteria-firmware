@@ -40,7 +40,7 @@ pub fn spawn_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
         .expect("CAN TX init twice");
     let can_tx = CAN_TX.try_get().expect("CAN TX not yet initialized");
 
-    spawner.spawn(vertical_state_task(can_tx).expect("spawn can vertical state"));
+    spawner.spawn(state_task(can_tx).expect("spawn can state"));
     spawner.spawn(status_task(can_tx).expect("spawn can status"));
     spawner.spawn(build_information_task(can_tx).expect("spawn can build info"));
 }
@@ -82,21 +82,38 @@ macro_rules! watch_loop {
 }
 
 #[embassy_executor::task]
-async fn vertical_state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::sensor_data::VerticalStateData;
+async fn state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+    use hermes_can::messages::sensor_data::{OrientationData, VerticalStateData};
     watch_loop!(
-        signals::VERTICAL_ESTIMATE_WATCH,
+        signals::STATE_ESTIMATE_WATCH,
         VERTICAL_MIN_PERIOD,
         |estimate| {
-            let msg = VerticalStateData {
-                height_m: estimate.height_msl_m,
-                velocity_mps: estimate.velocity_mps,
-                height_std_m: estimate.height_std_m,
-                velocity_std_mps: estimate.velocity_std_mps,
-                selected_imu: estimate.selected_imu.index() as u8,
-                redundancy_ready: estimate.redundancy_ready,
-            };
-            send(can_tx, msg).await;
+            let [w, x, y, z] = estimate.orientation_body_to_ned_wxyz;
+            // The CAN contract uses the inverse (NED-to-body) quaternion.
+            send(
+                can_tx,
+                OrientationData {
+                    orientation_w: w,
+                    orientation_x: -x,
+                    orientation_y: -y,
+                    orientation_z: -z,
+                },
+            )
+            .await;
+            if estimate.msl_ready {
+                send(
+                    can_tx,
+                    VerticalStateData {
+                        height_m: estimate.height_msl_m,
+                        velocity_mps: estimate.velocity_mps,
+                        height_std_m: estimate.height_std_m,
+                        velocity_std_mps: estimate.velocity_std_mps,
+                        selected_imu: estimate.selected_imu.index() as u8,
+                        redundancy_ready: estimate.redundancy_ready,
+                    },
+                )
+                .await;
+            }
         }
     );
 }

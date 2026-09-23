@@ -2,17 +2,17 @@
 
 use asteria_sef_light::{EstimatorError, PressureMeasurement};
 use defmt::{Debug2Format, info, warn};
-use embassy_sync::pubsub::WaitResult;
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
     Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
     barometric_pressure_altitude_m, gnss_measurement, imu_measurement, new_estimator,
 };
 
-use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, GnssId, IMU_0, IMU_1};
+use crate::calibration;
+use crate::sensors::{GnssId, IMU_0, IMU_1};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
-use crate::types::{BaroSample, GnssSample, ImuSample, VerticalEstimate};
+use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, StateEstimate};
 
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
@@ -30,6 +30,7 @@ const BARO_HEIGHT_STD_M: f32 = 1.5;
 enum Event {
     Imu(ImuSample),
     Barometer(BaroSample),
+    Magnetometer(MagSample),
     Gnss(GnssSample),
 }
 
@@ -38,6 +39,7 @@ impl Event {
         match self {
             Self::Imu(sample) => sample.ts,
             Self::Barometer(sample) => sample.ts,
+            Self::Magnetometer(sample) => sample.ts,
             Self::Gnss(sample) => sample.ts,
         }
     }
@@ -57,6 +59,7 @@ struct Processor {
     imu_windows: [ImuWindow; 2],
     last_imu_report: Instant,
     last_baro_log: [Option<Instant>; 2],
+    last_mag_log: [Option<Instant>; 2],
     last_warning: Option<Instant>,
     published_since_status: u32,
 }
@@ -77,6 +80,7 @@ impl Processor {
             imu_windows: [ImuWindow::default(); 2],
             last_imu_report: Instant::now(),
             last_baro_log: [None; 2],
+            last_mag_log: [None; 2],
             last_warning: None,
             published_since_status: 0,
         })
@@ -86,6 +90,7 @@ impl Processor {
         let result = match event {
             Event::Imu(sample) => self.update_imu(sample),
             Event::Barometer(sample) => self.update_barometer(sample),
+            Event::Magnetometer(sample) => self.update_magnetometer(sample),
             Event::Gnss(sample) => self.update_gnss(sample),
         };
         if let Err(error) = result {
@@ -139,6 +144,32 @@ impl Processor {
             },
         )?;
         Ok(())
+    }
+
+    fn update_magnetometer(&mut self, sample: MagSample) -> Result<(), EstimatorError> {
+        let index = sample.src.index();
+        let field = [sample.x, sample.y, sample.z];
+        let field_nt = libm::sqrtf(field.iter().map(|value| value * value).sum());
+        let calibration = calibration::mag::applied()[index];
+        if self.last_mag_log[index]
+            .is_none_or(|last| sample.ts.saturating_duration_since(last) >= Duration::from_secs(1))
+        {
+            info!(
+                "SEF mag {}: field={} nT, calibrated={}, accepted={}",
+                sample.src,
+                field_nt,
+                calibration.is_calibrated(),
+                calibration.accepts_field(field_nt)
+            );
+            self.last_mag_log[index] = Some(sample.ts);
+        }
+        if !calibration.accepts_field(field_nt) {
+            return Ok(());
+        }
+        let imu = asteria_sef_light::ImuId::from_index(index)
+            .expect("firmware magnetometer ID must map to SEF-light IMU");
+        self.estimator
+            .update_magnetometer(imu, sample.ts.as_micros(), field)
     }
 
     fn update_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
@@ -247,50 +278,44 @@ impl Processor {
         if now.saturating_duration_since(ts) > IMU_FRESH || !self.estimator.imu_ready(imu) {
             return;
         }
-        if !self.gnss_ready {
-            // MSL comes from GNSS. Raw pressure altitudes have already reached
-            // SEF-light; its bias states are resolved as GNSS becomes available.
-            if self
-                .last_status_log
-                .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
-            {
-                info!("SEF-light: waiting for usable GNSS fix to establish MSL altitude");
-                self.last_status_log = Some(now);
-            }
-            return;
-        }
+        // MSL comes from GNSS. The AHRS orientation is useful before the
+        // barometer bias states have an absolute height reference.
         let state = self.estimator.selected_state();
         let uncertainty = self.estimator.selected_uncertainty();
         let altitude_msl_m = state.height_m;
         let height_std_m = libm::sqrtf(uncertainty.height_variance_m2).max(self.gnss_height_std_m);
         let selected_imu = if imu.index() == 0 { IMU_0 } else { IMU_1 };
-        signals::VERTICAL_ESTIMATE_WATCH
-            .sender()
-            .send(VerticalEstimate {
-                ts,
-                height_msl_m: altitude_msl_m,
-                velocity_mps: state.velocity_mps,
-                height_std_m,
-                velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
-                selected_imu,
-                redundancy_ready: self.estimator.redundancy_ready(),
-            });
+        signals::STATE_ESTIMATE_WATCH.sender().send(StateEstimate {
+            ts,
+            msl_ready: self.gnss_ready,
+            height_msl_m: altitude_msl_m,
+            velocity_mps: state.velocity_mps,
+            height_std_m,
+            velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
+            orientation_body_to_ned_wxyz: self.estimator.orientation_body_to_ned_wxyz(imu),
+            selected_imu,
+            redundancy_ready: self.estimator.redundancy_ready(),
+        });
         self.published_since_status = self.published_since_status.saturating_add(1);
         self.log_full_state(now);
         if self
             .last_status_log
             .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
         {
-            info!(
-                "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
-                altitude_msl_m,
-                height_std_m,
-                state.velocity_mps,
-                libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
-                selected_imu,
-                self.estimator.redundancy_ready(),
-                self.published_since_status,
-            );
+            if self.gnss_ready {
+                info!(
+                    "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
+                    altitude_msl_m,
+                    height_std_m,
+                    state.velocity_mps,
+                    libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
+                    selected_imu,
+                    self.estimator.redundancy_ready(),
+                    self.published_since_status,
+                );
+            } else {
+                info!("SEF-light: waiting for usable GNSS fix to establish MSL altitude");
+            }
             self.published_since_status = 0;
             self.last_status_log = Some(now);
         }
@@ -315,7 +340,7 @@ impl Processor {
             let previous =
                 self.last_logged_state[index].unwrap_or((state.height_m, state.velocity_mps));
             info!(
-                "SEF {}: h={} dh={} m, v={} dv={} m/s, bias=[{},{}] m, std=[{},{},{},{}], cov_hv={}, score={}, q=[{},{},{},{}], attitude_error={} rad, ignored={}, flags=[{},{},{}]",
+                "SEF {}: h={} dh={} m, v={} dv={} m/s, bias=[{},{}] m, std=[{},{},{},{}], cov_hv={}, score={}, q=[{},{},{},{}], attitude_error={} rad, ignored={}, mag_error={} rad, mag_ignored={}, flags=[{},{},{}]",
                 id,
                 state.height_m,
                 state.height_m - previous.0,
@@ -335,6 +360,8 @@ impl Processor {
                 q[3],
                 attitude.acceleration_error_rad,
                 attitude.accelerometer_ignored,
+                attitude.magnetic_error_rad,
+                attitude.magnetometer_ignored,
                 attitude.flags.initialising(),
                 attitude.flags.angular_rate_recovery(),
                 attitude.flags.acceleration_recovery(),
@@ -374,126 +401,5 @@ impl Processor {
     }
 }
 
-#[embassy_executor::task]
-pub async fn task() -> ! {
-    let mut imu0 = signals::IMU_CHANNELS[IMU_0.index()]
-        .subscriber()
-        .expect("SEF IMU 0 subscriber");
-    let mut imu1 = signals::IMU_CHANNELS[IMU_1.index()]
-        .subscriber()
-        .expect("SEF IMU 1 subscriber");
-    let mut baro0 = signals::BARO_CHANNELS[BARO_BUS_1.index()]
-        .subscriber()
-        .expect("SEF barometer 0 subscriber");
-    let mut baro1 = signals::BARO_CHANNELS[BARO_BUS_2.index()]
-        .subscriber()
-        .expect("SEF barometer 1 subscriber");
-    let mut gnss0 = signals::GNSS_CHANNELS[GNSS_0.index()]
-        .subscriber()
-        .expect("SEF GNSS 0 subscriber");
-    let mut gnss1 = signals::GNSS_CHANNELS[GNSS_1.index()]
-        .subscriber()
-        .expect("SEF GNSS 1 subscriber");
-    let mut processor = Processor::new().expect("SEF-light configuration must be valid");
-    // Keep one pending sample per source. FIFO batches are published separately;
-    // the short holdback lets their older timestamps arrive before newer aiding.
-    let mut pending: [Option<Event>; 6] = [None; 6];
-    let mut dropped_imu = [0_u64; 2];
-    let mut dropped_aiding = [0_u64; 4];
-    let mut late_events = [0_u32; 2];
-    let mut last_event_time: Option<Instant> = None;
-    let mut max_imu_backlog = [0_u64; 2];
-    let mut queue_report_at = Instant::now() + IMU_DIAGNOSTIC_PERIOD;
-
-    loop {
-        max_imu_backlog[0] = max_imu_backlog[0].max(imu0.available());
-        max_imu_backlog[1] = max_imu_backlog[1].max(imu1.available());
-
-        if pending[0].is_none() {
-            match imu0.try_next_message() {
-                Some(WaitResult::Message(sample)) => pending[0] = Some(Event::Imu(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_imu[0] += count,
-                None => {}
-            }
-        }
-        if pending[1].is_none() {
-            match imu1.try_next_message() {
-                Some(WaitResult::Message(sample)) => pending[1] = Some(Event::Imu(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_imu[1] += count,
-                None => {}
-            }
-        }
-        if pending[2].is_none() {
-            match baro0.try_next_message() {
-                Some(WaitResult::Message(sample)) => pending[2] = Some(Event::Barometer(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[0] += count,
-                None => {}
-            }
-        }
-        if pending[3].is_none() {
-            match baro1.try_next_message() {
-                Some(WaitResult::Message(sample)) => pending[3] = Some(Event::Barometer(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[1] += count,
-                None => {}
-            }
-        }
-        if pending[4].is_none() {
-            match gnss0.try_next_message() {
-                Some(WaitResult::Message(sample)) => pending[4] = Some(Event::Gnss(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[2] += count,
-                None => {}
-            }
-        }
-        if pending[5].is_none() {
-            match gnss1.try_next_message() {
-                Some(WaitResult::Message(sample)) => pending[5] = Some(Event::Gnss(sample)),
-                Some(WaitResult::Lagged(count)) => dropped_aiding[3] += count,
-                None => {}
-            }
-        }
-
-        // Feed all six streams in timestamp order. In-order aiding avoids a
-        // full SEF history replay at each 40 Hz barometer observation.
-        let next = pending
-            .iter()
-            .enumerate()
-            .filter_map(|(index, event)| event.map(|event| (index, event.ts())))
-            .min_by_key(|&(_, ts)| ts);
-        if let Some((index, ts)) = next {
-            if Instant::now().saturating_duration_since(ts) >= EVENT_HOLDBACK {
-                let event = pending[index].take().expect("selected pending event");
-                if last_event_time.is_some_and(|last| ts < last) {
-                    late_events[usize::from(index >= 2)] += 1;
-                } else {
-                    last_event_time = Some(ts);
-                    processor.handle(event);
-                }
-            } else {
-                Timer::at(ts + EVENT_HOLDBACK).await;
-            }
-        } else {
-            Timer::after(Duration::from_millis(2)).await;
-        }
-
-        if Instant::now() >= queue_report_at {
-            info!(
-                "SEF queues/10s: imu_dropped=[{},{}], aiding_dropped=[{},{},{},{}], late=[{},{}], max_imu_backlog=[{},{}]",
-                dropped_imu[0],
-                dropped_imu[1],
-                dropped_aiding[0],
-                dropped_aiding[1],
-                dropped_aiding[2],
-                dropped_aiding[3],
-                late_events[0],
-                late_events[1],
-                max_imu_backlog[0],
-                max_imu_backlog[1]
-            );
-            dropped_imu = [0; 2];
-            dropped_aiding = [0; 4];
-            late_events = [0; 2];
-            max_imu_backlog = [0; 2];
-            queue_report_at = Instant::now() + IMU_DIAGNOSTIC_PERIOD;
-        }
-    }
-}
+mod stream;
+pub use stream::task;
