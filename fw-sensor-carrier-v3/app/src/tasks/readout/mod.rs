@@ -2,10 +2,10 @@
 //! raw samples to its per-sensor signal, and report `SensorStatus`.
 //!
 //! I2C readouts initialize sequentially at startup with bounded retries, then
-//! run a read task. Failed initialization or too many read errors disables the
-//! sensor until reboot. IMU/GNSS readouts retain `Inactive`/`Active` states and
-//! retry initialization indefinitely. Each readout updates its sensor status
-//! at state transitions.
+//! run a read task. Failed initialization disables the sensor until reboot;
+//! repeated read errors pause the read task before another attempt. IMU/GNSS
+//! readouts retain `Inactive`/`Active` states and retry initialization
+//! indefinitely. Each readout updates its sensor status at state transitions.
 
 use embassy_time::Duration;
 
@@ -15,9 +15,12 @@ pub mod gnss;
 pub mod imu;
 pub mod magnetometer;
 
-/// Maximum consecutive read errors before an I2C readout disables itself,
-/// or an IMU/GNSS readout transitions back to `Inactive` and retries init.
+/// Maximum consecutive read errors before an I2C readout pauses between
+/// attempts, or an IMU/GNSS readout retries initialization.
 pub const MAX_CONSECUTIVE_ERRORS: u8 = 10;
+
+/// Limit traffic from a failed I2C sensor while allowing it to recover.
+pub const I2C_RECOVERY_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How many times a readout retries init before it gives up, disables itself, and
 /// stops touching the bus. A sensor that never answers (unpopulated or shorted

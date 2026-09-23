@@ -1,4 +1,3 @@
-use core::future::pending;
 use core::sync::atomic::Ordering;
 
 use defmt::{Debug2Format, debug, error, info, trace, warn};
@@ -7,7 +6,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use ms5607::{Ms5607, Oversampling};
 
-use super::{MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
+use super::{I2C_RECOVERY_INTERVAL, MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
 use crate::calibration;
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{BAROMETER_STATUS, BarometerId, SensorStatus};
@@ -57,6 +56,10 @@ pub async fn read_task(mut sensor: Sensor, id: BarometerId) -> ! {
 
         match sensor.measure(Oversampling::Osr2048, &mut Delay).await {
             Ok(m) => {
+                if errors >= MAX_CONSECUTIVE_ERRORS {
+                    info!("{} recovered", id);
+                    BAROMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
+                }
                 errors = 0;
                 let raw = RawBaroSample {
                     src: id,
@@ -70,12 +73,13 @@ pub async fn read_task(mut sensor: Sensor, id: BarometerId) -> ! {
             Err(e) => {
                 warn!("{} read error: {:?}", id, Debug2Format(&e));
                 errors = errors.saturating_add(1);
-                if errors >= MAX_CONSECUTIVE_ERRORS {
-                    error!("{} offline; no longer polling", id);
+                if errors == MAX_CONSECUTIVE_ERRORS {
+                    error!("{} offline; retrying reads after backoff", id);
                     BAROMETER_STATUS[id.index()].store(SensorStatus::Disabled, Ordering::Relaxed);
-                    loop {
-                        pending::<()>().await;
-                    }
+                }
+                if errors >= MAX_CONSECUTIVE_ERRORS {
+                    Timer::after(I2C_RECOVERY_INTERVAL).await;
+                    continue;
                 }
             }
         }

@@ -1,4 +1,3 @@
-use core::future::pending;
 use core::sync::atomic::Ordering;
 
 use defmt::{Debug2Format, debug, error, info, trace, warn};
@@ -7,7 +6,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 
-use super::{MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
+use super::{I2C_RECOVERY_INTERVAL, MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
 use crate::calibration;
 use crate::resources::buses::{SharedI2c, SharedI2cBus};
 use crate::sensors::{MAGNETOMETER_STATUS, MagnetometerId, SensorStatus};
@@ -103,6 +102,10 @@ pub async fn read_task(mut sensor: Sensor, id: MagnetometerId) -> ! {
 
         match sensor.magnetic_field().await {
             Ok(field) => {
+                if errors >= MAX_CONSECUTIVE_ERRORS {
+                    info!("{} recovered", id);
+                    MAGNETOMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
+                }
                 errors = 0;
                 let (x, y, z) = field.xyz_unscaled();
                 let raw = RawMagSample {
@@ -119,13 +122,14 @@ pub async fn read_task(mut sensor: Sensor, id: MagnetometerId) -> ! {
             Err(e) => {
                 warn!("{} read error: {:?}", id, Debug2Format(&e));
                 errors = errors.saturating_add(1);
-                if errors >= MAX_CONSECUTIVE_ERRORS {
-                    error!("{} offline; no longer polling", id);
+                if errors == MAX_CONSECUTIVE_ERRORS {
+                    error!("{} offline; retrying reads after backoff", id);
                     MAGNETOMETER_STATUS[id.index()]
                         .store(SensorStatus::Disabled, Ordering::Relaxed);
-                    loop {
-                        pending::<()>().await;
-                    }
+                }
+                if errors >= MAX_CONSECUTIVE_ERRORS {
+                    Timer::after(I2C_RECOVERY_INTERVAL).await;
+                    continue;
                 }
             }
         }

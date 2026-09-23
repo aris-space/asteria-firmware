@@ -14,6 +14,10 @@ GNSS_0 ranged from 391 m to 428 m MSL indoors. GNSS_1 ranged from 418 m to 426 m
 
 The stationary gravity-norm residual averaged about 0.053 m/s² for IMU_0 and 0.139 m/s² for IMU_1 after the stored gyro calibration loaded. A stationary gyro calibration does not correct accelerometer scale or offset. Both magnetometers initialized, but neither has a stored magnetic calibration; their identity fallback is excluded from AHRS fusion. Magnetic aiding can be checked after a tumble calibration and reset.
 
+On 23 September, `just run --release` flashed the current firmware through the attached ST-Link. A five-minute stationary run reported no dropped or late samples, with a peak IMU backlog of 27 after startup. One subsequent reset initialized all four I²C sensors, then both barometers and both magnetometers timed out and stopped. Another reset brought all four back. Read tasks now retry once per second after ten consecutive errors and report recovery; the new build ran for two minutes with all four sensors streaming. The retry path has not yet been observed recovering a failed bus.
+
+In the next logged stationary run, GNSS_1 reported 420.92–421.92 m MSL with mean speed accuracy about 0.16 m/s. GNSS_0 ranged from 425.68 m to 481.58 m with median vertical accuracy about 12 m, so only GNSS_1 was selected. The fused MSL height averaged 421.76 m with 0.05 m standard deviation. Its reported vertical velocity averaged +0.08 m/s while the carrier was stationary, within the roughly 0.2–0.3 m/s filter uncertainty. The two barometer pressure-altitude standard deviations were 0.27 m and 0.25 m. An earlier repeat showed GNSS_1 height drifting upward by about 0.063 m/s while its reported vertical velocity averaged about −0.006 m/s; the estimate partly followed the indoor height drift. These data do not justify treating the GNSS height trend as physical motion or tuning against one indoor trajectory alone.
+
 ## Selection and output policy
 
 GNSS readout requires the UBX `GPS_FIX_OK` flag. Vertical fusion requires a 3D fix and `vAcc` at most 3 m. Among fresh receivers, lower `vAcc` wins; the selected receiver stays until the other is at least 1.5 times better. SEF-light receives only the chosen receiver, so it does not blend the two heights. `vAcc` measures the height dimension directly. PDOP describes overall satellite geometry and remains an additional SEF validity check; `hAcc` would be relevant to a horizontal position estimator, which SEF-light does not provide.
@@ -24,7 +28,7 @@ Orientation is published once the selected IMU attitude is ready. Vertical CAN t
 
 ## Remaining verification
 
-- Flash and observe the new build with `just run --release`. The latest attempt failed because no debug probe was detected; the firmware build and host tests passed.
+- Exercise I²C read recovery after a real timeout. The new retry logic is deployed and normal readout was verified, but the failing branch has not recurred during the new build's run.
 - Calibrate both magnetometers while tumbling the board, reset, then verify AHRS reports accepted magnetic samples. This requires physical movement.
 - Measure a known vertical displacement and return to the start. Check MSL height response and recovery without changing the GNSS selection policy.
 - Observe actual CAN frames with a bus peer or analyzer. The firmware build verifies message construction, but no CAN bus was available for this run.
