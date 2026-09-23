@@ -2,7 +2,6 @@
 
 use asteria_sef_light::{EstimatorError, PressureMeasurement};
 use defmt::{Debug2Format, info, warn};
-use embassy_futures::select::{Either, Either6, select, select6};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Timer};
 use fw_sensor_carrier_v3::sef::{
@@ -23,14 +22,25 @@ const GNSS_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
 const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
 const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
 const IMU_DIAGNOSTIC_PERIOD: Duration = Duration::from_secs(10);
-const IMU_MERGE_HOLDBACK: Duration = Duration::from_millis(35);
+const EVENT_HOLDBACK: Duration = Duration::from_millis(35);
 // Each stationary barometer varied by about 0.5 m in the bench run.
 const BARO_HEIGHT_STD_M: f32 = 1.5;
 
+#[derive(Clone, Copy)]
 enum Event {
     Imu(ImuSample),
     Barometer(BaroSample),
     Gnss(GnssSample),
+}
+
+impl Event {
+    fn ts(self) -> Instant {
+        match self {
+            Self::Imu(sample) => sample.ts,
+            Self::Barometer(sample) => sample.ts,
+            Self::Gnss(sample) => sample.ts,
+        }
+    }
 }
 
 struct Processor {
@@ -385,10 +395,13 @@ pub async fn task() -> ! {
         .subscriber()
         .expect("SEF GNSS 1 subscriber");
     let mut processor = Processor::new().expect("SEF-light configuration must be valid");
-    let mut pending_imu: [Option<ImuSample>; 2] = [None, None];
+    // Keep one pending sample per source. FIFO batches are published separately;
+    // the short holdback lets their older timestamps arrive before newer aiding.
+    let mut pending: [Option<Event>; 6] = [None; 6];
     let mut dropped_imu = [0_u64; 2];
-    let mut late_imu = 0_u32;
-    let mut last_imu_time: Option<Instant> = None;
+    let mut dropped_aiding = [0_u64; 4];
+    let mut late_events = [0_u32; 2];
+    let mut last_event_time: Option<Instant> = None;
     let mut max_imu_backlog = [0_u64; 2];
     let mut queue_report_at = Instant::now() + IMU_DIAGNOSTIC_PERIOD;
 
@@ -396,113 +409,91 @@ pub async fn task() -> ! {
         max_imu_backlog[0] = max_imu_backlog[0].max(imu0.available());
         max_imu_backlog[1] = max_imu_backlog[1].max(imu1.available());
 
-        if pending_imu[0].is_none() {
+        if pending[0].is_none() {
             match imu0.try_next_message() {
-                Some(WaitResult::Message(sample)) => pending_imu[0] = Some(sample),
+                Some(WaitResult::Message(sample)) => pending[0] = Some(Event::Imu(sample)),
                 Some(WaitResult::Lagged(count)) => dropped_imu[0] += count,
                 None => {}
             }
         }
-        if pending_imu[1].is_none() {
+        if pending[1].is_none() {
             match imu1.try_next_message() {
-                Some(WaitResult::Message(sample)) => pending_imu[1] = Some(sample),
+                Some(WaitResult::Message(sample)) => pending[1] = Some(Event::Imu(sample)),
                 Some(WaitResult::Lagged(count)) => dropped_imu[1] += count,
                 None => {}
             }
         }
-
-        // FIFO batches are published separately. Feed their samples in time
-        // order so SEF does not replay its whole history for every other IMU.
-        let ready_imu = match pending_imu {
-            [Some(first), Some(second)] => Some(if first.ts <= second.ts { 0 } else { 1 }),
-            [Some(sample), None]
-                if Instant::now().saturating_duration_since(sample.ts) >= IMU_MERGE_HOLDBACK =>
-            {
-                Some(0)
+        if pending[2].is_none() {
+            match baro0.try_next_message() {
+                Some(WaitResult::Message(sample)) => pending[2] = Some(Event::Barometer(sample)),
+                Some(WaitResult::Lagged(count)) => dropped_aiding[0] += count,
+                None => {}
             }
-            [None, Some(sample)]
-                if Instant::now().saturating_duration_since(sample.ts) >= IMU_MERGE_HOLDBACK =>
-            {
-                Some(1)
+        }
+        if pending[3].is_none() {
+            match baro1.try_next_message() {
+                Some(WaitResult::Message(sample)) => pending[3] = Some(Event::Barometer(sample)),
+                Some(WaitResult::Lagged(count)) => dropped_aiding[1] += count,
+                None => {}
             }
-            _ => None,
-        };
-        if let Some(index) = ready_imu {
-            let sample = pending_imu[index].take().expect("ready IMU sample");
-            if last_imu_time.is_some_and(|last| sample.ts < last) {
-                late_imu = late_imu.saturating_add(1);
+        }
+        if pending[4].is_none() {
+            match gnss0.try_next_message() {
+                Some(WaitResult::Message(sample)) => pending[4] = Some(Event::Gnss(sample)),
+                Some(WaitResult::Lagged(count)) => dropped_aiding[2] += count,
+                None => {}
             }
-            last_imu_time = Some(sample.ts);
-            processor.handle(Event::Imu(sample));
-            if Instant::now() >= queue_report_at {
-                info!(
-                    "SEF IMU queues/10s: dropped=[{},{}], late={}, max_backlog=[{},{}]",
-                    dropped_imu[0],
-                    dropped_imu[1],
-                    late_imu,
-                    max_imu_backlog[0],
-                    max_imu_backlog[1],
-                );
-                dropped_imu = [0; 2];
-                late_imu = 0;
-                max_imu_backlog = [0; 2];
-                queue_report_at = Instant::now() + IMU_DIAGNOSTIC_PERIOD;
+        }
+        if pending[5].is_none() {
+            match gnss1.try_next_message() {
+                Some(WaitResult::Message(sample)) => pending[5] = Some(Event::Gnss(sample)),
+                Some(WaitResult::Lagged(count)) => dropped_aiding[3] += count,
+                None => {}
             }
-            continue;
         }
 
-        let waiting_imu0 = pending_imu[0].is_some();
-        let waiting_imu1 = pending_imu[1].is_some();
-        let pending_deadline = pending_imu[0]
-            .or(pending_imu[1])
-            .map(|sample| sample.ts + IMU_MERGE_HOLDBACK);
-        let next = select6(
-            baro0.next_message_pure(),
-            baro1.next_message_pure(),
-            gnss0.next_message_pure(),
-            gnss1.next_message_pure(),
-            async {
-                if waiting_imu0 {
-                    core::future::pending().await
+        // Feed all six streams in timestamp order. In-order aiding avoids a
+        // full SEF history replay at each 40 Hz barometer observation.
+        let next = pending
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| event.map(|event| (index, event.ts())))
+            .min_by_key(|&(_, ts)| ts);
+        if let Some((index, ts)) = next {
+            if Instant::now().saturating_duration_since(ts) >= EVENT_HOLDBACK {
+                let event = pending[index].take().expect("selected pending event");
+                if last_event_time.is_some_and(|last| ts < last) {
+                    late_events[usize::from(index >= 2)] += 1;
                 } else {
-                    imu0.next_message().await
+                    last_event_time = Some(ts);
+                    processor.handle(event);
                 }
-            },
-            async {
-                if waiting_imu1 {
-                    core::future::pending().await
-                } else {
-                    imu1.next_message().await
-                }
-            },
-        );
-        let timeout = async {
-            if let Some(deadline) = pending_deadline {
-                Timer::at(deadline).await;
             } else {
-                core::future::pending::<()>().await;
+                Timer::at(ts + EVENT_HOLDBACK).await;
             }
-        };
-        match select(next, timeout).await {
-            Either::First(Either6::First(sample) | Either6::Second(sample)) => {
-                processor.handle(Event::Barometer(sample));
-            }
-            Either::First(Either6::Third(sample) | Either6::Fourth(sample)) => {
-                processor.handle(Event::Gnss(sample));
-            }
-            Either::First(Either6::Fifth(WaitResult::Message(sample))) => {
-                pending_imu[0] = Some(sample);
-            }
-            Either::First(Either6::Sixth(WaitResult::Message(sample))) => {
-                pending_imu[1] = Some(sample);
-            }
-            Either::First(Either6::Fifth(WaitResult::Lagged(count))) => {
-                dropped_imu[0] += count;
-            }
-            Either::First(Either6::Sixth(WaitResult::Lagged(count))) => {
-                dropped_imu[1] += count;
-            }
-            Either::Second(()) => {}
+        } else {
+            Timer::after(Duration::from_millis(2)).await;
+        }
+
+        if Instant::now() >= queue_report_at {
+            info!(
+                "SEF queues/10s: imu_dropped=[{},{}], aiding_dropped=[{},{},{},{}], late=[{},{}], max_imu_backlog=[{},{}]",
+                dropped_imu[0],
+                dropped_imu[1],
+                dropped_aiding[0],
+                dropped_aiding[1],
+                dropped_aiding[2],
+                dropped_aiding[3],
+                late_events[0],
+                late_events[1],
+                max_imu_backlog[0],
+                max_imu_backlog[1]
+            );
+            dropped_imu = [0; 2];
+            dropped_aiding = [0; 4];
+            late_events = [0; 2];
+            max_imu_backlog = [0; 2];
+            queue_report_at = Instant::now() + IMU_DIAGNOSTIC_PERIOD;
         }
     }
 }
