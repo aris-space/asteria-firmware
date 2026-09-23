@@ -20,12 +20,17 @@ fn log_configuration_packet(id: GnssId, packet: &PacketRef<'_>) {
     match packet {
         PacketRef::AckAck(ack) => info!("{} UBX ACK class={} id={}", id, ack.class(), ack.msg_id()),
         PacketRef::AckNak(nak) => warn!("{} UBX NAK class={} id={}", id, nak.class(), nak.msg_id()),
-        PacketRef::MonVer(version) => info!(
-            "{} receiver software={} hardware={}",
-            id,
-            version.software_version(),
-            version.hardware_version()
-        ),
+        PacketRef::MonVer(version) => {
+            info!(
+                "{} receiver software={} hardware={}",
+                id,
+                version.software_version(),
+                version.hardware_version()
+            );
+            for extension in version.extension() {
+                info!("{} receiver extension={}", id, extension);
+            }
+        }
         PacketRef::Unknown(raw)
             if raw.class == CfgRate::CLASS
                 && raw.msg_id == CfgRate::ID
