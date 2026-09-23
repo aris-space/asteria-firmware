@@ -136,7 +136,10 @@ struct Active<'a, RX> {
 impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
     async fn run(mut self) -> Inactive<'a, RX> {
         let mut recv_buf = [0u8; 4096];
-        let mut next_report = Instant::now();
+        let mut next_report = Instant::now() + Duration::from_secs(1);
+        let mut pvt_count = 0_u32;
+        let mut last_itow = None;
+        let mut max_epoch_gap_ms = 0_u32;
 
         loop {
             match self.rx.read(&mut recv_buf).await {
@@ -145,11 +148,19 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                     while let Some(pkt) = msgs.next() {
                         match pkt {
                             Ok(PacketRef::NavPvt(pvt)) => {
+                                pvt_count = pvt_count.saturating_add(1);
+                                if let Some(previous) = last_itow {
+                                    max_epoch_gap_ms =
+                                        max_epoch_gap_ms.max(pvt.itow().wrapping_sub(previous));
+                                }
+                                last_itow = Some(pvt.itow());
                                 let fix_ok = pvt.flags().contains(NavPvtFlags::GPS_FIX_OK);
                                 if Instant::now() >= next_report {
                                     info!(
-                                        "{} GNSS: MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
+                                        "{} GNSS: PVT/s={}, max_epoch_gap={} ms, MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
                                         self.id,
+                                        pvt_count,
+                                        max_epoch_gap_ms,
                                         pvt.height_msl(),
                                         pvt.vert_accuracy(),
                                         pvt.vel_down(),
@@ -159,6 +170,8 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                         Debug2Format(&pvt.fix_type()),
                                         fix_ok,
                                     );
+                                    pvt_count = 0;
+                                    max_epoch_gap_ms = 0;
                                     next_report = Instant::now() + Duration::from_secs(1);
                                 }
                                 if !fix_ok
