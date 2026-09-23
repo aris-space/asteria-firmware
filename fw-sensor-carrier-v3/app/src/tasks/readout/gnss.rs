@@ -2,10 +2,12 @@ use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{UartRx, UartTx};
 use embassy_time::{Duration, Instant};
+use ublox::cfg_val::CfgVal;
 use ublox::{
-    AlignmentToReferenceTime, CfgMsgSinglePortBuilder, CfgPrtUartBuilder, CfgRate, CfgRateBuilder,
-    DataBits, GpsFix, InProtoMask, MonVer, NavPvt, NavPvtFlags, NavStatus, OutProtoMask, PacketRef,
-    Parity, Parser, StopBits, UartMode, UartPortId, UbxPacketMeta, UbxPacketRequest,
+    AlignmentToReferenceTime, CfgLayer, CfgMsgSinglePortBuilder, CfgPrtUartBuilder, CfgRate,
+    CfgRateBuilder, CfgValSetBuilder, DataBits, GpsFix, InProtoMask, MonVer, NavPvt, NavPvtFlags,
+    NavStatus, OutProtoMask, PacketRef, Parity, Parser, StopBits, UartMode, UartPortId,
+    UbxPacketMeta, UbxPacketRequest,
 };
 
 use core::sync::atomic::Ordering;
@@ -326,7 +328,22 @@ async fn configure_gnss_1_port(
 }
 
 async fn configure_gnss_1_messages(tx: &mut UartTx<'static, Async>) {
-    // Match GNSS_0 so both receivers can produce the same navigation epochs.
+    // GPS + Galileo sustains 20 PVT solutions/s on this F9P. Keep the
+    // receiver's stored signal configuration available after a reset.
+    let signals = [
+        CfgVal::SignalGpsEna(true),
+        CfgVal::SignalGalEna(true),
+        CfgVal::SignalGloEna(false),
+        CfgVal::SignalBdsEna(false),
+    ];
+    let mut constellation = heapless::Vec::<u8, 64>::new();
+    CfgValSetBuilder {
+        version: 0,
+        layers: CfgLayer::RAM,
+        reserved1: 0,
+        cfg_data: &signals,
+    }
+    .extend_to(&mut constellation);
     let rate = CfgRateBuilder {
         measure_rate_ms: 50,
         nav_rate: 1,
@@ -335,7 +352,7 @@ async fn configure_gnss_1_messages(tx: &mut UartTx<'static, Async>) {
     .into_packet_bytes();
     let status = CfgMsgSinglePortBuilder::set_rate_for::<NavStatus>(1).into_packet_bytes();
     let pvt = CfgMsgSinglePortBuilder::set_rate_for::<NavPvt>(1).into_packet_bytes();
-    for packet in [&rate[..], &status[..], &pvt[..]] {
+    for packet in [&constellation[..], &rate[..], &status[..], &pvt[..]] {
         if let Err(e) = tx.write(packet).await {
             warn!(
                 "GNSS_1 message configuration failed: {:?}",
