@@ -4,7 +4,9 @@ use asteria_sef_light::{
     BARO_BUS_1, IMU_0, IMU_1, ImuAttitudeConfig, ImuMeasurement, ImuVerticalizer,
     PressureMeasurement, STANDARD_GRAVITY_MPS2,
 };
-use fw_sensor_carrier_v3::sef::new_estimator;
+use fw_sensor_carrier_v3::sef::{
+    GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement, new_estimator,
+};
 
 #[test]
 fn stationary_bias_remains_within_reported_velocity_uncertainty() {
@@ -22,13 +24,24 @@ fn stationary_bias_remains_within_reported_velocity_uncertainty() {
         estimator
             .update_imu(IMU_1, time_us, stationary_imu)
             .unwrap();
+        if step == 0 {
+            let gnss = gnss_measurement(GnssVerticalInput {
+                height_msl_m: 420.0,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm: 600,
+                speed_accuracy_mps: 0.1,
+                fix_tier: 3,
+                pdop_centi: 150,
+            });
+            estimator.update_gnss(time_us, [Some(gnss), None]).unwrap();
+        }
         if step.is_multiple_of(21) {
             estimator
                 .update_pressure(
                     time_us,
                     BARO_BUS_1,
                     PressureMeasurement {
-                        height_m: 0.0,
+                        height_m: barometric_pressure_altitude_m(978.0).unwrap(),
                         height_std_m: 3.0,
                     },
                 )
@@ -42,7 +55,7 @@ fn stationary_bias_remains_within_reported_velocity_uncertainty() {
         .velocity_variance_m2_per_s2
         .sqrt();
     assert!(
-        state.height_m.abs() < 0.3,
+        (state.height_m - 420.0).abs() < 0.3,
         "unexpected stationary height: {state:?}"
     );
     assert!(

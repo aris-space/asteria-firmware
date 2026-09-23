@@ -5,8 +5,8 @@ use defmt::{Debug2Format, info, warn};
 use embassy_futures::select::{Either6, select6};
 use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
-    BarometerReference, Estimator, GnssVerticalInput, gnss_measurement, imu_measurement,
-    new_estimator,
+    Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, barometric_pressure_altitude_m,
+    gnss_measurement, imu_measurement, new_estimator,
 };
 
 use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, GnssId, IMU_0, IMU_1};
@@ -17,6 +17,7 @@ use crate::types::{BaroSample, GnssSample, ImuSample, VerticalEstimate};
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
+const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
 const BARO_HEIGHT_STD_M: f32 = 3.0;
 
 enum Event {
@@ -27,10 +28,11 @@ enum Event {
 
 struct Processor {
     estimator: Estimator,
-    baro_reference: [Option<BarometerReference>; 2],
-    gnss_reference_msl_m: Option<f32>,
+    gnss_ready: bool,
+    gnss_height_std_m: f32,
     gnss_latest: [Option<GnssSample>; 2],
     selected_gnss: Option<GnssId>,
+    last_gnss_fusion: Option<Instant>,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
     last_baro_log: [Option<Instant>; 2],
@@ -42,10 +44,11 @@ impl Processor {
     fn new() -> Result<Self, EstimatorError> {
         Ok(Self {
             estimator: new_estimator(GYRO_RANGE_DPS)?,
-            baro_reference: [None; 2],
-            gnss_reference_msl_m: None,
+            gnss_ready: false,
+            gnss_height_std_m: GNSS_HEIGHT_STD_FLOOR_M,
             gnss_latest: [None; 2],
             selected_gnss: None,
+            last_gnss_fusion: None,
             last_output: None,
             last_status_log: None,
             last_baro_log: [None; 2],
@@ -87,26 +90,21 @@ impl Processor {
 
     fn update_barometer(&mut self, sample: BaroSample) -> Result<(), EstimatorError> {
         let index = sample.src.index();
-        let reference = match self.baro_reference[index] {
-            Some(reference) => reference,
-            None => {
-                let reference = BarometerReference::new(sample.pressure_mbar, sample.temperature_c)
-                    .ok_or(EstimatorError::OutOfRangeInput)?;
-                self.baro_reference[index] = Some(reference);
-                reference
-            }
-        };
-        let height_m = reference
-            .height_m(sample.pressure_mbar)
+        let height_m = barometric_pressure_altitude_m(sample.pressure_mbar)
             .ok_or(EstimatorError::OutOfRangeInput)?;
         if self.last_baro_log[index]
             .is_none_or(|last| sample.ts.saturating_duration_since(last) >= Duration::from_secs(1))
         {
             info!(
-                "SEF baro {}: relative={} m, pressure={} mbar",
+                "SEF baro {}: pressure_altitude={} m, pressure={} mbar",
                 sample.src, height_m, sample.pressure_mbar
             );
             self.last_baro_log[index] = Some(sample.ts);
+        }
+        // MSL comes from GNSS. Before its first fix, an uncalibrated pressure
+        // altitude cannot establish either the height or barometer biases.
+        if !self.gnss_ready {
+            return Ok(());
         }
         let barometer = asteria_sef_light::BarometerId::from_index(index)
             .expect("firmware barometer ID must map to SEF-light");
@@ -152,27 +150,23 @@ impl Processor {
             return Ok(());
         }
         if self.selected_gnss != Some(best.src) {
-            // Keep the reported altitude in the active receiver's MSL frame.
-            let relative_height_m = self.estimator.selected_state().height_m;
-            let origin_msl_m = best.pvt.height_msl - relative_height_m;
-            info!(
-                "SEF MSL reference: {} raw={} m, relative={} m, origin={} m, vAcc={} mm",
-                best.src,
-                best.pvt.height_msl,
-                relative_height_m,
-                origin_msl_m,
-                best.pvt.vert_accuracy
-            );
-            self.gnss_reference_msl_m = Some(origin_msl_m);
             info!(
                 "SEF GNSS source: {} (vAcc={} mm)",
                 best.src, best.pvt.vert_accuracy
             );
             self.selected_gnss = Some(best.src);
+            self.last_gnss_fusion = None;
+        }
+        // NavPVT arrives at 20 Hz, but adjacent GNSS heights are strongly
+        // correlated. Fuse them at 1 Hz while retaining the full receiver rate.
+        if self
+            .last_gnss_fusion
+            .is_some_and(|last| sample.ts.saturating_duration_since(last) < GNSS_FUSION_PERIOD)
+        {
+            return Ok(());
         }
         let mut measurements = [None, None];
         measurements[best.src.index()] = Some(gnss_measurement(GnssVerticalInput {
-            launch_height_msl_m: self.gnss_reference_msl_m.expect("GNSS MSL reference set"),
             height_msl_m: sample.pvt.height_msl,
             velocity_down_mps: sample.pvt.vel_down,
             vertical_accuracy_mm: sample.pvt.vert_accuracy,
@@ -180,8 +174,20 @@ impl Processor {
             fix_tier: 3,
             pdop_centi: sample.pvt.pdop,
         }));
-        self.estimator
-            .update_gnss(sample.ts.as_micros(), measurements)?;
+        let height_std_m = measurements[best.src.index()]
+            .expect("GNSS measurement set")
+            .measurement
+            .height_std_m;
+        if let Some(updates) = self
+            .estimator
+            .update_gnss(sample.ts.as_micros(), measurements)?
+        {
+            if updates.iter().any(|update| update.height.accepted) {
+                self.gnss_ready = true;
+                self.gnss_height_std_m = height_std_m;
+            }
+            self.last_gnss_fusion = Some(sample.ts);
+        }
         Ok(())
     }
 
@@ -201,7 +207,7 @@ impl Processor {
         if now.saturating_duration_since(ts) > IMU_FRESH || !self.estimator.imu_ready(imu) {
             return;
         }
-        let Some(origin_msl_m) = self.gnss_reference_msl_m else {
+        if !self.gnss_ready {
             if self
                 .last_status_log
                 .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
@@ -210,10 +216,11 @@ impl Processor {
                 self.last_status_log = Some(now);
             }
             return;
-        };
+        }
         let state = self.estimator.selected_state();
         let uncertainty = self.estimator.selected_uncertainty();
-        let altitude_msl_m = origin_msl_m + state.height_m;
+        let altitude_msl_m = state.height_m;
+        let height_std_m = libm::sqrtf(uncertainty.height_variance_m2).max(self.gnss_height_std_m);
         let selected_imu = if imu.index() == 0 { IMU_0 } else { IMU_1 };
         signals::VERTICAL_ESTIMATE_WATCH
             .sender()
@@ -221,7 +228,7 @@ impl Processor {
                 ts,
                 height_msl_m: altitude_msl_m,
                 velocity_mps: state.velocity_mps,
-                height_std_m: libm::sqrtf(uncertainty.height_variance_m2),
+                height_std_m,
                 velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
                 selected_imu,
                 redundancy_ready: self.estimator.redundancy_ready(),
@@ -232,9 +239,9 @@ impl Processor {
             .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
         {
             info!(
-                "SEF-light: altitude_msl={} m, filter_height_std={} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
+                "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
                 altitude_msl_m,
-                libm::sqrtf(uncertainty.height_variance_m2),
+                height_std_m,
                 state.velocity_mps,
                 libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
                 selected_imu,
