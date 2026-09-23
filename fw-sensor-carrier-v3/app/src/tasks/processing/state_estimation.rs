@@ -173,61 +173,9 @@ impl Processor {
     }
 
     fn update_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
-        // A poor 3D fix can be tens of metres from a later precise fix. Apply
-        // the same quality requirement to both receivers at every update.
-        let valid = sample.pvt.height_msl.is_finite()
-            && sample.pvt.vert_accuracy <= GNSS_MAX_VERTICAL_ACCURACY_MM
-            && matches!(
-                sample.pvt.fix_type,
-                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
-            );
-        if !valid {
-            self.gnss_latest[sample.src.index()] = None;
+        let Some(best) = self.select_gnss(sample) else {
             return Ok(());
-        }
-        self.gnss_latest[sample.src.index()] = Some(sample);
-        let now = Instant::now();
-        let [first, second] = self.gnss_latest.map(|candidate| {
-            candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
-        });
-        // Vertical accuracy estimates height error directly. Keep the current
-        // fresh receiver until another reports at least 1.5x better accuracy.
-        let candidate = match (first, second) {
-            (Some(first), Some(second)) => {
-                if first.pvt.vert_accuracy < second.pvt.vert_accuracy {
-                    first
-                } else {
-                    second
-                }
-            }
-            (Some(first), None) => first,
-            (None, Some(second)) => second,
-            (None, None) => return Ok(()),
         };
-        let best = match self
-            .selected_gnss
-            .and_then(|source| [first, second][source.index()])
-        {
-            Some(current)
-                if current.src != candidate.src
-                    && (candidate.pvt.vert_accuracy as f32) * GNSS_SWITCH_IMPROVEMENT
-                        >= current.pvt.vert_accuracy as f32 =>
-            {
-                current
-            }
-            _ => candidate,
-        };
-        if sample.src != best.src {
-            return Ok(());
-        }
-        if self.selected_gnss != Some(best.src) {
-            info!(
-                "SEF GNSS source: {} (vAcc={} mm, PDOP={})",
-                best.src, best.pvt.vert_accuracy, best.pvt.pdop
-            );
-            self.selected_gnss = Some(best.src);
-            self.last_gnss_fusion = None;
-        }
         // NavPVT arrives at 20 Hz, but adjacent GNSS heights are strongly
         // correlated. Fuse them at 1 Hz while retaining the full receiver rate.
         if self
@@ -260,6 +208,65 @@ impl Processor {
             self.last_gnss_fusion = Some(sample.ts);
         }
         Ok(())
+    }
+
+    fn select_gnss(&mut self, sample: GnssSample) -> Option<GnssSample> {
+        // A poor 3D fix can be tens of metres from a later precise fix. Apply
+        // the same quality requirement to both receivers at every update.
+        let valid = sample.pvt.height_msl.is_finite()
+            && sample.pvt.vert_accuracy <= GNSS_MAX_VERTICAL_ACCURACY_MM
+            && matches!(
+                sample.pvt.fix_type,
+                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
+            );
+        if !valid {
+            self.gnss_latest[sample.src.index()] = None;
+            return None;
+        }
+        self.gnss_latest[sample.src.index()] = Some(sample);
+        let now = Instant::now();
+        let [first, second] = self.gnss_latest.map(|candidate| {
+            candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
+        });
+        // Vertical accuracy estimates height error directly. Keep the current
+        // fresh receiver until another reports at least 1.5x better accuracy.
+        let candidate = match (first, second) {
+            (Some(first), Some(second)) => {
+                if first.pvt.vert_accuracy < second.pvt.vert_accuracy {
+                    first
+                } else {
+                    second
+                }
+            }
+            (Some(first), None) => first,
+            (None, Some(second)) => second,
+            (None, None) => return None,
+        };
+        let best = match self
+            .selected_gnss
+            .and_then(|source| [first, second][source.index()])
+        {
+            Some(current)
+                if current.src != candidate.src
+                    && (candidate.pvt.vert_accuracy as f32) * GNSS_SWITCH_IMPROVEMENT
+                        >= current.pvt.vert_accuracy as f32 =>
+            {
+                current
+            }
+            _ => candidate,
+        };
+        if sample.src != best.src {
+            return None;
+        }
+        if self.selected_gnss != Some(best.src) {
+            info!(
+                "SEF GNSS source: {} (vAcc={} mm, PDOP={})",
+                best.src, best.pvt.vert_accuracy, best.pvt.pdop
+            );
+            self.selected_gnss = Some(best.src);
+            self.last_gnss_fusion = None;
+        }
+        Some(best)
     }
 
     fn publish(&mut self) {
