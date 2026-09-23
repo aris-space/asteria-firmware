@@ -23,6 +23,7 @@ GNSS = re.compile(
     r"PDOP=(?P<pdop>\d+), sats=(?P<sats>\d+), "
     r'fix="(?P<fix>[^\"]+)", fixOk=(?P<fixok>true|false)'
 )
+GNSS_SOURCE = re.compile(r"SEF GNSS source: (?P<source>GNSS_[01])")
 BARO = re.compile(
     r"SEF baro (?P<source>BARO_BUS_[12]): "
     r"pressure_altitude=(?P<h>-?[\d.]+) m, pressure=(?P<pressure>-?[\d.]+) mbar"
@@ -48,7 +49,7 @@ ATTITUDE = re.compile(
     r"mag_ignored=(?P<ignored>true|false)"
 )
 PATTERNS = (
-    ("state", STATE), ("gnss", GNSS), ("baro", BARO),
+    ("state", STATE), ("gnss", GNSS), ("gnss_source", GNSS_SOURCE), ("baro", BARO),
     ("imu", IMU), ("mag", MAG), ("queue", QUEUE),
     ("attitude", ATTITUDE),
 )
@@ -213,6 +214,7 @@ def main():
         f"faults_total={len(rows['fault'])} "
         f"faults_after_1s={sum(time > 1 for time, _ in rows['fault'])}"
     )
+    print("gnss_source_changes", [(round(time, 1), item["source"]) for time, item in rows["gnss_source"]])
     for source in ("GNSS_0", "GNSS_1"):
         bad_run = 0
         longest_bad_run = 0
