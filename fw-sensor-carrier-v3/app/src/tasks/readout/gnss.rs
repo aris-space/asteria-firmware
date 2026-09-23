@@ -1,7 +1,7 @@
 use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{UartRx, UartTx};
-use embassy_time::{Duration, Instant};
+use embassy_time::{Duration, Instant, with_timeout};
 use ublox::cfg_val::CfgVal;
 use ublox::{
     AlignmentToReferenceTime, CfgLayer, CfgMsgSinglePortBuilder, CfgPrtUartBuilder, CfgRate,
@@ -16,6 +16,9 @@ use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
 use crate::types::{GnssSample, Pvt};
+
+// NAV-PVT is requested every 50 ms; a two-second gap means the UART link is silent.
+const LINK_SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn log_configuration_packet(id: GnssId, packet: &PacketRef<'_>) {
     match packet {
@@ -79,12 +82,22 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                 embassy_time::Timer::after(backoff(self.attempt)).await;
             }
 
-            let n = match self.rx.read(&mut recv_buf).await {
-                Ok(0) => continue,
-                Ok(n) => n,
-                Err(e) => {
+            let n = match with_timeout(LINK_SILENCE_TIMEOUT, self.rx.read(&mut recv_buf)).await {
+                Ok(Ok(0)) => continue,
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => {
                     warn!("{} read error: {:?}", self.id, Debug2Format(&e));
                     consecutive_errors = consecutive_errors.saturating_add(1);
+                    continue;
+                }
+                Err(_) => {
+                    if link_active {
+                        warn!("{} UBX link silent", self.id);
+                        GNSS_STATUS[self.id.index()]
+                            .store(SensorStatus::Inactive, Ordering::Relaxed);
+                        link_active = false;
+                    }
+                    consecutive_errors = MAX_CONSECUTIVE_ERRORS;
                     continue;
                 }
             };
@@ -183,8 +196,8 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
         let mut max_epoch_gap_ms = 0_u32;
 
         loop {
-            match self.rx.read(&mut recv_buf).await {
-                Ok(n) if n > 0 => {
+            match with_timeout(LINK_SILENCE_TIMEOUT, self.rx.read(&mut recv_buf)).await {
+                Ok(Ok(n)) if n > 0 => {
                     let mut msgs = self.parser.consume(&recv_buf[..n]);
                     while let Some(pkt) = msgs.next() {
                         if let Ok(ref packet) = pkt {
@@ -263,9 +276,18 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                         }
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     warn!("{} read error: {:?}", self.id, Debug2Format(&e));
                     self.errors = self.errors.saturating_add(1);
+                }
+                Err(_) => {
+                    warn!("{} UBX link silent", self.id);
+                    return Inactive {
+                        rx: self.rx,
+                        parser: self.parser,
+                        id: self.id,
+                        attempt: 0,
+                    };
                 }
                 _ => {}
             }
