@@ -8,6 +8,8 @@
 
 The full-rate stationary sensor path is verified on hardware. The state watch supplies the CAN vertical and orientation payloads, but actual CAN frames have not been observed with a bus peer. Host tests cover a simulated lift and magnetic aiding; a known-height hardware move and magnetometer tumble calibration remain necessary to finish dynamic and heading verification.
 
+A source-path audit found one spawned processing task, `state_estimation::task`. Its selected SEF-light state is the sole producer of `STATE_ESTIMATE_WATCH`; the CAN state task reads that watch for both orientation and vertical telemetry, and sends MSL height only after the selected IMU chain has a GNSS anchor. The `hermes-can` vertical-state message round-trip test passes with `message-vertical-state-data` enabled. This verifies construction and serialization, while the bus-peer check in milestone 2 remains open.
+
 ## Current measurements
 
 Run `python3 fw-sensor-carrier-v3/analyze_sef_soak.py LOG_PATH` to reproduce the ten-minute sensor, selector, and queue summaries from a firmware log.
