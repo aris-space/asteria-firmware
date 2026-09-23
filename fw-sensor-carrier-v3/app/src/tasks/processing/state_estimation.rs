@@ -1,12 +1,11 @@
 //! SEF-light vertical estimation from the calibrated sensor streams.
 
-use asteria_sef_light::{EstimatorError, ImuId, PressureMeasurement};
+use asteria_sef_light::{EstimatorError, PressureMeasurement};
 use defmt::{Debug2Format, info, warn};
 use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
     Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
     barometric_pressure_altitude_m, gnss_measurement, imu_measurement, new_estimator,
-    select_orientation_imu,
 };
 
 use crate::calibration;
@@ -58,9 +57,6 @@ struct Processor {
     gnss_latest: [Option<GnssSample>; 2],
     selected_gnss: Option<GnssId>,
     last_gnss_fusion: Option<Instant>,
-    // Keep heading continuous when the vertical selector changes between
-    // independent IMU attitude chains. Fail over only if this IMU goes stale.
-    orientation_imu: Option<ImuId>,
     last_output: Option<Instant>,
     last_status_log: Option<Instant>,
     last_state_log: Option<Instant>,
@@ -83,7 +79,6 @@ impl Processor {
             gnss_latest: [None; 2],
             selected_gnss: None,
             last_gnss_fusion: None,
-            orientation_imu: None,
             last_output: None,
             last_status_log: None,
             last_state_log: None,
@@ -193,7 +188,6 @@ impl Processor {
             self.estimator = new_estimator(GYRO_RANGE_DPS)?;
             self.last_logged_state = [None; 2];
             self.gnss_anchor_ready = [false; 2];
-            self.orientation_imu = None;
         }
         // NavPVT arrives at 20 Hz, but adjacent GNSS heights are strongly
         // correlated. Fuse them at 1 Hz while retaining the full receiver rate.
@@ -329,26 +323,6 @@ impl Processor {
         let height_std_m = libm::sqrtf(uncertainty.height_variance_m2).max(self.gnss_height_std_m);
         let selected_imu = if imu.index() == 0 { IMU_0 } else { IMU_1 };
         let msl_ready = self.gnss_anchor_ready[imu.index()];
-        let orientation_is_fresh = self.orientation_imu.is_some_and(|source| {
-            self.estimator.imu_ready(source)
-                && self
-                    .estimator
-                    .last_imu_sample_time_us(source)
-                    .is_some_and(|time| {
-                        now.saturating_duration_since(Instant::from_micros(time)) <= IMU_FRESH
-                    })
-        });
-        let orientation_imu =
-            select_orientation_imu(self.orientation_imu, imu, orientation_is_fresh);
-        let orientation_source = if orientation_imu.index() == 0 {
-            IMU_0
-        } else {
-            IMU_1
-        };
-        if self.orientation_imu != Some(orientation_imu) {
-            info!("SEF attitude source selected: {}", orientation_source);
-            self.orientation_imu = Some(orientation_imu);
-        }
         signals::STATE_ESTIMATE_WATCH.sender().send(StateEstimate {
             ts,
             msl_ready,
@@ -356,9 +330,7 @@ impl Processor {
             velocity_mps: state.velocity_mps,
             height_std_m,
             velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
-            orientation_body_to_ned_wxyz: self
-                .estimator
-                .orientation_body_to_ned_wxyz(orientation_imu),
+            orientation_body_to_ned_wxyz: self.estimator.orientation_body_to_ned_wxyz(imu),
             selected_imu,
             redundancy_ready: self.estimator.redundancy_ready(),
         });
@@ -370,13 +342,12 @@ impl Processor {
         {
             if msl_ready {
                 info!(
-                    "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, attitude_IMU={}, redundancy_ready={}, published={}",
+                    "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
                     altitude_msl_m,
                     height_std_m,
                     state.velocity_mps,
                     libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
                     selected_imu,
-                    orientation_source,
                     self.estimator.redundancy_ready(),
                     self.published_since_status,
                 );
