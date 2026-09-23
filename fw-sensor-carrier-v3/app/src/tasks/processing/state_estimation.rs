@@ -51,6 +51,8 @@ impl Event {
 struct Processor {
     estimator: Estimator,
     gnss_ready: bool,
+    // A later IMU handover must not publish an unanchored chain as MSL.
+    gnss_anchor_ready: [bool; 2],
     gnss_height_std_m: f32,
     gnss_latest: [Option<GnssSample>; 2],
     selected_gnss: Option<GnssId>,
@@ -72,6 +74,7 @@ impl Processor {
         Ok(Self {
             estimator: new_estimator(GYRO_RANGE_DPS)?,
             gnss_ready: false,
+            gnss_anchor_ready: [false; 2],
             gnss_height_std_m: GNSS_HEIGHT_STD_FLOOR_M,
             gnss_latest: [None; 2],
             selected_gnss: None,
@@ -184,6 +187,7 @@ impl Processor {
             // too far from MSL for the innovation gate to accept the first fix.
             self.estimator = new_estimator(GYRO_RANGE_DPS)?;
             self.last_logged_state = [None; 2];
+            self.gnss_anchor_ready = [false; 2];
         }
         // NavPVT arrives at 20 Hz, but adjacent GNSS heights are strongly
         // correlated. Fuse them at 1 Hz while retaining the full receiver rate.
@@ -210,9 +214,12 @@ impl Processor {
             .estimator
             .update_gnss(sample.ts.as_micros(), measurements)?
         {
+            for (ready, update) in self.gnss_anchor_ready.iter_mut().zip(updates.iter()) {
+                *ready |= update.height.accepted;
+            }
             let selected = &updates[self.estimator.selected_imu().index()];
             info!(
-                "SEF GNSS update {}: h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}",
+                "SEF GNSS update {}: h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
                 best.src,
                 selected.height.accepted,
                 selected.height.innovation,
@@ -220,6 +227,8 @@ impl Processor {
                 selected.velocity.accepted,
                 selected.velocity.innovation,
                 selected.velocity.normalized_innovation_squared,
+                self.gnss_anchor_ready[0],
+                self.gnss_anchor_ready[1],
             );
             if selected.height.accepted {
                 self.gnss_ready = true;
@@ -313,9 +322,10 @@ impl Processor {
         let altitude_msl_m = state.height_m;
         let height_std_m = libm::sqrtf(uncertainty.height_variance_m2).max(self.gnss_height_std_m);
         let selected_imu = if imu.index() == 0 { IMU_0 } else { IMU_1 };
+        let msl_ready = self.gnss_anchor_ready[imu.index()];
         signals::STATE_ESTIMATE_WATCH.sender().send(StateEstimate {
             ts,
-            msl_ready: self.gnss_ready,
+            msl_ready,
             height_msl_m: altitude_msl_m,
             velocity_mps: state.velocity_mps,
             height_std_m,
@@ -330,7 +340,7 @@ impl Processor {
             .last_status_log
             .is_none_or(|last| now.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
         {
-            if self.gnss_ready {
+            if msl_ready {
                 info!(
                     "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
                     altitude_msl_m,

@@ -64,7 +64,7 @@ GNSS readout requires the UBX `GPS_FIX_OK` flag. Vertical fusion requires a 3D f
 
 Each calibrated magnetometer supplies the attitude chain of the same index when its field magnitude is physically plausible. AHRS magnetic rejection handles angular disagreement, and samples expire after 250 ms. The selected IMU chain supplies both the published vertical state and orientation. The CAN orientation quaternion is the inverse of SEF-light's body-to-NED quaternion. Without magnetic calibration, roll and pitch remain available while yaw may drift.
 
-Orientation is published once the selected IMU attitude is ready. Vertical CAN telemetry waits until a GNSS fix has established the MSL reference, so a raw pressure altitude is never labeled MSL.
+Orientation is published once the selected IMU attitude is ready. Vertical CAN telemetry waits until the selected IMU chain has accepted a GNSS height update, including after an IMU handover, so a raw pressure altitude is never labeled MSL.
 
 ## Remaining verification
 
