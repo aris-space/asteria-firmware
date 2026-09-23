@@ -210,6 +210,17 @@ impl Processor {
             .estimator
             .update_gnss(sample.ts.as_micros(), measurements)?
         {
+            let selected = &updates[self.estimator.selected_imu().index()];
+            info!(
+                "SEF GNSS update {}: h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}",
+                best.src,
+                selected.height.accepted,
+                selected.height.innovation,
+                selected.height.normalized_innovation_squared,
+                selected.velocity.accepted,
+                selected.velocity.innovation,
+                selected.velocity.normalized_innovation_squared,
+            );
             if updates.iter().any(|update| update.height.accepted) {
                 self.gnss_ready = true;
                 self.gnss_height_std_m = height_std_m;

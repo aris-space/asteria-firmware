@@ -24,6 +24,11 @@ GNSS = re.compile(
     r'fix="(?P<fix>[^\"]+)", fixOk=(?P<fixok>true|false)'
 )
 GNSS_SOURCE = re.compile(r"SEF GNSS source: (?P<source>GNSS_[01])")
+GNSS_UPDATE = re.compile(
+    r"SEF GNSS update (?P<source>GNSS_[01]): "
+    r"h accepted=(?P<haccepted>true|false), innovation=(?P<hinnovation>[^ ]+) m, nis=(?P<hnis>[^,]+), "
+    r"v accepted=(?P<vaccepted>true|false), innovation=(?P<vinnovation>[^ ]+) m/s, nis=(?P<vnis>[^ ]+)"
+)
 BARO = re.compile(
     r"SEF baro (?P<source>BARO_BUS_[12]): "
     r"pressure_altitude=(?P<h>-?[\d.]+) m, pressure=(?P<pressure>-?[\d.]+) mbar"
@@ -49,7 +54,8 @@ ATTITUDE = re.compile(
     r"mag_ignored=(?P<ignored>true|false)"
 )
 PATTERNS = (
-    ("state", STATE), ("gnss", GNSS), ("gnss_source", GNSS_SOURCE), ("baro", BARO),
+    ("state", STATE), ("gnss", GNSS), ("gnss_source", GNSS_SOURCE),
+    ("gnss_update", GNSS_UPDATE), ("baro", BARO),
     ("imu", IMU), ("mag", MAG), ("queue", QUEUE),
     ("attitude", ATTITUDE),
 )
@@ -215,6 +221,15 @@ def main():
         f"faults_after_1s={sum(time > 1 for time, _ in rows['fault'])}"
     )
     print("gnss_source_changes", [(round(time, 1), item["source"]) for time, item in rows["gnss_source"]])
+    for source in ("GNSS_0", "GNSS_1"):
+        updates = in_window(rows["gnss_update"], 0, end + 1, source)
+        if updates:
+            print(
+                f"{source} fusion_updates={len(updates)} "
+                f"height_accepted={sum(item['haccepted'] == 'true' for item in updates)} "
+                f"velocity_accepted={sum(item['vaccepted'] == 'true' for item in updates)} "
+                f"height_innovation_m={mean_sd([float(item['hinnovation']) for item in updates])}"
+            )
     for source in ("GNSS_0", "GNSS_1"):
         bad_run = 0
         longest_bad_run = 0
