@@ -1,4 +1,3 @@
-use core::future::pending;
 use core::sync::atomic::Ordering;
 
 use defmt::{Debug2Format, debug, error, info, trace, warn};
@@ -7,9 +6,9 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use ms5607::{Ms5607, Oversampling};
 
-use super::{MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
+use super::{I2C_RECOVERY_INTERVAL, MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
 use crate::calibration;
-use crate::resources::buses::{SharedI2c, SharedI2cBus};
+use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{BAROMETER_STATUS, BarometerId, SensorStatus};
 use crate::signals;
 use crate::types::RawBaroSample;
@@ -23,8 +22,9 @@ pub type Sensor = Ms5607<BusDevice, ms5607::Initialized>;
 
 /// Bring the barometer up, retrying a bounded number of times. Returns the live
 /// sensor, or `None` (and marks it `Disabled`) if it never answered. Call this
-/// sequentially at startup, before any read task runs, so a stuck bus can't starve
-/// a healthy one mid-transaction.
+/// sequentially at startup, before any read task runs, so healthy sensors
+/// get their first initialization attempt before background retries begin.
+/// The read task retries a failed initialization.
 pub async fn init(bus: SharedI2cBus, id: BarometerId) -> Option<Sensor> {
     for attempt in 1..=MAX_INIT_ATTEMPTS {
         debug!("{} initializing (attempt {})", id, attempt);
@@ -42,13 +42,19 @@ pub async fn init(bus: SharedI2cBus, id: BarometerId) -> Option<Sensor> {
             }
         }
     }
-    warn!("{} not detected; not polling", id);
+    warn!("{} not detected; retrying later", id);
     BAROMETER_STATUS[id.index()].store(SensorStatus::Disabled, Ordering::Relaxed);
     None
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn read_task(mut sensor: Sensor, id: BarometerId) -> ! {
+pub async fn read_task(mut sensor: Option<Sensor>, bus: SharedI2cBus, id: BarometerId) -> ! {
+    while sensor.is_none() {
+        Timer::after(I2C_RECOVERY_INTERVAL).await;
+        buses::recover(bus).await;
+        sensor = init(bus, id).await;
+    }
+    let mut sensor = sensor.expect("barometer initialized before reading");
     BAROMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
     let mut errors: u8 = 0;
 
@@ -57,6 +63,10 @@ pub async fn read_task(mut sensor: Sensor, id: BarometerId) -> ! {
 
         match sensor.measure(Oversampling::Osr2048, &mut Delay).await {
             Ok(m) => {
+                if errors >= MAX_CONSECUTIVE_ERRORS {
+                    info!("{} recovered", id);
+                    BAROMETER_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
+                }
                 errors = 0;
                 let raw = RawBaroSample {
                     src: id,
@@ -70,12 +80,14 @@ pub async fn read_task(mut sensor: Sensor, id: BarometerId) -> ! {
             Err(e) => {
                 warn!("{} read error: {:?}", id, Debug2Format(&e));
                 errors = errors.saturating_add(1);
-                if errors >= MAX_CONSECUTIVE_ERRORS {
-                    error!("{} offline; no longer polling", id);
+                if errors == MAX_CONSECUTIVE_ERRORS {
+                    error!("{} offline; retrying reads after backoff", id);
                     BAROMETER_STATUS[id.index()].store(SensorStatus::Disabled, Ordering::Relaxed);
-                    loop {
-                        pending::<()>().await;
-                    }
+                }
+                if errors >= MAX_CONSECUTIVE_ERRORS {
+                    buses::recover(bus).await;
+                    Timer::after(I2C_RECOVERY_INTERVAL).await;
+                    continue;
                 }
             }
         }

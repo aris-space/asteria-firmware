@@ -87,7 +87,7 @@ define_sensor_family! {
 pub enum SensorStatus {
     Inactive,
     Active,
-    /// Init or reads failed too many times; polling stops until reboot.
+    /// No samples are available; initialization may stop or reads may retry.
     Disabled,
 }
 

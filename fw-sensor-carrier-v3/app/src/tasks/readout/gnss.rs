@@ -148,11 +148,12 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                 let fix_ok = pvt.flags().contains(NavPvtFlags::GPS_FIX_OK);
                                 if Instant::now() >= next_report {
                                     info!(
-                                        "{} GNSS: MSL={} m, vAcc={} mm, vDown={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
+                                        "{} GNSS: MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}",
                                         self.id,
                                         pvt.height_msl(),
                                         pvt.vert_accuracy(),
                                         pvt.vel_down(),
+                                        pvt.speed_accuracy_estimate(),
                                         pvt.pdop(),
                                         pvt.num_satellites(),
                                         Debug2Format(&pvt.fix_type()),
