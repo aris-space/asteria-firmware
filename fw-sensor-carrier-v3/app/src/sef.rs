@@ -48,7 +48,9 @@ pub fn weaker_gnss_disagreement_floor_m(
 // Use the good receiver's roughly 2.0 PDOP as the point where geometry
 // starts raising the uncertainty floor.
 const GNSS_PDOP_REFERENCE_CENTI: f32 = 200.0;
-const STABLE_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.001;
+// Let the bias follow gradual pressure drift while GNSS keeps MSL anchored.
+// A stationary slow-drift replay passes without following 7 m indoor GNSS wander.
+const STABLE_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.02;
 const DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.5;
 const BARO_TREND_WINDOW_US: u64 = 30_000_000;
 const BARO_DRIFT_START_M: f32 = 0.5;

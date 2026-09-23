@@ -174,6 +174,74 @@ fn stationary_height_survives_divergent_barometer_drift() {
 }
 
 #[test]
+fn stationary_gnss_anchors_height_during_slow_pressure_drift() {
+    let mut estimator = new_estimator(2_000.0).unwrap();
+    let mut bias_tracker = BarometerBiasTracker::default();
+    let imu = imu_measurement([0.0, 0.0, -1.006], [0.0; 3]);
+    let mut maximum_height_error_m = 0.0_f32;
+
+    for step in 0..250_000_u64 {
+        let time_us = step * 1_200;
+        let time_s = time_us as f32 / 1_000_000.0;
+        estimator.update_imu(IMU_0, time_us, imu).unwrap();
+        estimator.update_imu(IMU_1, time_us, imu).unwrap();
+
+        if step.is_multiple_of(21) {
+            for (index, (barometer, height_m)) in [
+                (BARO_BUS_1, 335.0 + time_s / 60.0),
+                (BARO_BUS_2, 310.0 + time_s / 75.0),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                estimator
+                    .update_pressure(
+                        time_us,
+                        barometer,
+                        PressureMeasurement {
+                            height_m,
+                            height_std_m: 1.5,
+                        },
+                    )
+                    .unwrap();
+                if let Some(walk_std) = bias_tracker.observe(index, time_us, height_m, 0.0) {
+                    estimator
+                        .set_barometer_bias_walk_std(barometer, walk_std)
+                        .unwrap();
+                }
+            }
+        }
+
+        if step.is_multiple_of(42) {
+            let mut gnss = gnss_measurement(GnssVerticalInput {
+                height_msl_m: 420.0,
+                velocity_down_mps: 0.0,
+                vertical_accuracy_mm: 600,
+                speed_accuracy_mps: 0.15,
+                fix_tier: 3,
+                pdop_centi: 200,
+            });
+            gnss.measurement.height_std_m =
+                correlated_gnss_height_std_m(gnss.measurement.height_std_m, 50_000);
+            let updates = estimator
+                .update_gnss(time_us, [None, Some(gnss)])
+                .unwrap()
+                .unwrap();
+            assert!(updates[estimator.selected_imu().index()].height.accepted);
+            if time_us >= 60_000_000 {
+                maximum_height_error_m =
+                    maximum_height_error_m.max((estimator.selected_state().height_m - 420.0).abs());
+            }
+        }
+    }
+
+    assert!(
+        maximum_height_error_m < 1.0,
+        "slow pressure drift moved stationary MSL by {maximum_height_error_m} m"
+    );
+}
+
+#[test]
 fn weak_receiver_after_good_fix_does_not_drag_stationary_height_far() {
     let mut estimator = new_estimator(2_000.0).unwrap();
     let imu = imu_measurement([0.0, 0.0, -1.006], [0.0; 3]);
