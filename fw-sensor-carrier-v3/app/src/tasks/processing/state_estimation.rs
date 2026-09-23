@@ -326,6 +326,8 @@ impl Processor {
             // other fix. This is an uncertainty adjustment, not a height offset.
             self.gnss_disagreement_floor_m = weaker_gnss_disagreement_floor_m(
                 [first.pvt.height_msl, second.pvt.height_msl],
+                [first.pvt.vel_down, second.pvt.vel_down],
+                [first.ts.as_micros(), second.ts.as_micros()],
                 [
                     gnss_height_std_m(first.pvt.vert_accuracy, first.pvt.pdop),
                     gnss_height_std_m(second.pvt.vert_accuracy, second.pvt.pdop),

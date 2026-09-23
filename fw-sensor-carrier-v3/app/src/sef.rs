@@ -24,8 +24,18 @@ pub fn correlated_gnss_height_std_m(height_std_m: f32, interval_us: u64) -> f32 
 /// When receivers disagree, retain that observed error as an uncertainty
 /// floor for the less precise receiver if it later becomes the only fix.
 /// Neither height is averaged or shifted.
-pub fn weaker_gnss_disagreement_floor_m(heights_m: [f32; 2], stds_m: [f32; 2]) -> [f32; 2] {
-    let disagreement_m = (heights_m[0] - heights_m[1]).abs();
+pub fn weaker_gnss_disagreement_floor_m(
+    heights_m: [f32; 2],
+    velocity_down_mps: [f32; 2],
+    timestamps_us: [u64; 2],
+    stds_m: [f32; 2],
+) -> [f32; 2] {
+    // Bring both heights to the same epoch before comparing them in motion.
+    let time_offset_s =
+        (i128::from(timestamps_us[0]) - i128::from(timestamps_us[1])) as f32 / 1_000_000.0;
+    let mean_velocity_down_mps = (velocity_down_mps[0] + velocity_down_mps[1]) * 0.5;
+    let disagreement_m =
+        (heights_m[0] - heights_m[1] + mean_velocity_down_mps * time_offset_s).abs();
     if stds_m[0] < stds_m[1] {
         [0.0, disagreement_m]
     } else if stds_m[1] < stds_m[0] {
@@ -344,16 +354,26 @@ mod tests {
     #[test]
     fn observed_receiver_disagreement_raises_only_the_weaker_height_uncertainty() {
         assert_eq!(
-            weaker_gnss_disagreement_floor_m([384.0, 415.0], [7.8, 4.8]),
+            weaker_gnss_disagreement_floor_m([384.0, 415.0], [0.0; 2], [0; 2], [7.8, 4.8]),
             [31.0, 0.0]
         );
         assert_eq!(
-            weaker_gnss_disagreement_floor_m([384.0, 415.0], [4.8, 7.8]),
+            weaker_gnss_disagreement_floor_m([384.0, 415.0], [0.0; 2], [0; 2], [4.8, 7.8]),
             [0.0, 31.0]
         );
         assert_eq!(
-            weaker_gnss_disagreement_floor_m([384.0, 415.0], [4.8, 4.8]),
+            weaker_gnss_disagreement_floor_m([384.0, 415.0], [0.0; 2], [0; 2], [4.8, 4.8]),
             [31.0, 31.0]
+        );
+        assert_eq!(
+            weaker_gnss_disagreement_floor_m(
+                [105.0, 100.0],
+                [-100.0; 2],
+                [1_000_000, 950_000],
+                [7.8, 4.8],
+            ),
+            [0.0, 0.0],
+            "asynchronous fixes during ascent should agree after velocity alignment"
         );
     }
 

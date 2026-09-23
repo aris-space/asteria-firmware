@@ -175,6 +175,8 @@ fn weak_receiver_after_good_fix_does_not_drag_stationary_height_far() {
     let mut weak_velocity_accepted = 0_u32;
     let disagreement_floor = weaker_gnss_disagreement_floor_m(
         [384.0, 415.0],
+        [0.0; 2],
+        [0; 2],
         [gnss_height_std_m(3_700, 517), gnss_height_std_m(1_200, 313)],
     );
 
