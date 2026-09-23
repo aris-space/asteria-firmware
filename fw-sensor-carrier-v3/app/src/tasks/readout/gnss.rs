@@ -3,9 +3,9 @@ use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{UartRx, UartTx};
 use embassy_time::{Duration, Instant};
 use ublox::{
-    AlignmentToReferenceTime, CfgMsgSinglePortBuilder, CfgPrtUartBuilder, CfgRateBuilder, DataBits,
-    GpsFix, InProtoMask, NavPvt, NavPvtFlags, NavStatus, OutProtoMask, PacketRef, Parity, Parser,
-    StopBits, UartMode, UartPortId,
+    AlignmentToReferenceTime, CfgMsgSinglePortBuilder, CfgPrtUartBuilder, CfgRate, CfgRateBuilder,
+    DataBits, GpsFix, InProtoMask, MonVer, NavPvt, NavPvtFlags, NavStatus, OutProtoMask, PacketRef,
+    Parity, Parser, StopBits, UartMode, UartPortId, UbxPacketMeta, UbxPacketRequest,
 };
 
 use core::sync::atomic::Ordering;
@@ -15,6 +15,32 @@ use crate::calibration;
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
 use crate::types::{Pvt, RawGnssSample};
+
+fn log_configuration_packet(id: GnssId, packet: &PacketRef<'_>) {
+    match packet {
+        PacketRef::AckAck(ack) => info!("{} UBX ACK class={} id={}", id, ack.class(), ack.msg_id()),
+        PacketRef::AckNak(nak) => warn!("{} UBX NAK class={} id={}", id, nak.class(), nak.msg_id()),
+        PacketRef::MonVer(version) => info!(
+            "{} receiver software={} hardware={}",
+            id,
+            version.software_version(),
+            version.hardware_version()
+        ),
+        PacketRef::Unknown(raw)
+            if raw.class == CfgRate::CLASS
+                && raw.msg_id == CfgRate::ID
+                && raw.payload.len() == 6 =>
+        {
+            let measure_rate_ms = u16::from_le_bytes([raw.payload[0], raw.payload[1]]);
+            let nav_rate = u16::from_le_bytes([raw.payload[2], raw.payload[3]]);
+            info!(
+                "{} CFG-RATE readback: measure={} ms, nav_rate={}",
+                id, measure_rate_ms, nav_rate
+            );
+        }
+        _ => {}
+    }
+}
 
 struct Inactive<'a, RX> {
     rx: RX,
@@ -59,6 +85,9 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
             {
                 let mut parsed = self.parser.consume(&recv_buf[..n]);
                 while let Some(msg) = parsed.next() {
+                    if let Ok(ref packet) = msg {
+                        log_configuration_packet(self.id, packet);
+                    }
                     match msg {
                         Ok(PacketRef::NavStatus(stat)) => {
                             status_packets = status_packets.saturating_add(1);
@@ -148,6 +177,9 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                 Ok(n) if n > 0 => {
                     let mut msgs = self.parser.consume(&recv_buf[..n]);
                     while let Some(pkt) = msgs.next() {
+                        if let Ok(ref packet) = pkt {
+                            log_configuration_packet(self.id, packet);
+                        }
                         match pkt {
                             Ok(PacketRef::NavPvt(pvt)) => {
                                 pvt_count = pvt_count.saturating_add(1);
@@ -255,7 +287,10 @@ async fn run_inner<'a, RX: embedded_io_async::Read>(
     }
 }
 
-async fn configure_gnss_1(tx: &mut UartTx<'static, Async>, rx: &UartRx<'static, Async>) {
+async fn configure_gnss_1_port(
+    tx: &mut UartTx<'static, Async>,
+    rx: &UartRx<'static, Async>,
+) -> bool {
     // A receiver with factory settings sends NMEA at 38400 baud. An already
     // configured receiver ignores this first packet and accepts the later ones.
     let port = CfgPrtUartBuilder {
@@ -276,9 +311,12 @@ async fn configure_gnss_1(tx: &mut UartTx<'static, Async>, rx: &UartRx<'static, 
     embassy_time::Timer::after_millis(100).await;
     if let Err(e) = rx.set_baudrate(921_600) {
         warn!("GNSS_1 baud change failed: {:?}", Debug2Format(&e));
-        return;
+        return false;
     }
+    true
+}
 
+async fn configure_gnss_1_messages(tx: &mut UartTx<'static, Async>) {
     // Match GNSS_0 so both receivers can produce the same navigation epochs.
     let rate = CfgRateBuilder {
         measure_rate_ms: 50,
@@ -288,7 +326,15 @@ async fn configure_gnss_1(tx: &mut UartTx<'static, Async>, rx: &UartRx<'static, 
     .into_packet_bytes();
     let status = CfgMsgSinglePortBuilder::set_rate_for::<NavStatus>(1).into_packet_bytes();
     let pvt = CfgMsgSinglePortBuilder::set_rate_for::<NavPvt>(1).into_packet_bytes();
-    for packet in [&rate[..], &status[..], &pvt[..]] {
+    let poll_rate = UbxPacketRequest::request_for::<CfgRate>().into_packet_bytes();
+    let poll_version = UbxPacketRequest::request_for::<MonVer>().into_packet_bytes();
+    for packet in [
+        &rate[..],
+        &status[..],
+        &pvt[..],
+        &poll_rate[..],
+        &poll_version[..],
+    ] {
         if let Err(e) = tx.write(packet).await {
             warn!(
                 "GNSS_1 message configuration failed: {:?}",
@@ -307,11 +353,18 @@ pub async fn task(
     mut tx: Option<UartTx<'static, Async>>,
     id: GnssId,
 ) -> ! {
-    if let Some(tx) = tx.as_mut() {
-        configure_gnss_1(tx, &rx).await;
-    }
+    let gnss_1_ready = if let Some(tx) = tx.as_mut() {
+        configure_gnss_1_port(tx, &rx).await
+    } else {
+        false
+    };
     let mut uart_ring_buf = [0u8; 4096];
     let rx = rx.into_ring_buffered(&mut uart_ring_buf);
+
+    // Start DMA reception before asking for acknowledgements and readbacks.
+    if gnss_1_ready {
+        configure_gnss_1_messages(tx.as_mut().expect("GNSS_1 TX present")).await;
+    }
 
     let mut parse_buf = [0u8; 4096];
     let linear_buf = ublox::FixedLinearBuffer::new(&mut parse_buf);
