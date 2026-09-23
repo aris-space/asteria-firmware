@@ -19,7 +19,7 @@ const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const GNSS_FRESH: Duration = Duration::from_millis(500);
 const GNSS_FUSION_PERIOD: Duration = Duration::from_secs(1);
-const GNSS_BOOTSTRAP_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
+const GNSS_MAX_VERTICAL_ACCURACY_MM: u32 = 3_000;
 const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
 const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
 const IMU_DIAGNOSTIC_PERIOD: Duration = Duration::from_secs(10);
@@ -118,11 +118,6 @@ impl Processor {
             );
             self.last_baro_log[index] = Some(sample.ts);
         }
-        // MSL comes from GNSS. Before its first fix, an uncalibrated pressure
-        // altitude cannot establish either the height or barometer biases.
-        if !self.gnss_ready {
-            return Ok(());
-        }
         let barometer = asteria_sef_light::BarometerId::from_index(index)
             .expect("firmware barometer ID must map to SEF-light");
         self.estimator.update_pressure(
@@ -137,7 +132,10 @@ impl Processor {
     }
 
     fn update_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
+        // A poor 3D fix can be tens of metres from a later precise fix. Apply
+        // the same quality requirement to both receivers at every update.
         let valid = sample.pvt.height_msl.is_finite()
+            && sample.pvt.vert_accuracy <= GNSS_MAX_VERTICAL_ACCURACY_MM
             && matches!(
                 sample.pvt.fix_type,
                 ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
@@ -178,13 +176,6 @@ impl Processor {
             }
             _ => candidate,
         };
-        // Establish the MSL datum from a usable fix. Indoors, the first
-        // receiver can report a 3D fix tens of metres away from the later,
-        // more precise receiver. A bad first datum makes that fix look like
-        // an outlier to the filter.
-        if !self.gnss_ready && best.pvt.vert_accuracy > GNSS_BOOTSTRAP_MAX_VERTICAL_ACCURACY_MM {
-            return Ok(());
-        }
         if sample.src != best.src {
             return Ok(());
         }
@@ -224,11 +215,6 @@ impl Processor {
             if updates.iter().any(|update| update.height.accepted) {
                 self.gnss_ready = true;
                 self.gnss_height_std_m = height_std_m;
-            } else if !self.gnss_ready {
-                warn!(
-                    "SEF GNSS bootstrap height rejected: {} m",
-                    best.pvt.height_msl
-                );
             }
             self.last_gnss_fusion = Some(sample.ts);
         }
@@ -252,6 +238,8 @@ impl Processor {
             return;
         }
         if !self.gnss_ready {
+            // MSL comes from GNSS. Raw pressure altitudes have already reached
+            // SEF-light; its bias states are resolved as GNSS becomes available.
             if self
                 .last_status_log
                 .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(1))
