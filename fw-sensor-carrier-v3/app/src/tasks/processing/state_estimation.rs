@@ -221,7 +221,7 @@ impl Processor {
                 selected.velocity.innovation,
                 selected.velocity.normalized_innovation_squared,
             );
-            if updates.iter().any(|update| update.height.accepted) {
+            if selected.height.accepted {
                 self.gnss_ready = true;
                 self.gnss_height_std_m = height_std_m;
             }
