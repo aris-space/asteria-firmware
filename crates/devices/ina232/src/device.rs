@@ -1,3 +1,5 @@
+//! Formalized <https://www.ti.com/lit/ds/symlink/ina232.pdf>
+
 device_driver::create_device!(
     device_name: Ina232device,
     dsl: {

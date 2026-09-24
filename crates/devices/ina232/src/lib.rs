@@ -1,3 +1,5 @@
+//! Device driver for the TI INA232 Current/Voltage/Power Monitor
+
 #![no_std]
 
 mod device;
