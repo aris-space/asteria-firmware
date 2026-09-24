@@ -61,7 +61,7 @@ jobs:
             fw-engine-board
             fw-sensor-carrier
             fw-sensor-carrier-v3
-            fw-power-board
+            fw-backplane
             fw-fuel-control-board
             fw-oxidizer-control-board
             fw-lox-valve-control-board
@@ -116,7 +116,7 @@ jobs:
             fw-engine-board
             fw-sensor-carrier
             fw-sensor-carrier-v3
-            fw-power-board
+            fw-backplane
             fw-fuel-control-board
             fw-oxidizer-control-board
             fw-lox-valve-control-board
@@ -150,7 +150,7 @@ jobs:
             fw-engine-board
             fw-sensor-carrier
             fw-sensor-carrier-v3
-            fw-power-board
+            fw-backplane
             fw-fuel-control-board
             fw-oxidizer-control-board
             fw-lox-valve-control-board
