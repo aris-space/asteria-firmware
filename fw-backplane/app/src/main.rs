@@ -9,12 +9,10 @@ mod board;
 mod build_info;
 mod buzzer;
 mod can;
-mod can_io;
 mod sensor_readout;
 mod unix_time;
 
-use crate::can::{OUTPUTS, THIS_BOARD_ID, can_board_status_task};
-use crate::can_io::ReceivedMessage;
+use crate::can::{OUTPUTS, ReceivedMessage, THIS_BOARD_ID, can_board_status_task};
 use crate::unix_time::init_utc_clock;
 use board::{INA232_I2C_ADDR, Irqs};
 use can_utils::broadcast::Broadcast;
@@ -136,17 +134,16 @@ async fn main(spawner: Spawner) -> ! {
         sensor_readout::sensor_readout_5v_task(ina_rail_5v)
             .expect("Failed to spawn 5V sensor task"),
     );
-
     spawner.spawn(
         sensor_readout::sensor_readout_24v_task(ina_rail_24v)
             .expect("Failed to spawn 24V sensor task"),
     );
+    spawner.spawn(can_board_status_task().expect("Failed to spawn board status task"));
 
     OUTPUTS
         .build_info
         .sender()
         .send(crate::build_info::BUILD_INFO.get().clone());
-    spawner.spawn(can_board_status_task(can_tx).expect("Failed to spawn board status task"));
     OUTPUTS
         .start_broadcasting(spawner, can_tx)
         .expect("Failed to start CAN broadcasters");
