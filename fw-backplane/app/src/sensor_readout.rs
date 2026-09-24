@@ -1,5 +1,7 @@
 use crate::can::OUTPUTS;
 use datatypes::units::RailStatus;
+use dp_backplane::ActivePowerSource;
+use embassy_stm32::gpio::{Input, Level, Output};
 use embassy_stm32::i2c::{self, I2c};
 use embassy_stm32::mode::Async;
 use embassy_time::{Duration, Ticker};
@@ -91,5 +93,36 @@ pub async fn sensor_readout_24v_task(
             sender_24v.send(status);
         }
         ticker.next().await; // wait for the next tick
+    }
+}
+
+/// Readout digital inputs for battery & external power, set their LEDs,
+/// and track which is active for CAN.
+#[embassy_executor::task]
+pub async fn active_power_source_task(
+    bat_p: Input<'static>,
+    ext_p: Input<'static>,
+    mut led_bat_p: Output<'static>,
+    mut led_ext_p: Output<'static>,
+) {
+    let active_power_sender = OUTPUTS.active_power_source.sender();
+    let mut ticker = Ticker::every(Duration::from_millis(100));
+
+    loop {
+        let bat_level = bat_p.get_level();
+        let ext_level = ext_p.get_level();
+        led_bat_p.set_level(bat_level);
+        led_ext_p.set_level(ext_level);
+
+        let active_source = if ext_level == Level::High {
+            ActivePowerSource::External
+        } else if bat_level == Level::High {
+            ActivePowerSource::Battery
+        } else {
+            ActivePowerSource::None
+        };
+        active_power_sender.send(active_source);
+
+        ticker.next().await;
     }
 }
