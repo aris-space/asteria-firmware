@@ -210,7 +210,7 @@ pub mod scripts {
         Step::Wait(Duration::from_millis(50)),
     ];
 
-    /// Urgent notification sound, sound good when played 3 times in sequence
+    /// Urgent notification sound, sounds good when played 3 times in sequence
     pub const URGENT: &[Step] = &[
         Step::Tone(Hertz(700), Duration::from_millis(80)),
         Step::Tone(Hertz(1000), Duration::from_millis(80)),
@@ -233,7 +233,7 @@ pub mod scripts {
         Step::Tone(Hertz(880), Duration::from_millis(400)),
     ];
 
-    /// Discconnect external power sound, meant to be played once.
+    /// Disconnect external power sound, meant to be played once.
     pub const DISCONNECT_EXTERNAL_POWER: &[Step] = &[
         Step::Tone(Hertz(880), Duration::from_millis(60)),
         Step::Wait(Duration::from_millis(40)),
