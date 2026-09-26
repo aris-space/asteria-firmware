@@ -1,3 +1,6 @@
+// Copyright 2026 ARIS
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! The `Broadcast` derive macro spawns an embassy CAN broadcast task for each annotated field.
 //!
 //! For each field annotated with `#[broadcast(map = ..., min_freq_hz = ..., max_freq_hz = ...)]`

@@ -3,6 +3,7 @@ name = "lsm6dso32"
 version = "0.1.0"
 edition = "2024"
 authors = ["Louis Schell <louis.schell1@gmx.de>", "Robert Jahnke <robert.jahnke@aris-space.ch>"]
+license = "MIT OR Apache-2.0"
 description = "Device driver for the LSM6DSO32 IMU"
 
 [dependencies]
