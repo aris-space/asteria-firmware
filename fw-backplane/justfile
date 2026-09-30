@@ -1,5 +1,5 @@
 chip    := "STM32G473RCTx"
-bin     := "fw-power-board"
+bin     := "fw-backplane"
 use_probe_rs := "true"
 
 import '../just/firmware.just'

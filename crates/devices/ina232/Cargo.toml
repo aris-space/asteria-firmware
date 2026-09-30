@@ -1,10 +1,9 @@
 [package]
-name = "ltc2945"
+name = "ina232"
 version = "0.1.0"
 edition = "2024"
 authors = ["Robert Jahnke", "Louis Schell"]
-license = "MIT OR Apache-2.0"
-description = "Device driver for the LTC2945 Voltage/Power-Sensor"
+description = "Device driver for the INA232 Current/Voltage/Power Monitor"
 
 [dependencies]
 device-driver = "1.0.4"

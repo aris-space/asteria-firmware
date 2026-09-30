@@ -1,16 +1,19 @@
 [package]
-name = "fw-power-board"
+name = "fw-backplane"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
 embedded-utils = { path = "../../crates/embedded-utils" }
-ltc2945 = { path = "../../crates/devices/ltc2945" }
-hermes-can = { path = "../../hermes-can", version = "=0.3", features = [
-    "defmt",
-    "message-camera-power-control",
+ina232 = { path = "../../crates/devices/ina232" }
+can-utils = { path = "../../crates/can-utils" }
+data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
+dp-backplane = { path = "../../data-definitions/datapoints/dp-backplane", features = ["can"] }
+dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", features = [
+    "can",
 ] }
+datatypes = { path = "../../data-definitions/datatypes" }
 thiserror = { version = "2.0.11", default-features = false }
 micromath = "2.1.0"
 cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
@@ -42,6 +45,10 @@ debug = ["defmt", "dep:panic-probe"]
 defmt = [
     "dep:defmt",
     "dep:defmt-rtt",
+    "can-utils/defmt",
+    "data-core/defmt",
+    "dp-backplane/derive_defmt",
+    "dp-system-management/derive_defmt",
     "panic-probe/defmt",
     "panic-probe/defmt-error",
     "panic-probe/print-defmt",
@@ -53,10 +60,11 @@ defmt = [
     "embassy-stm32/defmt",
     "embedded-hal-async/defmt-03",
     "embedded-hal-bus/defmt-03",
+    "embedded-utils/defmt",
 ]
 
 [[bin]]
-name = "fw-power-board"
+name = "fw-backplane"
 test = false
 doctest = false
 bench = false
