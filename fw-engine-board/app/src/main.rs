@@ -46,7 +46,6 @@ use crate::k23_temperature_control::k23_temperature_control;
 use crate::sensors::solenoid_current::solenoid_current_task;
 use crate::sensors::{OXD_RNL_T, OXD_TNK_T};
 use ads1120_thermocouples::{ADSThermocouples, PGAGain};
-use analog_pressure::config_vref_buf;
 use can_utils::broadcast::Broadcast as _;
 use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode as _;
@@ -86,6 +85,7 @@ bind_interrupts!(struct Irqs {
     DMA2_CHANNEL1 => dma::InterruptHandler<peripherals::DMA2_CH1>;
     DMA2_CHANNEL2 => dma::InterruptHandler<peripherals::DMA2_CH2>;
     DMA2_CHANNEL3 => dma::InterruptHandler<peripherals::DMA2_CH3>;
+    DMA2_CHANNEL4 => dma::InterruptHandler<peripherals::DMA2_CH4>;
 
     // EXTI interrupt
     EXTI4 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI4>;
@@ -122,7 +122,10 @@ async fn main(spawner: Spawner) -> ! {
         .ok()
         .unwrap();
 
-    config_vref_buf();
+    // Initialize the ADC and enable the internal temperature sensor channel
+    // SAFTEY: this board has an unconnected VREF+ and no other system sets the VREFBUF.
+    let vrefbuf_cfg = unsafe { stm32_temp::setup_internal_vref_buffer() };
+    let mcu_temp = stm32_temp::MCUTemperature::new(p.ADC5, p.DMA2_CH4, vrefbuf_cfg);
 
     // Analog Pressure Initialization
     let eng_p_handles = EnginePressureHandles {
@@ -218,7 +221,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(check_main_arming(main_arming_pin).expect("Check main arming Task failed"));
 
     spawner.spawn(can_rx_task(rx).expect("Can't spawn CAN RX task"));
-    spawner.spawn(board_status_update_task().expect("Board Status Task failed"));
+    spawner.spawn(board_status_update_task(mcu_temp).expect("Board Status Task failed"));
 
     spawner.spawn(build_status_blinky(red).expect("blinky executor"));
 

@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 ads1120-thermocouples = { path = "../../crates/devices/ads1120-thermocouples" }
 max31889-thermistor = { path = "../../crates/devices/max31889-thermistor" }
 analog-pressure = { path = "../../crates/devices/analog-pressure" }
+stm32-temp = { path = "../../crates/devices/stm32-temp" }
 filters = { path = "../../crates/filters" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 can-utils = { path = "../../crates/can-utils" }
