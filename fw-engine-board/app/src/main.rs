@@ -123,7 +123,7 @@ async fn main(spawner: Spawner) -> ! {
         .unwrap();
 
     // Initialize the ADC and enable the internal temperature sensor channel
-    // SAFTEY: this board has an unconnected VREF+ and no other system sets the VREFBUF.
+    // SAFETY: this board has an unconnected VREF+ and no other system sets the VREFBUF.
     let vrefbuf_cfg = unsafe { stm32_temp::setup_internal_vref_buffer() };
     let mcu_temp = stm32_temp::MCUTemperature::new(p.ADC5, p.DMA2_CH4, vrefbuf_cfg);
 
