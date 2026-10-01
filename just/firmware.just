@@ -6,6 +6,11 @@ import './logs.just'
 # `chip`: The STM32 chip being targeted, e.g. `STM32G473RCTx` or `STM32H723ZG`.
 # `bin` : The name of the binary being built, e.g. `fw-engine-board` or `fw-sensor-carrier`.
 # `use_probe_rs` : Whether to use probe-rs for flashing (true/false).
+#
+# Probe-rs flag defaults. A board's justfile can re-assign either of these
+# before/after the import to override (the importing file wins in `just`).
+probe_rs_run_flags := "--no-catch-hardfault --no-catch-reset --connect-under-reset --chip-erase"
+probe_rs_attach_flags := "--no-catch-hardfault --no-catch-reset"
 
 # Show available capabilities in a board workspace.
 [default]
@@ -91,19 +96,12 @@ run *args:
     }
 
     if [[ "{{use_probe_rs}}" == "true" ]]; then
-        probe-rs run --chip {{chip}} \
-            --no-catch-hardfault \
-            --no-catch-reset \
-            --chip-erase \
-            --log-format '{t} {L:severity} {s}' "$elf"
+        probe-rs run --chip {{chip}} {{probe_rs_run_flags}} "$elf"
         wait_for_upload
     else
         arm-none-eabi-objcopy -O binary "$elf" "${elf}.bin"
         STM32_Programmer_CLI -c port=SWD -d "${elf}.bin" 0x08000000 -rst
-        probe-rs attach --chip {{chip}} \
-            --no-catch-hardfault \
-            --no-catch-reset \
-            "$elf"
+        probe-rs attach --chip {{chip}} {{probe_rs_attach_flags}} "$elf"
         # Mirror probe-rs behavior: defer upload wait until the interactive phase ends.
         wait_for_upload
     fi
@@ -167,10 +165,7 @@ attach:
     echo "using profile: $chosen_dir"
     echo "attached with: $elf"
 
-    exec probe-rs attach --chip {{chip}} \
-        --no-catch-hardfault \
-        --no-catch-reset \
-        "$elf"
+    exec probe-rs attach --chip {{chip}} {{probe_rs_attach_flags}} "$elf"
 
 # Replay flash logs then attach live via probe-rs.
 replay-attach:
@@ -219,10 +214,7 @@ replay-attach:
     echo ""
     echo "--- live (probe-rs attach) ---"
     echo ""
-    exec probe-rs attach --chip {{chip}} \
-        --no-catch-hardfault \
-        --no-catch-reset \
-        "$elf"
+    exec probe-rs attach --chip {{chip}} {{probe_rs_attach_flags}} "$elf"
 
 # Run checks that will be used in CI
 ci-checks:
