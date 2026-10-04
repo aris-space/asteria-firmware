@@ -48,9 +48,9 @@ pub fn weaker_gnss_disagreement_floor_m(
 // Use the good receiver's roughly 2.0 PDOP as the point where geometry
 // starts raising the uncertainty floor.
 const GNSS_PDOP_REFERENCE_CENTI: f32 = 200.0;
-// Let the bias follow gradual pressure drift while GNSS keeps MSL anchored.
-// A stationary slow-drift replay passes without following 7 m indoor GNSS wander.
-const STABLE_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.02;
+// Once a bias is fitted, keep its process uncertainty small so indoor GNSS
+// wander does not move a steady barometric height estimate.
+const STABLE_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.005;
 const DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.5;
 const BARO_TREND_WINDOW_US: u64 = 30_000_000;
 const BARO_DRIFT_START_M: f32 = 0.5;
@@ -116,6 +116,10 @@ pub struct BarometerBiasTracker {
 }
 
 impl BarometerBiasTracker {
+    pub fn should_fit(&self, index: usize, bias_variance_m2: f32, barometer_std_m: f32) -> bool {
+        self.drifting[index] || bias_variance_m2 > barometer_std_m * barometer_std_m
+    }
+
     pub fn reset_windows(&mut self) {
         self.window_start = [None; 2];
     }
@@ -321,6 +325,8 @@ mod tests {
     #[test]
     fn barometer_bias_tracking_uses_change_unexplained_by_gnss_motion() {
         let mut tracker = BarometerBiasTracker::default();
+        assert!(tracker.should_fit(0, 9.0, 1.5));
+        assert!(!tracker.should_fit(0, 1.0, 1.5));
         assert_eq!(tracker.observe(0, 0, 300.0, 0.0), None);
         assert_eq!(tracker.observe(0, 5_000_000, 301.1, 0.0), None);
         assert_eq!(tracker.observe(0, 30_000_000, 302.0, 2.0), None);
@@ -339,6 +345,7 @@ mod tests {
             fast_tracker.observe(1, 5_000_000, 303.0, 0.0),
             Some(DRIFTING_BARO_BIAS_WALK_M_PER_SQRT_S)
         );
+        assert!(fast_tracker.should_fit(1, 1.0, 1.5));
     }
 
     #[test]

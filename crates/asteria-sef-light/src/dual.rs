@@ -1,10 +1,11 @@
 use crate::error::EstimatorError;
 use crate::filter::{
-    MeasurementUpdate, PressureMeasurement, VerticalFilter, VerticalFilterConfig,
-    VerticalGnssMeasurement, VerticalGnssUpdate, VerticalState, VerticalUncertainty,
+    BarometerBiasMeasurement, MeasurementUpdate, PressureMeasurement, VerticalFilter,
+    VerticalFilterConfig, VerticalGnssMeasurement, VerticalGnssUpdate, VerticalState,
+    VerticalUncertainty,
 };
 use crate::imu::{ImuAttitudeConfig, ImuAttitudeStatus, ImuMeasurement, ImuVerticalizer};
-use crate::sensor_id::{BarometerId, IMU_0, IMU_1, IMU_COUNT, ImuId};
+use crate::sensor_id::{BAROMETER_COUNT, BarometerId, IMU_0, IMU_1, IMU_COUNT, ImuId};
 use asteria_estimator_selector::{
     Candidate, DualGnssSelector, GNSS_RECEIVER_COUNT, GnssSample, GnssSelectorConfig, GnssSolution,
     HysteresisSelector, SelectorConfig,
@@ -12,6 +13,7 @@ use asteria_estimator_selector::{
 use heapless::Vec;
 
 const MAX_MAGNETOMETER_AGE_US: u64 = 250_000;
+type BiasUpdates = [[Option<MeasurementUpdate>; BAROMETER_COUNT]; IMU_COUNT];
 
 #[derive(Clone, Copy)]
 enum FilterEvent {
@@ -31,6 +33,10 @@ enum FilterEvent {
         sample_time_us: u64,
         measurement: VerticalGnssMeasurement,
     },
+    Bias {
+        sample_time_us: u64,
+        measurements: [Option<BarometerBiasMeasurement>; BAROMETER_COUNT],
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -38,6 +44,7 @@ enum FilterEventResult {
     Prediction,
     Pressure([MeasurementUpdate; IMU_COUNT]),
     Gnss([VerticalGnssUpdate; IMU_COUNT]),
+    Bias(BiasUpdates),
 }
 
 impl FilterEvent {
@@ -45,7 +52,8 @@ impl FilterEvent {
         match self {
             Self::Prediction { sample_time_us, .. }
             | Self::Pressure { sample_time_us, .. }
-            | Self::Gnss { sample_time_us, .. } => sample_time_us,
+            | Self::Gnss { sample_time_us, .. }
+            | Self::Bias { sample_time_us, .. } => sample_time_us,
         }
     }
 
@@ -54,6 +62,7 @@ impl FilterEvent {
             Self::Prediction { .. } => 0,
             Self::Pressure { .. } => 1,
             Self::Gnss { .. } => 2,
+            Self::Bias { .. } => 3,
         }
     }
 
@@ -92,6 +101,20 @@ impl FilterEvent {
                 filters[0].update_gnss(measurement)?,
                 filters[1].update_gnss(measurement)?,
             ])),
+            Self::Bias { measurements, .. } => {
+                let mut updates = [[None; BAROMETER_COUNT]; IMU_COUNT];
+                for (index, measurement) in measurements.into_iter().enumerate() {
+                    if let Some(measurement) = measurement {
+                        let barometer = BarometerId::from_index(index)
+                            .expect("bias measurement index must map to a barometer");
+                        for chain in 0..IMU_COUNT {
+                            updates[chain][index] =
+                                Some(filters[chain].update_barometer_bias(barometer, measurement)?);
+                        }
+                    }
+                }
+                Ok(FilterEventResult::Bias(updates))
+            }
         }
     }
 }
@@ -356,6 +379,31 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
         Ok(Some(updates))
     }
 
+    /// Applies GNSS-derived barometer-bias observations to both chains at the reference epoch.
+    /// Height and velocity change only through subsequent pressure and IMU updates.
+    pub fn update_barometer_biases(
+        &mut self,
+        sample_time_us: u64,
+        measurements: [Option<BarometerBiasMeasurement>; BAROMETER_COUNT],
+    ) -> Result<BiasUpdates, EstimatorError> {
+        if measurements.iter().all(Option::is_none) {
+            return Err(EstimatorError::OutOfRangeInput);
+        }
+        for measurement in measurements.into_iter().flatten() {
+            crate::error::validate_finite(&[measurement.bias_m])?;
+            crate::error::validate_positive(&[measurement.std_m])?;
+        }
+        let FilterEventResult::Bias(updates) = self.apply_filter_event(FilterEvent::Bias {
+            sample_time_us,
+            measurements,
+        })?
+        else {
+            unreachable!("bias event returned a non-bias result")
+        };
+        self.select_best();
+        Ok(updates)
+    }
+
     /// Changes one barometer bias random walk in both estimator chains.
     ///
     /// Setting this to zero freezes the process-noise growth for that bias. This is intended to be
@@ -508,6 +556,13 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
                     update.height.normalized_innovation_squared,
                     update.velocity.normalized_innovation_squared,
                 )
+            }),
+            FilterEventResult::Bias(updates) => updates.map(|chain| {
+                chain
+                    .into_iter()
+                    .flatten()
+                    .map(|update| update.normalized_innovation_squared)
+                    .fold(0.0, f32::max)
             }),
         };
         for (score, normalized_innovation_squared) in scores.iter_mut().zip(normalized_innovations)
