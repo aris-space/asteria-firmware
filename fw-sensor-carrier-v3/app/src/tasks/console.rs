@@ -16,7 +16,7 @@ use static_cell::StaticCell;
 use crate::calibration::{Name, imu, mag};
 use crate::resources::flash;
 use crate::resources::usb::UsbDriver;
-use crate::sensors::{ImuId, MagnetometerId};
+use crate::sensors::{ImuId, MagId};
 use crate::storage::{self, Storage};
 
 type Class = CdcAcmClass<'static, UsbDriver>;
@@ -287,7 +287,7 @@ async fn show_imu_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
 async fn show_mag_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
     let applied = mag::applied();
     let stored = mag::stored(storage).await;
-    for id in MagnetometerId::ALL {
+    for id in MagId::ALL {
         let i = id.index();
         let pending = stored[i]
             .filter(|st| st.differs_from(&applied[i]))
@@ -443,7 +443,7 @@ async fn flash_list(class: &mut ConsoleIo<'_>) {
         let _ = writeln!(s, "{}", id.name());
         say(class, &s).await;
     }
-    for id in MagnetometerId::ALL {
+    for id in MagId::ALL {
         let mut s: String<24> = String::new();
         let _ = writeln!(s, "{}", id.name());
         say(class, &s).await;

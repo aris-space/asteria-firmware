@@ -7,7 +7,7 @@
 use embassy_time::Instant;
 use lsm6dso32::types::{Acceleration, AccelerationRaw, AngularRate, AngularRateRaw};
 
-use crate::sensors::{BarometerId, DhtId, GnssId, ImuId, MagnetometerId};
+use crate::sensors::{BaroId, DhtId, GnssId, ImuId, MagId};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ImuSample {
@@ -32,7 +32,7 @@ pub struct RawImuSample {
 /// conversion by the barometer readout.
 #[derive(Clone, Copy, Debug)]
 pub struct BaroSample {
-    pub src: BarometerId,
+    pub src: BaroId,
     pub ts: Instant,
     pub pressure_mbar: f32,
     pub temperature_c: f32,
@@ -61,7 +61,7 @@ pub struct GnssSample {
 /// `crate::calibration::mag::apply_calibration`.
 #[derive(Clone, Copy, Debug)]
 pub struct RawMagSample {
-    pub src: MagnetometerId,
+    pub src: MagId,
     pub ts: Instant,
     pub x: i16,
     pub y: i16,
@@ -72,7 +72,7 @@ pub struct RawMagSample {
 /// Output of magnetometer calibration.
 #[derive(Clone, Copy, Debug)]
 pub struct MagSample {
-    pub src: MagnetometerId,
+    pub src: MagId,
     pub ts: Instant,
     pub x: f32,
     pub y: f32,
@@ -89,11 +89,11 @@ pub struct Pvt {
     pub fix_ok: bool,
     pub latitude_deg: f64,
     pub longitude_deg: f64,
-    pub height_msl: f32,
-    pub vel_down: f32,
-    pub pdop: u16,
-    pub horiz_accuracy: u32,
-    pub vert_accuracy: u32,
+    pub height_msl_m: f32,
+    pub velocity_down_mps: f32,
+    pub pdop_centi: u16,
+    pub horizontal_accuracy_mm: u32,
+    pub vertical_accuracy_mm: u32,
     pub speed_accuracy_mps: f32,
 }
 
@@ -142,12 +142,12 @@ pub enum SdLogRecord {
         cal: ImuSample,
         read_ts: Instant,
     },
-    Magnetometer {
+    Mag {
         raw: RawMagSample,
         cal: MagSample,
     },
     Gnss(GnssSample),
-    Barometer {
+    Baro {
         sample: BaroSample,
         read_ts: Instant,
     },
@@ -162,9 +162,9 @@ impl SdLogRecord {
         match self {
             Self::State(_) => 0,
             Self::Imu { .. } => 1,
-            Self::Magnetometer { .. } => 2,
+            Self::Mag { .. } => 2,
             Self::Gnss(_) => 3,
-            Self::Barometer { .. } => 4,
+            Self::Baro { .. } => 4,
             Self::Dht(_) => 5,
         }
     }

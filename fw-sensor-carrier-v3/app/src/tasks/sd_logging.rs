@@ -49,15 +49,15 @@ const FILES: [CsvFile; FILE_COUNT] = [
     },
     CsvFile {
         name: "MAG.CSV",
-        header: "sample_us,read_us,magnetometer,x_raw,y_raw,z_raw,x_nt,y_nt,z_nt\n",
+        header: "sample_us,read_us,mag,x_raw,y_raw,z_raw,x_nt,y_nt,z_nt\n",
     },
     CsvFile {
         name: "GNSS.CSV",
-        header: "sample_us,read_us,receiver,itow_ms,num_satellites,fix_type,fix_ok,latitude_deg,longitude_deg,height_msl_m,velocity_down_mps,horizontal_accuracy_mm,vertical_accuracy_mm,speed_accuracy_mps,pdop_centi\n",
+        header: "sample_us,read_us,gnss,itow_ms,num_satellites,fix_type,fix_ok,latitude_deg,longitude_deg,height_msl_m,velocity_down_mps,horizontal_accuracy_mm,vertical_accuracy_mm,speed_accuracy_mps,pdop_centi\n",
     },
     CsvFile {
         name: "BARO.CSV",
-        header: "sample_us,read_us,barometer,pressure_mbar,temperature_c\n",
+        header: "sample_us,read_us,baro,pressure_mbar,temperature_c\n",
     },
     CsvFile {
         name: "DHT.CSV",
@@ -65,7 +65,7 @@ const FILES: [CsvFile; FILE_COUNT] = [
     },
     CsvFile {
         name: "DROPS.CSV",
-        header: "uptime_us,state,imu,magnetometer,gnss,barometer,dht\n",
+        header: "uptime_us,state,imu,mag,gnss,baro,dht\n",
     },
 ];
 const BUFFER_SIZE: usize = 4096;
@@ -338,7 +338,7 @@ fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
             cal.gyro.y,
             cal.gyro.z,
         )?,
-        SdLogRecord::Magnetometer { raw, cal } => write!(
+        SdLogRecord::Mag { raw, cal } => write!(
             row,
             "{},{},{},{},{},{},{:.2},{:.2},{:.2}\n",
             raw.ts.as_micros(),
@@ -363,14 +363,14 @@ fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
             u8::from(g.pvt.fix_ok),
             g.pvt.latitude_deg,
             g.pvt.longitude_deg,
-            g.pvt.height_msl,
-            g.pvt.vel_down,
-            g.pvt.horiz_accuracy,
-            g.pvt.vert_accuracy,
+            g.pvt.height_msl_m,
+            g.pvt.velocity_down_mps,
+            g.pvt.horizontal_accuracy_mm,
+            g.pvt.vertical_accuracy_mm,
             g.pvt.speed_accuracy_mps,
-            g.pvt.pdop,
+            g.pvt.pdop_centi,
         )?,
-        SdLogRecord::Barometer { sample, read_ts } => write!(
+        SdLogRecord::Baro { sample, read_ts } => write!(
             row,
             "{},{},{},{:.3},{:.3}\n",
             sample.ts.as_micros(),

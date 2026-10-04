@@ -115,10 +115,10 @@ pub async fn spawn_tasks(
     );
 
     // Do not replace this unless you know why it was there in the first place.
-    let mag1 = tasks::readout::magnetometer::init(board.sensors.bus1, MAG_BUS_1).await;
-    let baro1 = tasks::readout::barometer::init(board.sensors.bus1, BARO_BUS_1).await;
-    let mag2 = tasks::readout::magnetometer::init(board.sensors.bus2, MAG_BUS_2).await;
-    let baro2 = tasks::readout::barometer::init(board.sensors.bus2, BARO_BUS_2).await;
+    let mag1 = tasks::readout::mag::init(board.sensors.bus1, MAG_BUS_1).await;
+    let baro1 = tasks::readout::baro::init(board.sensors.bus1, BARO_BUS_1).await;
+    let mag2 = tasks::readout::mag::init(board.sensors.bus2, MAG_BUS_2).await;
+    let baro2 = tasks::readout::baro::init(board.sensors.bus2, BARO_BUS_2).await;
 
     // DHT readout is disabled for the height bench. Initializing DHT caused
     // both I2C barometers to time out; the barometers stay active without it.
@@ -126,19 +126,19 @@ pub async fn spawn_tasks(
         status.store(SensorStatus::Disabled, Ordering::Relaxed);
     }
     level_0_spawner.spawn(
-        tasks::readout::magnetometer::task(mag1, board.sensors.bus1, MAG_BUS_1)
+        tasks::readout::mag::task(mag1, board.sensors.bus1, MAG_BUS_1)
             .expect("Failed to spawn magnetometer 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::barometer::task(baro1, board.sensors.bus1, BARO_BUS_1)
+        tasks::readout::baro::task(baro1, board.sensors.bus1, BARO_BUS_1)
             .expect("Failed to spawn barometer 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::magnetometer::task(mag2, board.sensors.bus2, MAG_BUS_2)
+        tasks::readout::mag::task(mag2, board.sensors.bus2, MAG_BUS_2)
             .expect("Failed to spawn magnetometer 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::barometer::task(baro2, board.sensors.bus2, BARO_BUS_2)
+        tasks::readout::baro::task(baro2, board.sensors.bus2, BARO_BUS_2)
             .expect("Failed to spawn barometer 1 task"),
     );
     level_0_spawner.spawn(

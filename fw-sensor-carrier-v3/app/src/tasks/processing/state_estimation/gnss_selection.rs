@@ -26,8 +26,8 @@ impl GnssSelection {
     pub fn select(&mut self, sample: GnssSample) -> bool {
         // GNSS uncertainty determines weight; only an unusable solution is
         // removed here. A weak 3D fix can still provide an absolute anchor.
-        let usable = sample.pvt.height_msl.is_finite()
-            && sample.pvt.vel_down.is_finite()
+        let usable = sample.pvt.height_msl_m.is_finite()
+            && sample.pvt.velocity_down_mps.is_finite()
             && matches!(
                 sample.pvt.fix_type,
                 ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
@@ -45,8 +45,8 @@ impl GnssSelection {
             // Only the less precise receiver inherits disagreement with the
             // other fix. This is an uncertainty adjustment, not a height offset.
             self.disagreement_floor_m = weaker_gnss_disagreement_floor_m(
-                [first.pvt.height_msl, second.pvt.height_msl],
-                [first.pvt.vel_down, second.pvt.vel_down],
+                [first.pvt.height_msl_m, second.pvt.height_msl_m],
+                [first.pvt.velocity_down_mps, second.pvt.velocity_down_mps],
                 [first.ts.as_micros(), second.ts.as_micros()],
                 [
                     receiver_height_std_m(&first),
@@ -88,5 +88,5 @@ impl GnssSelection {
 }
 
 fn receiver_height_std_m(sample: &GnssSample) -> f32 {
-    gnss_height_std_m(sample.pvt.vert_accuracy, sample.pvt.pdop)
+    gnss_height_std_m(sample.pvt.vertical_accuracy_mm, sample.pvt.pdop_centi)
 }

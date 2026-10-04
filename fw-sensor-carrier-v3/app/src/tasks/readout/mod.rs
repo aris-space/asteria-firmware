@@ -19,12 +19,12 @@ use embassy_time::{Duration, Instant, Timer};
 
 use crate::sensors::{AtomicSensorStatus, SensorStatus};
 
-pub mod barometer;
+pub mod baro;
 #[expect(dead_code, reason = "not spawned; see startup.rs")]
 pub mod dht;
 pub mod gnss;
 pub mod imu;
-pub mod magnetometer;
+pub mod mag;
 
 /// Consecutive read errors before a readout returns to `Inactive`.
 pub const MAX_CONSECUTIVE_ERRORS: u8 = 10;

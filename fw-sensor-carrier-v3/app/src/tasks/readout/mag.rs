@@ -1,33 +1,63 @@
-//! MS5607 barometer readout on a shared I2C bus.
+//! LSM303AGR magnetometer readout on a shared I2C bus.
 
 use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
-use ms5607::{Ms5607, Oversampling};
+use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 
 use super::{MAX_CONSECUTIVE_ERRORS, State, backoff, init_at_startup, wait_for_sample};
+use crate::calibration;
 use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
-use crate::sensors::{BAROMETER_STATUS, BarometerId};
+use crate::sensors::{MAG_STATUS, MagId};
 use crate::signals;
-use crate::types::{BaroSample, SdLogRecord};
+use crate::types::{RawMagSample, SdLogRecord};
 
-const SAMPLE_HZ: u32 = 40;
+const MAG_ODR: MagOutputDataRate = MagOutputDataRate::Hz10;
+const SAMPLE_HZ: u32 = match MAG_ODR {
+    MagOutputDataRate::Hz10 => 10,
+    MagOutputDataRate::Hz20 => 20,
+    MagOutputDataRate::Hz50 => 50,
+    MagOutputDataRate::Hz100 => 100,
+};
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 type BusDevice = I2cDevice<'static, CriticalSectionRawMutex, SharedI2c>;
-/// A fully-initialized barometer, ready to read.
-pub type Sensor = Ms5607<BusDevice, ms5607::Initialized>;
+/// A fully-initialized magnetometer, ready to read.
+pub type Sensor =
+    Lsm303agr<lsm303agr::interface::I2cInterface<BusDevice>, lsm303agr::mode::MagContinuous>;
 
-async fn configure(bus: SharedI2cBus, id: BarometerId) -> Result<Sensor, ()> {
-    Ms5607::new(I2cDevice::new(bus), false)
-        .init(&mut Delay)
+async fn configure(bus: SharedI2cBus, id: MagId) -> Result<Sensor, ()> {
+    let mut sensor = Lsm303agr::new_with_i2c(I2cDevice::new(bus));
+    sensor
+        .init()
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e.kind)))
+        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+    let mut sensor = sensor
+        .into_mag_continuous()
+        .await
+        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e.error)))?;
+    sensor
+        .set_mag_mode_and_odr(&mut Delay, MagMode::HighResolution, MAG_ODR)
+        .await
+        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+    sensor
+        .enable_mag_offset_cancellation()
+        .await
+        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+    sensor
+        .mag_enable_low_pass_filter()
+        .await
+        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+    sensor
+        .set_accel_mode_and_odr(&mut Delay, AccelMode::Normal, AccelOutputDataRate::Hz50)
+        .await
+        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+    Ok(sensor)
 }
 
-/// Brings the barometer up at startup; see [`super`] for why this is separate.
-pub async fn init(bus: SharedI2cBus, id: BarometerId) -> Option<Sensor> {
+/// Brings the magnetometer up at startup; see [`super`] for why this is separate.
+pub async fn init(bus: SharedI2cBus, id: MagId) -> Option<Sensor> {
     init_at_startup(id, async || configure(bus, id).await).await
 }
 
@@ -35,7 +65,7 @@ struct Inactive {
     /// Initialized by [`init`] at startup, if it succeeded.
     sensor: Option<Sensor>,
     bus: SharedI2cBus,
-    id: BarometerId,
+    id: MagId,
     attempt: u8,
 }
 
@@ -69,7 +99,7 @@ impl State for Inactive {
 struct Active {
     sensor: Sensor,
     bus: SharedI2cBus,
-    id: BarometerId,
+    id: MagId,
 }
 
 impl State for Active {
@@ -97,34 +127,34 @@ impl State for Active {
 
 impl Active {
     async fn read(&mut self) -> Result<(), ()> {
-        let started = Instant::now();
-        let m = self
+        let field = self
             .sensor
-            .measure(Oversampling::Osr2048, &mut Delay)
+            .magnetic_field()
             .await
             .map_err(|e| warn!("{} read error: {:?}", self.id, Debug2Format(&e)))?;
-        // Pressure is converted in the first half of the D1/D2 cycle.
-        // Use the measured cycle midpoint instead of a fixed read delay.
-        let read_ts = Instant::now();
-        let sample = BaroSample {
+        let (x, y, z) = field.xyz_unscaled();
+        let raw = RawMagSample {
             src: self.id,
-            ts: started + read_ts.saturating_duration_since(started) / 2,
-            pressure_mbar: m.pressure_mbar,
-            temperature_c: m.temperature_c,
+            ts: Instant::now(),
+            x,
+            y,
+            z,
         };
-        signals::submit_baro_sample(sample);
-        signals::submit_sd_log(SdLogRecord::Barometer { sample, read_ts });
+        let cal = calibration::mag::apply_calibration(raw);
+        signals::submit_raw_mag_sample(raw);
+        signals::submit_mag_sample(cal);
+        signals::submit_sd_log(SdLogRecord::Mag { raw, cal });
         Ok(())
     }
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn task(sensor: Option<Sensor>, bus: SharedI2cBus, id: BarometerId) -> ! {
+pub async fn task(sensor: Option<Sensor>, bus: SharedI2cBus, id: MagId) -> ! {
     let inactive = Inactive {
         sensor,
         bus,
         id,
         attempt: super::MAX_INIT_ATTEMPTS,
     };
-    super::run(&BAROMETER_STATUS[id.index()], inactive).await
+    super::run(&MAG_STATUS[id.index()], inactive).await
 }

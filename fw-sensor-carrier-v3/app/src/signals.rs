@@ -11,7 +11,7 @@ use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 
-use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
+use crate::sensors::{BARO_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAG_COUNT};
 use crate::types::{
     BaroSample, DhtSample, GnssSample, ImuSample, MagSample, RawMagSample, SdLogRecord,
     StateEstimate,
@@ -47,15 +47,15 @@ define_sample_channels!(IMU_CHANNELS, submit_imu_sample, submit_imu_sample_batch
     ImuSample, cap = 256, subs = 2, count = IMU_COUNT);
 
 define_sample_channels!(BARO_CHANNELS, submit_baro_sample, submit_baro_sample_batch:
-    BaroSample, cap = 16, subs = 1, count = BAROMETER_COUNT);
+    BaroSample, cap = 16, subs = 1, count = BARO_COUNT);
 
 define_sample_channels!(MAG_CHANNELS, submit_mag_sample, submit_mag_sample_batch:
-    MagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
+    MagSample, cap = 16, subs = 1, count = MAG_COUNT);
 
 // Raw, pre-calibration mag samples for the calibration task to consume
 // while the device is being tumbled. Off the hot path otherwise.
 define_sample_channels!(RAW_MAG_CHANNELS, submit_raw_mag_sample, submit_raw_mag_sample_batch:
-    RawMagSample, cap = 16, subs = 1, count = MAGNETOMETER_COUNT);
+    RawMagSample, cap = 16, subs = 1, count = MAG_COUNT);
 
 define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_batch:
     GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);

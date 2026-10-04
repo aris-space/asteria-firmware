@@ -12,8 +12,7 @@ use hermes_can::messages::board_status::SensorStatus as CanSensorStatus;
 
 use super::CanTransmitter;
 use crate::sensors::{
-    AtomicSensorStatus, BAROMETER_STATUS, DHT_STATUS, GNSS_STATUS, IMU_STATUS, MAGNETOMETER_STATUS,
-    SensorStatus,
+    AtomicSensorStatus, BARO_STATUS, DHT_STATUS, GNSS_STATUS, IMU_STATUS, MAG_STATUS, SensorStatus,
 };
 use crate::signals;
 
@@ -140,12 +139,12 @@ async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>)
                 micros_since_restart,
             },
             sensor_health: SensorsHealth {
-                barometer_bus_1: convert(&BAROMETER_STATUS[0]),
-                barometer_bus_2: convert(&BAROMETER_STATUS[1]),
+                barometer_bus_1: convert(&BARO_STATUS[0]),
+                barometer_bus_2: convert(&BARO_STATUS[1]),
                 dht_bus_1: convert(&DHT_STATUS[0]),
                 dht_bus_2: convert(&DHT_STATUS[1]),
-                magnetometer_bus_1: convert(&MAGNETOMETER_STATUS[0]),
-                magnetometer_bus_2: convert(&MAGNETOMETER_STATUS[1]),
+                magnetometer_bus_1: convert(&MAG_STATUS[0]),
+                magnetometer_bus_2: convert(&MAG_STATUS[1]),
                 imu_1: convert(&IMU_STATUS[0]),
                 imu_2: convert(&IMU_STATUS[1]),
                 gps_1: convert(&GNSS_STATUS[0]),

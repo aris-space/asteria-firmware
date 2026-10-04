@@ -9,7 +9,7 @@ use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
 use super::Name;
-use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MAGNETOMETER_COUNT, MagnetometerId};
+use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MAG_COUNT, MagId};
 use crate::signals::RAW_MAG_CHANNELS;
 use crate::storage::Storage;
 use crate::types::{MagSample, RawMagSample};
@@ -37,11 +37,11 @@ pub async fn load(storage: &Storage) {
     let _ = CAL.init(cal);
 }
 
-pub fn applied() -> [StoredCal; MAGNETOMETER_COUNT] {
+pub fn applied() -> [StoredCal; MAG_COUNT] {
     *CAL.try_get().unwrap_or(&DEFAULTS)
 }
 
-pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT] {
+pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAG_COUNT] {
     [
         storage.load::<StoredCal>(&MAG_BUS_1.key()).await,
         storage.load::<StoredCal>(&MAG_BUS_2.key()).await,
@@ -49,11 +49,11 @@ pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAGNETOMETER_COUNT
 }
 
 /// Live per-sensor cal, written once at startup; a reset reloads and applies it.
-static CAL: OnceLock<[StoredCal; MAGNETOMETER_COUNT]> = OnceLock::new();
+static CAL: OnceLock<[StoredCal; MAG_COUNT]> = OnceLock::new();
 
-const DEFAULTS: [StoredCal; MAGNETOMETER_COUNT] = [StoredCal::DEFAULT; MAGNETOMETER_COUNT];
+const DEFAULTS: [StoredCal; MAG_COUNT] = [StoredCal::DEFAULT; MAG_COUNT];
 
-async fn load_one(storage: &Storage, id: MagnetometerId) -> StoredCal {
+async fn load_one(storage: &Storage, id: MagId) -> StoredCal {
     match storage.load::<StoredCal>(&id.key()).await {
         Some(cal) => {
             info!("{}: cal \"{}\" loaded from flash", id, cal.name.as_str());
@@ -212,14 +212,14 @@ const MIN_VALID_NT: f32 = 22_000.0;
 const MAX_VALID_NT: f32 = 67_000.0;
 
 const _: () = assert!(
-    MAGNETOMETER_COUNT == 2,
+    MAG_COUNT == 2,
     "MagCal is written for exactly two magnetometers"
 );
 
 /// Magnetometer calibration: the caller drives the collection loop (`collect_tick`
 /// per window, then `finish`). One `magcal` solver per sensor.
 pub struct MagCal {
-    solvers: [Solver; MAGNETOMETER_COUNT],
+    solvers: [Solver; MAG_COUNT],
 }
 
 impl Default for MagCal {
@@ -254,14 +254,14 @@ impl MagCal {
         }
     }
 
-    pub fn counts(&self) -> [usize; MAGNETOMETER_COUNT] {
+    pub fn counts(&self) -> [usize; MAG_COUNT] {
         [
             self.solvers[0].sample_count(),
             self.solvers[1].sample_count(),
         ]
     }
 
-    pub async fn finish(self, name: &str, storage: &Storage) -> [CalReport; MAGNETOMETER_COUNT] {
+    pub async fn finish(self, name: &str, storage: &Storage) -> [CalReport; MAG_COUNT] {
         let [mut s0, mut s1] = self.solvers;
         [
             Self::finish_one(&mut s0, MAG_BUS_1, name, storage).await,
@@ -271,7 +271,7 @@ impl MagCal {
 
     async fn finish_one(
         solver: &mut Solver,
-        id: MagnetometerId,
+        id: MagId,
         name: &str,
         storage: &Storage,
     ) -> CalReport {
@@ -338,7 +338,7 @@ struct Fit {
 }
 
 pub struct CalReport {
-    id: MagnetometerId,
+    id: MagId,
     samples: usize,
     outcome: CalOutcome,
 }

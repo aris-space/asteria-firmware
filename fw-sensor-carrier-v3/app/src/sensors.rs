@@ -58,14 +58,14 @@ define_sensor_family! {
 }
 
 define_sensor_family! {
-    pub struct BarometerId;
-    count: BAROMETER_COUNT;
+    pub struct BaroId;
+    count: BARO_COUNT;
     ids: [BARO_BUS_1 = 0, BARO_BUS_2 = 1];
 }
 
 define_sensor_family! {
-    pub struct MagnetometerId;
-    count: MAGNETOMETER_COUNT;
+    pub struct MagId;
+    count: MAG_COUNT;
     ids: [MAG_BUS_1 = 0, MAG_BUS_2 = 1];
 }
 
@@ -99,7 +99,7 @@ macro_rules! status_array {
 }
 
 status_array!(IMU_STATUS, IMU_COUNT);
-status_array!(BAROMETER_STATUS, BAROMETER_COUNT);
-status_array!(MAGNETOMETER_STATUS, MAGNETOMETER_COUNT);
+status_array!(BARO_STATUS, BARO_COUNT);
+status_array!(MAG_STATUS, MAG_COUNT);
 status_array!(GNSS_STATUS, GNSS_COUNT);
 status_array!(DHT_STATUS, DHT_COUNT);

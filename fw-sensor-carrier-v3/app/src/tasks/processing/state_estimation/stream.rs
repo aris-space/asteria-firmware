@@ -29,9 +29,9 @@ pub async fn task() -> ! {
         let (baro_heads, rest) = rest.split_at_mut(2);
         let (gnss_heads, mag_heads) = rest.split_at_mut(2);
         refill(imu_heads, &mut imu, Event::Imu, "IMU");
-        refill(baro_heads, &mut baro, Event::Barometer, "barometer");
+        refill(baro_heads, &mut baro, Event::Baro, "baro");
         refill(gnss_heads, &mut gnss, Event::Gnss, "GNSS");
-        refill(mag_heads, &mut mag, Event::Magnetometer, "magnetometer");
+        refill(mag_heads, &mut mag, Event::Mag, "mag");
 
         // Feed all streams in timestamp order. In-order aiding avoids a full
         // SEF history replay at each barometer observation.

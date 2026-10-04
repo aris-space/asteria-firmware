@@ -13,7 +13,7 @@ use fw_sensor_carrier_v3::sef::{
 };
 
 use crate::calibration;
-use crate::sensors::{BAROMETER_COUNT, GnssId, IMU_COUNT, ImuId};
+use crate::sensors::{BARO_COUNT, GnssId, IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::types::{
@@ -34,8 +34,8 @@ const BARO_HEIGHT_STD_M: f32 = 1.5;
 #[derive(Clone, Copy)]
 enum Event {
     Imu(ImuSample),
-    Barometer(BaroSample),
-    Magnetometer(MagSample),
+    Baro(BaroSample),
+    Mag(MagSample),
     Gnss(GnssSample),
 }
 
@@ -43,8 +43,8 @@ impl Event {
     fn ts(self) -> Instant {
         match self {
             Self::Imu(sample) => sample.ts,
-            Self::Barometer(sample) => sample.ts,
-            Self::Magnetometer(sample) => sample.ts,
+            Self::Baro(sample) => sample.ts,
+            Self::Mag(sample) => sample.ts,
             Self::Gnss(sample) => sample.ts,
         }
     }
@@ -64,7 +64,7 @@ struct Processor {
     last_gnss_velocity: Option<(Instant, f32)>,
     gnss_displacement_m: f32,
     barometer_bias_tracker: BarometerBiasTracker,
-    last_baro_height: [Option<(Instant, f32)>; BAROMETER_COUNT],
+    last_baro_height: [Option<(Instant, f32)>; BARO_COUNT],
     last_output: Option<Instant>,
     last_warning: Option<Instant>,
 }
@@ -82,7 +82,7 @@ impl Processor {
             last_gnss_velocity: None,
             gnss_displacement_m: 0.0,
             barometer_bias_tracker: BarometerBiasTracker::default(),
-            last_baro_height: [None; BAROMETER_COUNT],
+            last_baro_height: [None; BARO_COUNT],
             last_output: None,
             last_warning: None,
         })
@@ -91,8 +91,8 @@ impl Processor {
     fn handle(&mut self, event: Event) {
         let result = match event {
             Event::Imu(sample) => self.update_imu(sample),
-            Event::Barometer(sample) => self.update_barometer(sample),
-            Event::Magnetometer(sample) => self.update_magnetometer(sample),
+            Event::Baro(sample) => self.update_baro(sample),
+            Event::Mag(sample) => self.update_mag(sample),
             Event::Gnss(sample) => self.update_gnss(sample),
         };
         if let Err(error) = result {
@@ -121,7 +121,7 @@ impl Processor {
         Ok(())
     }
 
-    fn update_barometer(&mut self, sample: BaroSample) -> Result<(), EstimatorError> {
+    fn update_baro(&mut self, sample: BaroSample) -> Result<(), EstimatorError> {
         let index = sample.src.index();
         let height_m = barometric_pressure_altitude_m(sample.pressure_mbar)
             .ok_or(EstimatorError::OutOfRangeInput)?;
@@ -161,7 +161,7 @@ impl Processor {
         Ok(())
     }
 
-    fn update_magnetometer(&mut self, sample: MagSample) -> Result<(), EstimatorError> {
+    fn update_mag(&mut self, sample: MagSample) -> Result<(), EstimatorError> {
         let index = sample.src.index();
         let field = [sample.x, sample.y, sample.z];
         let field_nt = libm::sqrtf(field.iter().map(|value| value * value).sum());
@@ -195,7 +195,7 @@ impl Processor {
         );
 
         let measurements =
-            self.barometer_bias_measurements(sample.ts, sample.pvt.height_msl, bias_std_m);
+            self.barometer_bias_measurements(sample.ts, sample.pvt.height_msl_m, bias_std_m);
         if measurements.iter().any(Option::is_some) {
             if self.anchored_at.is_none() {
                 self.restart_for_first_anchor()?;
@@ -214,7 +214,7 @@ impl Processor {
         } else if self.anchored_at.is_none() {
             return Ok(());
         }
-        self.track_gnss_velocity(sample.ts, -sample.pvt.vel_down);
+        self.track_gnss_velocity(sample.ts, -sample.pvt.velocity_down_mps);
         self.last_gnss_fusion = Some((sample.src, sample.ts));
         Ok(())
     }
@@ -227,7 +227,7 @@ impl Processor {
         ts: Instant,
         gnss_height_m: f32,
         std_m: f32,
-    ) -> [Option<BarometerBiasMeasurement>; BAROMETER_COUNT] {
+    ) -> [Option<BarometerBiasMeasurement>; BARO_COUNT] {
         let bias_variance = ImuId::ALL.map(|id| {
             self.estimator
                 .uncertainty(sef_imu(id.index()))
