@@ -7,10 +7,11 @@ use embassy_time::{Delay, Duration, Instant, Timer};
 use ms5607::{Ms5607, Oversampling};
 
 use super::{MAX_CONSECUTIVE_ERRORS, State, backoff, init_at_startup, wait_for_sample};
+use crate::calibration;
 use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{BARO_STATUS, BaroId};
 use crate::signals;
-use crate::types::{BaroSample, SdLogRecord};
+use crate::types::{RawBaroSample, SdLogRecord};
 
 const SAMPLE_HZ: u32 = 40;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
@@ -106,14 +107,16 @@ impl Active {
         // Pressure is converted in the first half of the D1/D2 cycle.
         // Use the measured cycle midpoint instead of a fixed read delay.
         let read_ts = Instant::now();
-        let sample = BaroSample {
+        let raw = RawBaroSample {
             src: self.id,
             ts: started + read_ts.saturating_duration_since(started) / 2,
+            read_ts,
             pressure_mbar: m.pressure_mbar,
             temperature_c: m.temperature_c,
         };
-        signals::submit_baro_sample(sample);
-        signals::submit_sd_log(SdLogRecord::Baro { sample, read_ts });
+        let cal = calibration::baro::apply_calibration(raw);
+        signals::submit_baro_sample(cal);
+        signals::submit_sd_log(SdLogRecord::Baro { raw, cal });
         Ok(())
     }
 }

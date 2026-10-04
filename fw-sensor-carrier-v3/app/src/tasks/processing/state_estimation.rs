@@ -165,7 +165,11 @@ impl Processor {
         let index = sample.src.index();
         let field = [sample.x, sample.y, sample.z];
         let field_nt = libm::sqrtf(field.iter().map(|value| value * value).sum());
-        if !calibration::mag::applied()[index].accepts_field(field_nt) {
+        if !calibration::mag::CAL
+            .applied(sample.src)
+            .correction
+            .accepts_field(field_nt)
+        {
             return Ok(());
         }
         // Each magnetometer aids the attitude chain of the IMU with the same index.

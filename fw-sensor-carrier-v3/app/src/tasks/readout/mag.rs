@@ -133,9 +133,11 @@ impl Active {
             .await
             .map_err(|e| warn!("{} read error: {:?}", self.id, Debug2Format(&e)))?;
         let (x, y, z) = field.xyz_unscaled();
+        let read_ts = Instant::now();
         let raw = RawMagSample {
             src: self.id,
-            ts: Instant::now(),
+            ts: read_ts,
+            read_ts,
             x,
             y,
             z,

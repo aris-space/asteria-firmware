@@ -7,10 +7,11 @@ use embassy_time::{Delay, Duration, Instant, Timer};
 use sht4x::{Precision, Sht4xAsync};
 
 use super::{MAX_CONSECUTIVE_ERRORS, State, backoff, init_at_startup, wait_for_sample};
+use crate::calibration;
 use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{DHT_STATUS, DhtId};
 use crate::signals;
-use crate::types::{DhtSample, SdLogRecord};
+use crate::types::{RawDhtSample, SdLogRecord};
 
 const SAMPLE_HZ: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
@@ -108,14 +109,17 @@ impl Active {
             .measure(Precision::Low, &mut Delay)
             .await
             .map_err(|e| warn!("{} read error: {:?}", self.id, Debug2Format(&e)))?;
-        let sample = DhtSample {
+        let read_ts = Instant::now();
+        let raw = RawDhtSample {
             src: self.id,
-            ts: Instant::now(),
+            ts: read_ts,
+            read_ts,
             temperature_c: m.temperature_celsius().to_num(),
             humidity_rh: m.humidity_percent().to_num(),
         };
-        signals::submit_dht_sample(sample);
-        signals::submit_sd_log(SdLogRecord::Dht(sample));
+        let cal = calibration::dht::apply_calibration(raw);
+        signals::submit_dht_sample(cal);
+        signals::submit_sd_log(SdLogRecord::Dht { raw, cal });
         Ok(())
     }
 }

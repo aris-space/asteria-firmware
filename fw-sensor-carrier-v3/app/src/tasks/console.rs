@@ -13,10 +13,10 @@ use heapless::String;
 use noline::builder::EditorBuilder;
 use static_cell::StaticCell;
 
-use crate::calibration::{Name, imu, mag};
+use crate::calibration::{self, Calibrations, Correction, Name, baro, dht, gnss, imu, mag};
 use crate::resources::flash;
 use crate::resources::usb::UsbDriver;
-use crate::sensors::{ImuId, MagId};
+use crate::sensors::SensorId;
 use crate::storage::{self, Storage};
 
 type Class = CdcAcmClass<'static, UsbDriver>;
@@ -102,9 +102,10 @@ impl Write for ConsoleIo<'_> {
 
 const PROMPT: &str = "asteria> ";
 const HELP: &str = r"commands:
-  cal mag <name>     run magnetometer calibration (label required)
-  cal imu <name>     measure gyro offsets while the board is still
-  cal show           show stored calibrations
+  cal mag <name>         run magnetometer calibration (label required)
+  cal imu <name>         measure gyro offsets while the board is still
+  cal latency <id> <us>  set a sensor's latency, e.g. 'cal latency GNSS_0 25000'
+  cal show               show stored calibrations
   flash info         show chip id and status register
   flash list         list the keys you can clear
   flash clear <key>  clear a key (needs --yes)
@@ -195,11 +196,15 @@ async fn cmd_cal(
     match args.next() {
         Some("mag") => cmd_cal_mag(class, args, storage).await,
         Some("imu") => cmd_cal_imu(class, args, storage).await,
+        Some("latency") => cmd_cal_latency(class, args, storage).await,
         Some("show") => cal_show(class, storage).await,
         _ => {
             say(
                 class,
-                paint!(red, "usage: cal <mag <name>|imu <name>|show>\n"),
+                paint!(
+                    red,
+                    "usage: cal <mag <name>|imu <name>|latency <id> <us>|show>\n"
+                ),
             )
             .await
         }
@@ -267,32 +272,42 @@ async fn cmd_cal_mag(
     report_outcome(class, stored).await;
 }
 
-async fn cal_show(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    show_imu_cals(class, storage).await;
-    show_mag_cals(class, storage).await;
-}
-
-async fn show_imu_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    let applied = imu::applied();
-    let stored = imu::stored(storage).await;
-    for id in ImuId::ALL {
-        let i = id.index();
-        let pending = stored[i]
-            .filter(|st| st.differs_from(&applied[i]))
-            .map(|st| st.name);
-        show_cal_slot(class, id.name(), applied[i], pending).await;
+async fn cmd_cal_latency(
+    class: &mut ConsoleIo<'_>,
+    args: &mut SplitAsciiWhitespace<'_>,
+    storage: &Storage,
+) {
+    let (Some(sensor), Some(Ok(latency_us))) = (args.next(), args.next().map(str::parse)) else {
+        say(class, paint!(red, "usage: cal latency <id> <us>\n")).await;
+        return;
+    };
+    match calibration::store_latency(storage, sensor, latency_us).await {
+        Some(stored) => report_outcome(class, stored).await,
+        None => say(class, paint!(red, "unknown sensor (see 'flash list')\n")).await,
     }
 }
 
-async fn show_mag_cals(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    let applied = mag::applied();
-    let stored = mag::stored(storage).await;
-    for id in MagId::ALL {
-        let i = id.index();
-        let pending = stored[i]
-            .filter(|st| st.differs_from(&applied[i]))
-            .map(|st| st.name);
-        show_cal_slot(class, id.name(), applied[i], pending).await;
+async fn cal_show(class: &mut ConsoleIo<'_>, storage: &Storage) {
+    show_cals(class, storage, &imu::CAL).await;
+    show_cals(class, storage, &mag::CAL).await;
+    show_cals(class, storage, &gnss::CAL).await;
+    show_cals(class, storage, &baro::CAL).await;
+    show_cals(class, storage, &dht::CAL).await;
+}
+
+async fn show_cals<Id: SensorId, C: Correction, const N: usize>(
+    class: &mut ConsoleIo<'_>,
+    storage: &Storage,
+    cals: &Calibrations<Id, C, N>,
+) {
+    for id in cals.ids() {
+        let applied = cals.applied(id);
+        let pending = cals
+            .stored(storage, id)
+            .await
+            .filter(|stored| *stored != applied)
+            .map(|stored| stored.name);
+        show_cal_slot(class, id.name(), applied, pending).await;
     }
 }
 
@@ -438,14 +453,22 @@ fn write_flash_identity(out: &mut impl fmt::Write, id: &flash::JedecId, status: 
 }
 
 async fn flash_list(class: &mut ConsoleIo<'_>) {
-    for id in ImuId::ALL {
+    list_keys(class, &imu::CAL).await;
+    list_keys(class, &mag::CAL).await;
+    list_keys(class, &gnss::CAL).await;
+    list_keys(class, &baro::CAL).await;
+    list_keys(class, &dht::CAL).await;
+}
+
+async fn list_keys<Id: SensorId, C: Correction, const N: usize>(
+    class: &mut ConsoleIo<'_>,
+    cals: &Calibrations<Id, C, N>,
+) {
+    for id in cals.ids() {
+        let key = calibration::key(id);
+        let len = key.iter().position(|&b| b == 0).unwrap_or(key.len());
         let mut s: String<24> = String::new();
-        let _ = writeln!(s, "{}", id.name());
-        say(class, &s).await;
-    }
-    for id in MagId::ALL {
-        let mut s: String<24> = String::new();
-        let _ = writeln!(s, "{}", id.name());
+        let _ = writeln!(s, "{}", core::str::from_utf8(&key[..len]).unwrap_or("?"));
         say(class, &s).await;
     }
 }

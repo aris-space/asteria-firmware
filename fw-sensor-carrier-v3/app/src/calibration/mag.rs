@@ -1,177 +1,75 @@
+//! Magnetometer calibration: latency, LSM303AGR units, axes, and hard- and
+//! soft-iron correction.
+
 use core::fmt;
 
 use defmt::{Debug2Format, info, warn};
 use embassy_futures::select::{Either, select};
-use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Duration, Instant, with_timeout};
 use magcal::{Solver, SolverTier};
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use super::Name;
+use super::{Calibrations, Name};
 use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MAG_COUNT, MagId};
 use crate::signals::RAW_MAG_CHANNELS;
 use crate::storage::Storage;
 use crate::types::{MagSample, RawMagSample};
 
-// The delay between a physical measurement and read completion is unknown,
-// so use the read-completion timestamp without an assumed offset.
-pub fn apply_calibration(raw: RawMagSample) -> MagSample {
-    let cal = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].correction;
-    let board = sensor_to_board([raw.x, raw.y, raw.z]).map(|c| c as f32 * LSB_TO_NT);
-    let corrected = cal.correct_board_field(Vector3::from(board));
-    MagSample {
-        src: raw.src,
-        ts: raw.ts,
-        x: corrected.x,
-        y: corrected.y,
-        z: corrected.z,
-    }
-}
-
-pub async fn load(storage: &Storage) {
-    let cal = [
-        load_one(storage, MAG_BUS_1).await,
-        load_one(storage, MAG_BUS_2).await,
-    ];
-    let _ = CAL.init(cal);
-}
-
-pub fn applied() -> [StoredCal; MAG_COUNT] {
-    *CAL.try_get().unwrap_or(&DEFAULTS)
-}
-
-pub async fn stored(storage: &Storage) -> [Option<StoredCal>; MAG_COUNT] {
-    [
-        storage.load::<StoredCal>(&MAG_BUS_1.key()).await,
-        storage.load::<StoredCal>(&MAG_BUS_2.key()).await,
-    ]
-}
-
-/// Live per-sensor cal, written once at startup; a reset reloads and applies it.
-static CAL: OnceLock<[StoredCal; MAG_COUNT]> = OnceLock::new();
-
-const DEFAULTS: [StoredCal; MAG_COUNT] = [StoredCal::DEFAULT; MAG_COUNT];
-
-async fn load_one(storage: &Storage, id: MagId) -> StoredCal {
-    match storage.load::<StoredCal>(&id.key()).await {
-        Some(cal) => {
-            info!("{}: cal \"{}\" loaded from flash", id, cal.name.as_str());
-            cal
-        }
-        None => {
-            warn!("{}: no cal in flash, using identity (default)", id);
-            StoredCal::DEFAULT
-        }
-    }
-}
-
 // The LSM303AGR reports 150 nT per count; the solver fits in native counts and
 // results scale back to nT.
 const LSB_TO_NT: f32 = 150.0;
 
-/// What's persisted per sensor: the applied correction plus metadata about the
-/// fit that produced it, so a stored cal can be inspected later (`cal show`).
+/// Sensor-to-board axis remap on this board: negate all three axes, in the
+/// magnetometer's native counts (so the cal solver fits at full resolution).
+fn sensor_to_board(counts: [i16; 3]) -> [i16; 3] {
+    counts.map(i16::saturating_neg)
+}
+
+/// Hard- and soft-iron correction, applied as `soft_iron * (board - hard_iron)`
+/// in nT, with the fit that produced it. The soft-iron matrix also absorbs any
+/// residual mounting rotation.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct StoredCal {
-    pub name: Name,
+pub struct Correction {
     field_nt: f32,
     fit_error_pc: f32,
     samples: u16,
-    correction: Correction,
+    hard_iron: [f32; 3],
+    soft_iron: [f32; 9],
 }
 
-impl StoredCal {
+impl super::Correction for Correction {
     const DEFAULT: Self = Self {
-        name: Name::new("default"),
         field_nt: 0.0,
         fit_error_pc: 0.0,
         samples: 0,
-        correction: Correction::IDENTITY,
+        hard_iron: [0.0, 0.0, 0.0],
+        soft_iron: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
     };
+}
 
-    fn from_fit(name: Name, fit: &Fit, samples: usize) -> Self {
+impl Correction {
+    fn from_fit(cal: &magcal::MagCal, samples: usize) -> Self {
+        let s = cal.soft_iron;
         Self {
-            name,
-            field_nt: fit.field_nt,
-            fit_error_pc: fit.fit_error_pc,
+            field_nt: cal.field_strength * LSB_TO_NT,
+            fit_error_pc: cal.fit_error_percent,
             samples: samples.min(u16::MAX as usize) as u16,
-            correction: fit.correction,
+            hard_iron: cal.hard_iron.map(|h| h * LSB_TO_NT),
+            soft_iron: [
+                s[0][0], s[0][1], s[0][2], s[1][0], s[1][1], s[1][2], s[2][0], s[2][1], s[2][2],
+            ],
         }
-    }
-
-    fn is_default(&self) -> bool {
-        *self == Self::DEFAULT
     }
 
     /// An identity fallback has no measured hard- or soft-iron correction.
     pub fn is_calibrated(&self) -> bool {
-        !self.is_default()
+        *self != <Self as super::Correction>::DEFAULT
     }
 
     /// Accept only calibrated samples with a plausible Earth-field magnitude.
     pub fn accepts_field(&self, field_nt: f32) -> bool {
         self.is_calibrated() && (MIN_VALID_NT..=MAX_VALID_NT).contains(&field_nt)
-    }
-
-    /// Whether applying this stored cal would change the live one: only the
-    /// label and correction are applied, so fit metadata is ignored.
-    pub fn differs_from(&self, applied: &Self) -> bool {
-        self.name != applied.name || self.correction != applied.correction
-    }
-}
-
-impl fmt::Display for StoredCal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_default() {
-            write!(
-                f,
-                "\"{}\" \x1b[31m(built-in default, not calibrated)\x1b[0m",
-                self.name
-            )?;
-        } else {
-            write!(
-                f,
-                "\"{}\"  field {:.1} uT  error {:.2} %  ({} samples)",
-                self.name,
-                self.field_nt / 1000.0,
-                self.fit_error_pc,
-                self.samples,
-            )?;
-        }
-        write!(f, "\n{}", self.correction)
-    }
-}
-
-/// Hard- and soft-iron correction, applied as `soft_iron * (board - hard_iron)`
-/// in nT. The soft-iron matrix also absorbs any residual mounting rotation.
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Correction {
-    hard_iron: [f32; 3],
-    soft_iron: [f32; 9],
-}
-
-impl Correction {
-    const IDENTITY: Self = Self {
-        hard_iron: [0.0, 0.0, 0.0],
-        soft_iron: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-    };
-
-    fn from_solver(hard_iron: [f32; 3], soft_iron: [[f32; 3]; 3]) -> Self {
-        Self {
-            hard_iron: hard_iron.map(|h| h * LSB_TO_NT),
-            soft_iron: [
-                soft_iron[0][0],
-                soft_iron[0][1],
-                soft_iron[0][2],
-                soft_iron[1][0],
-                soft_iron[1][1],
-                soft_iron[1][2],
-                soft_iron[2][0],
-                soft_iron[2][1],
-                soft_iron[2][2],
-            ],
-        }
     }
 
     fn correct_board_field(&self, board: Vector3<f32>) -> Vector3<f32> {
@@ -185,6 +83,13 @@ impl fmt::Display for Correction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let h = self.hard_iron;
         let s = self.soft_iron;
+        writeln!(
+            f,
+            "  field {:.1} uT  error {:.2} %  ({} samples)",
+            self.field_nt / 1000.0,
+            self.fit_error_pc,
+            self.samples,
+        )?;
         writeln!(f, "  axis  hard uT   {:^27}", "soft-iron")?;
         write!(
             f,
@@ -202,6 +107,21 @@ impl fmt::Display for Correction {
             s[7],
             s[8],
         )
+    }
+}
+
+pub static CAL: Calibrations<MagId, Correction, MAG_COUNT> = Calibrations::new(MagId::ALL);
+
+pub fn apply_calibration(raw: RawMagSample) -> MagSample {
+    let cal = CAL.applied(raw.src);
+    let board = sensor_to_board([raw.x, raw.y, raw.z]).map(|c| c as f32 * LSB_TO_NT);
+    let corrected = cal.correction.correct_board_field(Vector3::from(board));
+    MagSample {
+        src: raw.src,
+        ts: cal.sample_time(raw.ts),
+        x: corrected.x,
+        y: corrected.y,
+        z: corrected.z,
     }
 }
 
@@ -309,15 +229,15 @@ impl MagCal {
             };
         }
 
-        let correction = Correction::from_solver(cal.hard_iron, cal.soft_iron);
+        let correction = Correction::from_fit(&cal, samples);
         let fit = Fit {
             tier: cal.tier,
-            field_nt,
-            fit_error_pc: cal.fit_error_percent,
             correction,
         };
-        let record = StoredCal::from_fit(Name::new(name), &fit, samples);
-        let outcome = if storage.store(&id.key(), &record).await {
+        let outcome = if CAL
+            .store_correction(storage, id, Name::new(name), correction)
+            .await
+        {
             CalOutcome::Stored(fit)
         } else {
             CalOutcome::StoreFailed(fit)
@@ -332,8 +252,6 @@ impl MagCal {
 
 struct Fit {
     tier: SolverTier,
-    field_nt: f32,
-    fit_error_pc: f32,
     correction: Correction,
 }
 
@@ -370,15 +288,7 @@ impl fmt::Display for CalReport {
                 } else {
                     "FLASH WRITE FAILED"
                 };
-                write!(
-                    f,
-                    "{name}  ({:?}, {} samples) -> {status}\n  field {:.1} uT    error {:.2} %\n{}",
-                    fit.tier,
-                    self.samples,
-                    fit.field_nt / 1000.0,
-                    fit.fit_error_pc,
-                    fit.correction,
-                )
+                write!(f, "{name}  ({:?}) -> {status}{}", fit.tier, fit.correction,)
             }
             CalOutcome::ImplausibleField { tier, field_nt } => write!(
                 f,
@@ -388,10 +298,4 @@ impl fmt::Display for CalReport {
             CalOutcome::TooFewSamples => write!(f, "{name}: too few samples ({})", self.samples),
         }
     }
-}
-
-/// Sensor-to-board axis remap on this board: negate all three axes, in the
-/// magnetometer's native counts (so the cal solver fits at full resolution).
-fn sensor_to_board(counts: [i16; 3]) -> [i16; 3] {
-    counts.map(i16::saturating_neg)
 }

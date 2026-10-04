@@ -1,15 +1,19 @@
 //! Full-rate CSV logging through the async SDMMC and FAT drivers.
 //!
 //! Each session writes one CSV per record kind into a new `LOGnnnn` directory.
-//! Sensor files start with `sample_us,read_us`: the timestamp the estimator
-//! uses and the instant the readout received the data. They are equal for the
-//! magnetometer, GNSS, and DHT. IMU sample times are interpolated across a FIFO batch
-//! read at `read_us`; the barometer sample time is the midpoint of a conversion
-//! cycle that ends at `read_us`.
+//! Sensor files start with the same columns:
 //!
-//! Raw IMU and magnetometer columns are sensor-frame counts at the configured
-//! full scale (accel 4096 LSB/g, gyro 70 mdps/LSB, mag 150 nT/LSB). Calibrated
-//! columns are board frame. Barometer values are the factory-compensated output.
+//! - `read_us`: when the readout received the data,
+//! - `raw_us`: the readout's estimate of the measurement time; IMU samples are
+//!   interpolated across their FIFO batch, barometer samples sit at the middle
+//!   of the conversion, other sensors use `read_us`,
+//! - `cal_us`: `raw_us` minus the stored latency, the time the estimator uses,
+//! - the sensor index.
+//!
+//! IMU and magnetometer rows then hold raw sensor-frame counts (accel 4096
+//! LSB/g, gyro 70 mdps/LSB, mag 150 nT/LSB) followed by calibrated board-frame
+//! values. Other sensors have no value correction yet, so their values appear
+//! once.
 
 use core::fmt::Write as _;
 use core::sync::atomic::Ordering;
@@ -45,23 +49,23 @@ const FILES: [CsvFile; FILE_COUNT] = [
     },
     CsvFile {
         name: "IMU.CSV",
-        header: "sample_us,read_us,imu,ax_raw,ay_raw,az_raw,gx_raw,gy_raw,gz_raw,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n",
+        header: "read_us,raw_us,cal_us,imu,ax_raw,ay_raw,az_raw,gx_raw,gy_raw,gz_raw,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n",
     },
     CsvFile {
         name: "MAG.CSV",
-        header: "sample_us,read_us,mag,x_raw,y_raw,z_raw,x_nt,y_nt,z_nt\n",
+        header: "read_us,raw_us,cal_us,mag,x_raw,y_raw,z_raw,x_nt,y_nt,z_nt\n",
     },
     CsvFile {
         name: "GNSS.CSV",
-        header: "sample_us,read_us,gnss,itow_ms,num_satellites,fix_type,fix_ok,latitude_deg,longitude_deg,height_msl_m,velocity_down_mps,horizontal_accuracy_mm,vertical_accuracy_mm,speed_accuracy_mps,pdop_centi\n",
+        header: "read_us,raw_us,cal_us,gnss,itow_ms,num_satellites,fix_type,fix_ok,latitude_deg,longitude_deg,height_msl_m,velocity_down_mps,horizontal_accuracy_mm,vertical_accuracy_mm,speed_accuracy_mps,pdop_centi\n",
     },
     CsvFile {
         name: "BARO.CSV",
-        header: "sample_us,read_us,baro,pressure_mbar,temperature_c\n",
+        header: "read_us,raw_us,cal_us,baro,pressure_mbar,temperature_c\n",
     },
     CsvFile {
         name: "DHT.CSV",
-        header: "sample_us,read_us,dht,temperature_c,humidity_rh\n",
+        header: "read_us,raw_us,cal_us,dht,temperature_c,humidity_rh\n",
     },
     CsvFile {
         name: "DROPS.CSV",
@@ -319,75 +323,78 @@ fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
                 qz,
             )?;
         }
-        SdLogRecord::Imu { raw, cal, read_ts } => write!(
-            row,
-            "{},{},{},{},{},{},{},{},{},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4}\n",
-            raw.ts.as_micros(),
-            read_ts.as_micros(),
-            raw.src.index(),
-            raw.accel.x,
-            raw.accel.y,
-            raw.accel.z,
-            raw.gyro.x,
-            raw.gyro.y,
-            raw.gyro.z,
-            cal.accel.x,
-            cal.accel.y,
-            cal.accel.z,
-            cal.gyro.x,
-            cal.gyro.y,
-            cal.gyro.z,
-        )?,
-        SdLogRecord::Mag { raw, cal } => write!(
-            row,
-            "{},{},{},{},{},{},{:.2},{:.2},{:.2}\n",
-            raw.ts.as_micros(),
-            raw.ts.as_micros(),
-            raw.src.index(),
-            raw.x,
-            raw.y,
-            raw.z,
-            cal.x,
-            cal.y,
-            cal.z,
-        )?,
-        SdLogRecord::Gnss(g) => write!(
-            row,
-            "{},{},{},{},{},{},{},{:.8},{:.8},{:.3},{:.4},{},{},{:.4},{}\n",
-            g.ts.as_micros(),
-            g.ts.as_micros(),
-            g.src.index(),
-            g.pvt.itow_ms,
-            g.pvt.num_satellites,
-            g.pvt.fix_type as u8,
-            u8::from(g.pvt.fix_ok),
-            g.pvt.latitude_deg,
-            g.pvt.longitude_deg,
-            g.pvt.height_msl_m,
-            g.pvt.velocity_down_mps,
-            g.pvt.horizontal_accuracy_mm,
-            g.pvt.vertical_accuracy_mm,
-            g.pvt.speed_accuracy_mps,
-            g.pvt.pdop_centi,
-        )?,
-        SdLogRecord::Baro { sample, read_ts } => write!(
-            row,
-            "{},{},{},{:.3},{:.3}\n",
-            sample.ts.as_micros(),
-            read_ts.as_micros(),
-            sample.src.index(),
-            sample.pressure_mbar,
-            sample.temperature_c,
-        )?,
-        SdLogRecord::Dht(sample) => write!(
-            row,
-            "{},{},{},{:.2},{:.2}\n",
-            sample.ts.as_micros(),
-            sample.ts.as_micros(),
-            sample.src.index(),
-            sample.temperature_c,
-            sample.humidity_rh,
-        )?,
+        SdLogRecord::Imu { raw, cal } => {
+            write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
+            write!(
+                row,
+                ",{},{},{},{},{},{},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4}\n",
+                raw.accel.x,
+                raw.accel.y,
+                raw.accel.z,
+                raw.gyro.x,
+                raw.gyro.y,
+                raw.gyro.z,
+                cal.accel.x,
+                cal.accel.y,
+                cal.accel.z,
+                cal.gyro.x,
+                cal.gyro.y,
+                cal.gyro.z,
+            )?;
+        }
+        SdLogRecord::Mag { raw, cal } => {
+            write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
+            write!(
+                row,
+                ",{},{},{},{:.2},{:.2},{:.2}\n",
+                raw.x, raw.y, raw.z, cal.x, cal.y, cal.z,
+            )?;
+        }
+        SdLogRecord::Gnss { raw, cal } => {
+            write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
+            let p = cal.pvt;
+            write!(
+                row,
+                ",{},{},{},{},{:.8},{:.8},{:.3},{:.4},{},{},{:.4},{}\n",
+                p.itow_ms,
+                p.num_satellites,
+                p.fix_type as u8,
+                u8::from(p.fix_ok),
+                p.latitude_deg,
+                p.longitude_deg,
+                p.height_msl_m,
+                p.velocity_down_mps,
+                p.horizontal_accuracy_mm,
+                p.vertical_accuracy_mm,
+                p.speed_accuracy_mps,
+                p.pdop_centi,
+            )?;
+        }
+        SdLogRecord::Baro { raw, cal } => {
+            write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
+            write!(row, ",{:.3},{:.3}\n", cal.pressure_mbar, cal.temperature_c)?;
+        }
+        SdLogRecord::Dht { raw, cal } => {
+            write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
+            write!(row, ",{:.2},{:.2}\n", cal.temperature_c, cal.humidity_rh)?;
+        }
     }
     Ok(row)
+}
+
+fn write_times(
+    row: &mut Row,
+    read_ts: Instant,
+    raw_ts: Instant,
+    cal_ts: Instant,
+    index: usize,
+) -> core::fmt::Result {
+    write!(
+        row,
+        "{},{},{},{}",
+        read_ts.as_micros(),
+        raw_ts.as_micros(),
+        cal_ts.as_micros(),
+        index
+    )
 }

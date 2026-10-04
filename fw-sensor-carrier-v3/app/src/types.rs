@@ -1,14 +1,30 @@
 #![allow(dead_code)]
 
-//! Materialised per sensor samples. A sample is a measurement
-//! that tracks provenance and its timestamp. Downstream code should not
-//! see uncalibrated values or untimed observations.
+//! Per-sensor samples and the records derived from them. A sample is a
+//! measurement with its source and timestamp. Only readouts and the SD log see
+//! raw samples; everything downstream uses calibrated ones.
 
 use embassy_time::Instant;
 use lsm6dso32::types::{Acceleration, AccelerationRaw, AngularRate, AngularRateRaw};
 
 use crate::sensors::{BaroId, DhtId, GnssId, ImuId, MagId};
 
+// Every sensor has a raw sample, built by its readout, and a calibrated
+// sample, built by `crate::calibration::<kind>::apply_calibration`. A raw `ts`
+// is the readout's estimate of the measurement time; `read_ts` is when the
+// readout received the data. A calibrated `ts` also removes the stored latency.
+
+/// Raw IMU sample, sensor frame, native LSM6DSO32 counts (i16 LSB).
+#[derive(Clone, Copy, Debug)]
+pub struct RawImuSample {
+    pub src: ImuId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub accel: AccelerationRaw,
+    pub gyro: AngularRateRaw,
+}
+
+/// Calibrated IMU sample, board frame, g and deg/s.
 #[derive(Clone, Copy, Debug)]
 pub struct ImuSample {
     pub src: ImuId,
@@ -17,19 +33,57 @@ pub struct ImuSample {
     pub gyro: AngularRate,
 }
 
-/// Raw IMU sample, sensor frame, native LSM6DSO32 counts (i16 LSB). Built by
-/// the readout; conversion to g and dps happens at the calibration boundary in
-/// `crate::calibration::imu::apply_calibration`. Never crosses a channel.
+/// Raw magnetometer sample, sensor frame, native LSM303AGR counts (i16 LSB).
+/// The cal solver fits these counts directly.
 #[derive(Clone, Copy, Debug)]
-pub struct RawImuSample {
-    pub src: ImuId,
+pub struct RawMagSample {
+    pub src: MagId,
     pub ts: Instant,
-    pub accel: AccelerationRaw,
-    pub gyro: AngularRateRaw,
+    pub read_ts: Instant,
+    pub x: i16,
+    pub y: i16,
+    pub z: i16,
 }
 
-/// Pressure and temperature in sensor units, timestamped near the pressure
-/// conversion by the barometer readout.
+/// Calibrated magnetometer sample, board frame, nT.
+#[derive(Clone, Copy, Debug)]
+pub struct MagSample {
+    pub src: MagId,
+    pub ts: Instant,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+/// Raw GNSS navigation data, stamped when its packet arrived.
+#[derive(Clone, Copy, Debug)]
+pub struct RawGnssSample {
+    pub src: GnssId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub pvt: Pvt,
+}
+
+/// Calibrated GNSS navigation data.
+#[derive(Clone, Copy, Debug)]
+pub struct GnssSample {
+    pub src: GnssId,
+    pub ts: Instant,
+    pub pvt: Pvt,
+}
+
+/// Raw barometer sample, factory-compensated by the MS5607, stamped at the
+/// middle of the pressure conversion.
+#[derive(Clone, Copy, Debug)]
+pub struct RawBaroSample {
+    pub src: BaroId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub pressure_mbar: f32,
+    pub temperature_c: f32,
+}
+
+/// Calibrated barometer sample.
 #[derive(Clone, Copy, Debug)]
 pub struct BaroSample {
     pub src: BaroId,
@@ -38,45 +92,23 @@ pub struct BaroSample {
     pub temperature_c: f32,
 }
 
-/// Humidity and temperature from the readout, timestamped on completion.
+/// Raw humidity and temperature sample, stamped on completion.
+#[derive(Clone, Copy, Debug)]
+pub struct RawDhtSample {
+    pub src: DhtId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub temperature_c: f32,
+    pub humidity_rh: f32,
+}
+
+/// Calibrated humidity and temperature sample.
 #[derive(Clone, Copy, Debug)]
 pub struct DhtSample {
     pub src: DhtId,
     pub ts: Instant,
     pub temperature_c: f32,
     pub humidity_rh: f32,
-}
-
-/// GNSS navigation data, timestamped when its packet is received.
-#[derive(Clone, Copy, Debug)]
-pub struct GnssSample {
-    pub src: GnssId,
-    pub ts: Instant,
-    pub pvt: Pvt,
-}
-
-/// Raw magnetometer sample, sensor frame, native LSM303AGR counts (i16 LSB).
-/// The cal solver fits these counts directly; conversion to physical units (nT)
-/// happens at the calibration boundary in
-/// `crate::calibration::mag::apply_calibration`.
-#[derive(Clone, Copy, Debug)]
-pub struct RawMagSample {
-    pub src: MagId,
-    pub ts: Instant,
-    pub x: i16,
-    pub y: i16,
-    pub z: i16,
-}
-
-/// Calibrated magnetometer sample, board frame, nT.
-/// Output of magnetometer calibration.
-#[derive(Clone, Copy, Debug)]
-pub struct MagSample {
-    pub src: MagId,
-    pub ts: Instant,
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
 }
 
 /// GNSS vertical position and velocity used by SEF-light.
@@ -131,27 +163,16 @@ pub struct SefLogSample {
     pub orientation_body_to_ned_wxyz: [f32; 4],
 }
 
-/// One row of the SD card CSV logs. Sensor rows keep the value before and
-/// after calibration and the instant the readout received it, so latency and
-/// calibration can be refitted offline.
+/// One row of the SD card CSV logs. Sensor rows keep the sample before and
+/// after calibration, so latency and calibration can be refitted offline.
 #[derive(Clone, Copy, Debug)]
 pub enum SdLogRecord {
     State(SefLogSample),
-    Imu {
-        raw: RawImuSample,
-        cal: ImuSample,
-        read_ts: Instant,
-    },
-    Mag {
-        raw: RawMagSample,
-        cal: MagSample,
-    },
-    Gnss(GnssSample),
-    Baro {
-        sample: BaroSample,
-        read_ts: Instant,
-    },
-    Dht(DhtSample),
+    Imu { raw: RawImuSample, cal: ImuSample },
+    Mag { raw: RawMagSample, cal: MagSample },
+    Gnss { raw: RawGnssSample, cal: GnssSample },
+    Baro { raw: RawBaroSample, cal: BaroSample },
+    Dht { raw: RawDhtSample, cal: DhtSample },
 }
 
 impl SdLogRecord {
@@ -163,9 +184,9 @@ impl SdLogRecord {
             Self::State(_) => 0,
             Self::Imu { .. } => 1,
             Self::Mag { .. } => 2,
-            Self::Gnss(_) => 3,
+            Self::Gnss { .. } => 3,
             Self::Baro { .. } => 4,
-            Self::Dht(_) => 5,
+            Self::Dht { .. } => 5,
         }
     }
 }

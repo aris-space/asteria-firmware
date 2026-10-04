@@ -1,3 +1,15 @@
+/// Shared interface of the per-family sensor ids, for code that handles
+/// every sensor family the same way.
+pub trait SensorId: Copy + defmt::Format + 'static {
+    fn index(self) -> usize;
+    fn name(self) -> &'static str;
+    fn all() -> &'static [Self];
+
+    fn from_name(name: &str) -> Option<Self> {
+        Self::all().iter().copied().find(|id| id.name() == name)
+    }
+}
+
 macro_rules! define_sensor_family {
     (
         $(#[$meta:meta])*
@@ -19,7 +31,7 @@ macro_rules! define_sensor_family {
             }
 
             /// The id's Rust identifier, e.g. `"IMU_0"`. Used for logs, console
-            /// display, and as the flash-key seed, so there is a single source.
+            /// display, and flash keys, so there is a single source.
             pub const fn name(self) -> &'static str {
                 match self.0 {
                     $($index => stringify!($id_name),)+
@@ -27,10 +39,19 @@ macro_rules! define_sensor_family {
                 }
             }
 
-            /// This id's flash storage key, derived from its [`name`](Self::name).
-            #[allow(dead_code)]
-            pub const fn key(self) -> crate::storage::Key {
-                crate::storage::key(self.name())
+        }
+
+        impl SensorId for $name {
+            fn index(self) -> usize {
+                $name::index(self)
+            }
+
+            fn name(self) -> &'static str {
+                $name::name(self)
+            }
+
+            fn all() -> &'static [Self] {
+                &Self::ALL
             }
         }
 

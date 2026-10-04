@@ -233,6 +233,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             let raw = RawImuSample {
                 src: self.id,
                 ts: batch_start + Duration::from_micros(pair_dt_us * i as u64),
+                read_ts,
                 accel: AccelerationRaw {
                     x: acc.x(),
                     y: acc.y(),
@@ -246,7 +247,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             };
             let cal = calibration::imu::apply_calibration(raw);
             let _ = samples.push(cal);
-            signals::submit_sd_log(SdLogRecord::Imu { raw, cal, read_ts });
+            signals::submit_sd_log(SdLogRecord::Imu { raw, cal });
         }
         signals::submit_imu_sample_batch(&samples);
         Ok(())

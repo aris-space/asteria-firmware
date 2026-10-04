@@ -17,17 +17,20 @@ use ublox::{
 use core::sync::atomic::Ordering;
 
 use super::{MAX_CONSECUTIVE_ERRORS, State, backoff};
+use crate::calibration;
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
-use crate::types::{GnssSample, Pvt, SdLogRecord};
+use crate::types::{Pvt, RawGnssSample, SdLogRecord};
 
 // NAV-PVT is requested every 50 ms; a two-second gap means the UART link is silent.
 const LINK_SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
 
-fn nav_pvt_sample(id: GnssId, pvt: &ublox::NavPvtRef<'_>) -> GnssSample {
-    GnssSample {
+fn raw_sample(id: GnssId, pvt: &ublox::NavPvtRef<'_>) -> RawGnssSample {
+    let read_ts = Instant::now();
+    RawGnssSample {
         src: id,
-        ts: Instant::now(),
+        ts: read_ts,
+        read_ts,
         pvt: Pvt {
             itow_ms: pvt.itow(),
             num_satellites: pvt.num_satellites(),
@@ -145,11 +148,12 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                 self.attempt = 0;
                 consecutive_errors = 0;
                 if let PacketRef::NavPvt(pvt) = packet {
-                    let sample = nav_pvt_sample(self.id, &pvt);
-                    signals::submit_sd_log(SdLogRecord::Gnss(sample));
+                    let raw = raw_sample(self.id, &pvt);
+                    let cal = calibration::gnss::apply_calibration(raw);
+                    signals::submit_sd_log(SdLogRecord::Gnss { raw, cal });
                     // NAV-PVT alone is enough to establish a usable link and fix.
-                    if has_fix(&sample.pvt) {
-                        fix = Some(sample.pvt.fix_type);
+                    if has_fix(&cal.pvt) {
+                        fix = Some(cal.pvt.fix_type);
                     }
                 }
             }
@@ -198,11 +202,12 @@ impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
                     while let Some(msg) = parsed.next() {
                         match msg {
                             Ok(PacketRef::NavPvt(pvt)) => {
-                                let sample = nav_pvt_sample(self.id, &pvt);
-                                signals::submit_sd_log(SdLogRecord::Gnss(sample));
-                                if has_fix(&sample.pvt) {
+                                let raw = raw_sample(self.id, &pvt);
+                                let cal = calibration::gnss::apply_calibration(raw);
+                                signals::submit_sd_log(SdLogRecord::Gnss { raw, cal });
+                                if has_fix(&cal.pvt) {
                                     errors = 0;
-                                    signals::submit_gnss_sample(sample);
+                                    signals::submit_gnss_sample(cal);
                                 }
                             }
                             Ok(packet) => log_configuration_packet(self.id, &packet),
