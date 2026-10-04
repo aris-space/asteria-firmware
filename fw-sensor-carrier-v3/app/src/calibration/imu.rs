@@ -1,13 +1,13 @@
+//! IMU calibration: latency, LSM6DSO32 units, axes, and gyro bias.
+
 use core::fmt;
 
-use defmt::{info, warn};
 use embassy_futures::select::{Either, select};
-use embassy_sync::once_lock::OnceLock;
-use embassy_time::Duration;
+use embassy_time::{Duration, Instant, with_timeout};
 use lsm6dso32::{Acceleration, AngularRate};
 use serde::{Deserialize, Serialize};
 
-use super::Name;
+use super::{Calibrations, Name};
 use crate::sensors::{IMU_0, IMU_1, IMU_COUNT, ImuId};
 use crate::signals::IMU_CHANNELS;
 use crate::storage::Storage;
@@ -15,24 +15,53 @@ use crate::tasks::readout::imu::{ACCEL_FULL_SCALE, GYRO_FULL_SCALE};
 use crate::types::{ImuSample, RawImuSample};
 use fw_sensor_carrier_v3::sef::{ImuWindow, ImuWindowSummary, imu_measurement};
 
-static CAL: OnceLock<[StoredCal; IMU_COUNT]> = OnceLock::new();
-const DEFAULTS: [StoredCal; IMU_COUNT] = [StoredCal::DEFAULT; IMU_COUNT];
-const CALIBRATION_TIME: Duration = Duration::from_secs(5);
-const MIN_SAMPLES: u32 = 1_000;
-const MAX_GYRO_NOISE_RAD_S: f32 = 0.01;
-const MAX_ACCEL_NOISE_MPS2: f32 = 0.3;
+/// Sensor-to-board axis remap for the LSM6DSO32 on this board: negate x and z.
+fn sensor_to_board([x, y, z]: [f32; 3]) -> [f32; 3] {
+    [-x, y, -z]
+}
 
-// Measurement latency has not been measured, so retain the read-completion
-// timestamp rather than applying an assumed offset.
+/// Gyro offsets in board axes and degrees per second. A stationary
+/// calibration cannot determine the three accelerometer offsets independently.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Correction {
+    gyro_bias_dps: [f32; 3],
+    samples: u32,
+}
+
+impl super::Correction for Correction {
+    const DEFAULT: Self = Self {
+        gyro_bias_dps: [0.0; 3],
+        samples: 0,
+    };
+
+    fn is_valid(&self) -> bool {
+        self.gyro_bias_dps.iter().all(|v| v.is_finite())
+    }
+}
+
+impl fmt::Display for Correction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let b = self.gyro_bias_dps;
+        write!(
+            f,
+            "  gyro bias [{:.4}, {:.4}, {:.4}] deg/s ({} samples)",
+            b[0], b[1], b[2], self.samples
+        )
+    }
+}
+
+pub static CAL: Calibrations<ImuId, Correction, IMU_COUNT> = Calibrations::new(ImuId::ALL);
+
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
+    let cal = CAL.applied(raw.src);
     let accel = Acceleration::from_raw(raw.accel, ACCEL_FULL_SCALE);
     let gyro = AngularRate::from_raw(raw.gyro, GYRO_FULL_SCALE);
     let [ax, ay, az] = sensor_to_board([accel.x, accel.y, accel.z]);
     let [gx, gy, gz] = sensor_to_board([gyro.x, gyro.y, gyro.z]);
-    let bias = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].gyro_bias_dps;
+    let bias = cal.correction.gyro_bias_dps;
     ImuSample {
         src: raw.src,
-        ts: raw.ts,
+        ts: cal.sample_time(raw.ts),
         accel: Acceleration {
             x: ax,
             y: ay,
@@ -46,85 +75,19 @@ pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
     }
 }
 
-/// Gyro offsets are in board axes and degrees per second. A stationary
-/// calibration cannot determine the three accelerometer offsets independently.
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct StoredCal {
-    pub name: Name,
-    gyro_bias_dps: [f32; 3],
-    samples: u32,
-}
+const CALIBRATION_TIME: Duration = Duration::from_secs(5);
+const MIN_SAMPLES: u32 = 1_000;
+const MAX_GYRO_NOISE_RAD_S: f32 = 0.01;
+const MAX_ACCEL_NOISE_MPS2: f32 = 0.3;
 
-impl StoredCal {
-    const DEFAULT: Self = Self {
-        name: Name::new("default"),
-        gyro_bias_dps: [0.0; 3],
-        samples: 0,
-    };
-
-    pub fn differs_from(&self, applied: &Self) -> bool {
-        self.name != applied.name || self.gyro_bias_dps != applied.gyro_bias_dps
-    }
-}
-
-impl fmt::Display for StoredCal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let b = self.gyro_bias_dps;
-        write!(
-            f,
-            "\"{}\" gyro bias [{:.4}, {:.4}, {:.4}] deg/s ({} samples)",
-            self.name, b[0], b[1], b[2], self.samples
-        )
-    }
-}
-
-pub async fn load(storage: &Storage) {
-    let cal = [
-        load_one(storage, IMU_0).await,
-        load_one(storage, IMU_1).await,
-    ];
-    let _ = CAL.init(cal);
-}
-
-async fn load_one(storage: &Storage, id: ImuId) -> StoredCal {
-    match storage.load::<StoredCal>(&id.key()).await {
-        Some(cal) if cal.gyro_bias_dps.iter().all(|v| v.is_finite()) => {
-            info!(
-                "{}: gyro cal \"{}\" loaded from flash",
-                id,
-                cal.name.as_str()
-            );
-            cal
-        }
-        _ => {
-            warn!("{}: no valid gyro cal in flash, using zero offset", id);
-            StoredCal::DEFAULT
-        }
-    }
-}
-
-pub fn applied() -> [StoredCal; IMU_COUNT] {
-    *CAL.try_get().unwrap_or(&DEFAULTS)
-}
-
-pub async fn stored(storage: &Storage) -> [Option<StoredCal>; IMU_COUNT] {
-    [
-        storage.load::<StoredCal>(&IMU_0.key()).await,
-        storage.load::<StoredCal>(&IMU_1.key()).await,
-    ]
-}
-
+/// Stationary gyro calibration: [`collect`](Self::collect) records both IMUs
+/// for [`CALIBRATION_TIME`], then [`finish`](Self::finish) stores the result.
+#[derive(Default)]
 pub struct ImuCal {
     windows: [ImuWindow; IMU_COUNT],
 }
 
 impl ImuCal {
-    pub fn new() -> Self {
-        Self {
-            windows: [ImuWindow::default(); IMU_COUNT],
-        }
-    }
-
     pub async fn collect(&mut self) {
         let mut imu_0 = IMU_CHANNELS[IMU_0.index()]
             .subscriber()
@@ -132,8 +95,8 @@ impl ImuCal {
         let mut imu_1 = IMU_CHANNELS[IMU_1.index()]
             .subscriber()
             .expect("second IMU subscriber unavailable");
-        let deadline = embassy_time::Instant::now() + CALIBRATION_TIME;
-        while embassy_time::Instant::now() < deadline {
+        let deadline = Instant::now() + CALIBRATION_TIME;
+        while Instant::now() < deadline {
             // Drain one sample per source before waiting, so FIFO bursts from
             // either IMU cannot starve the other calibration window.
             let first = imu_0.try_next_message_pure();
@@ -144,9 +107,9 @@ impl ImuCal {
                 }
                 continue;
             }
-            let remaining = deadline - embassy_time::Instant::now();
+            let remaining = deadline - Instant::now();
             let next = select(imu_0.next_message_pure(), imu_1.next_message_pure());
-            let sample = match embassy_time::with_timeout(remaining, next).await {
+            let sample = match with_timeout(remaining, next).await {
                 Ok(Either::First(sample)) | Ok(Either::Second(sample)) => sample,
                 Err(_) => break,
             };
@@ -180,17 +143,18 @@ impl ImuCal {
         if valid {
             for report in &mut reports {
                 let summary = report.summary.expect("validated IMU summary");
-                let old = applied()[report.id.index()].gyro_bias_dps;
+                let old = CAL.applied(report.id).correction.gyro_bias_dps;
                 const RAD_TO_DEG: f32 = 180.0 / core::f32::consts::PI;
                 let gyro_bias_dps = core::array::from_fn(|axis| {
                     old[axis] + summary.gyro_mean_rad_s[axis] * RAD_TO_DEG
                 });
-                let cal = StoredCal {
-                    name: Name::new(name),
+                let correction = Correction {
                     gyro_bias_dps,
                     samples: summary.samples,
                 };
-                report.stored = storage.store(&report.id.key(), &cal).await;
+                report.stored = CAL
+                    .store_correction(storage, report.id, Name::new(name), correction)
+                    .await;
                 report.bias_dps = gyro_bias_dps;
             }
         }
@@ -269,9 +233,4 @@ impl fmt::Display for CalReport {
             }
         )
     }
-}
-
-/// Sensor-to-board axis remap for the LSM6DSO32 on this board: negate x and z.
-fn sensor_to_board([x, y, z]: [f32; 3]) -> [f32; 3] {
-    [-x, y, -z]
 }
