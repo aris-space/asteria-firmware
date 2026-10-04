@@ -25,7 +25,7 @@ const HEADERS: [&[u8]; FILE_COUNT] = [
     b"uptime_us,imu,selected,msl_ready,redundancy_ready,selected_gnss,height_msl_m,velocity_mps,bias0_m,bias1_m,height_std_m,velocity_std_mps,bias0_std_m,bias1_std_m,score,qw,qx,qy,qz\n",
     b"uptime_us,imu,ax_mps2,ay_mps2,az_mps2,gx_radps,gy_radps,gz_radps\n",
     b"uptime_us,magnetometer,x_nt,y_nt,z_nt\n",
-    b"uptime_us,receiver,fix_type,height_msl_m,velocity_down_mps,pdop_centi,vertical_accuracy_mm,speed_accuracy_mps\n",
+    b"uptime_us,receiver,fix_type,fix_ok,height_msl_m,velocity_down_mps,pdop_centi,vertical_accuracy_mm,speed_accuracy_mps\n",
     b"uptime_us,barometer,pressure_mbar,temperature_c\n",
     b"uptime_us,dropped_state,dropped_imu,dropped_magnetometer,dropped_gnss,dropped_barometer\n",
 ];
@@ -336,10 +336,11 @@ fn format_record(record: SdLogRecord) -> Option<(usize, String<512>)> {
         SdLogRecord::Gnss(sample) => {
             write!(
                 &mut row,
-                "{},{},{},{:.3},{:.4},{},{},{:.4}\n",
+                "{},{},{},{},{:.3},{:.4},{},{},{:.4}\n",
                 sample.ts.as_micros(),
                 sample.src.index(),
                 sample.pvt.fix_type as u8,
+                u8::from(sample.pvt.fix_ok),
                 sample.pvt.height_msl,
                 sample.pvt.vel_down,
                 sample.pvt.pdop,

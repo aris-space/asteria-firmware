@@ -20,6 +20,22 @@ use crate::types::{GnssSample, Pvt, SdLogRecord};
 // NAV-PVT is requested every 50 ms; a two-second gap means the UART link is silent.
 const LINK_SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
 
+fn nav_pvt_sample(id: GnssId, pvt: &ublox::NavPvtRef<'_>) -> GnssSample {
+    GnssSample {
+        src: id,
+        ts: Instant::now(),
+        pvt: Pvt {
+            fix_type: pvt.fix_type(),
+            fix_ok: pvt.flags().contains(NavPvtFlags::GPS_FIX_OK),
+            height_msl: pvt.height_msl() as f32,
+            vel_down: pvt.vel_down() as f32,
+            pdop: pvt.pdop(),
+            vert_accuracy: pvt.vert_accuracy(),
+            speed_accuracy_mps: pvt.speed_accuracy_estimate() as f32,
+        },
+    }
+}
+
 fn log_configuration_packet(id: GnssId, packet: &PacketRef<'_>) {
     match packet {
         PacketRef::AckAck(ack) => info!("{} UBX ACK class={} id={}", id, ack.class(), ack.msg_id()),
@@ -128,6 +144,9 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                             valid_packets = valid_packets.saturating_add(1);
                             self.attempt = 0;
                             consecutive_errors = 0;
+                            signals::submit_sd_log(SdLogRecord::Gnss(nav_pvt_sample(
+                                self.id, &pvt,
+                            )));
                             // NAV-PVT alone is enough to establish a usable link and fix.
                             if pvt.flags().contains(NavPvtFlags::GPS_FIX_OK)
                                 && matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D)
@@ -245,26 +264,15 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                     report_started_at = now;
                                     next_report = now + Duration::from_secs(1);
                                 }
+                                let sample = nav_pvt_sample(self.id, &pvt);
+                                signals::submit_sd_log(SdLogRecord::Gnss(sample));
                                 if !fix_ok
                                     || !matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D)
                                 {
                                     continue;
                                 }
                                 self.errors = 0;
-                                let sample = GnssSample {
-                                    src: self.id,
-                                    ts: Instant::now(),
-                                    pvt: Pvt {
-                                        fix_type: pvt.fix_type(),
-                                        height_msl: pvt.height_msl() as f32,
-                                        vel_down: pvt.vel_down() as f32,
-                                        pdop: pvt.pdop(),
-                                        vert_accuracy: pvt.vert_accuracy(),
-                                        speed_accuracy_mps: pvt.speed_accuracy_estimate() as f32,
-                                    },
-                                };
                                 signals::submit_gnss_sample(sample);
-                                signals::submit_sd_log(SdLogRecord::Gnss(sample));
                             }
                             Ok(PacketRef::NavStatus(_)) => {
                                 status_count = status_count.saturating_add(1);

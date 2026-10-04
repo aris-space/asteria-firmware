@@ -82,6 +82,7 @@ pub struct MagSample {
 #[derive(Clone, Copy, Debug)]
 pub struct Pvt {
     pub fix_type: ublox::GpsFix,
+    pub fix_ok: bool,
     pub height_msl: f32,
     pub vel_down: f32,
     pub pdop: u16,
