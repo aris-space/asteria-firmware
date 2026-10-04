@@ -5,6 +5,7 @@ pub mod buses;
 pub mod can;
 pub mod flash;
 pub mod leds;
+pub mod sd;
 pub mod sensors;
 pub mod uart;
 pub mod usb;
@@ -90,6 +91,17 @@ assign_resources! {
         periph: USB_OTG_HS,
         dp: PA12,
         dm: PA11,
+    }
+    sd_card: SdCard {
+        periph: SDMMC1,
+        clk: PC12,
+        cmd: PD2,
+        d0: PC8,
+        d1: PC9,
+        d2: PC10,
+        d3: PC11,
+        detect: PD3,
+        power: PD6,
     }
 }
 

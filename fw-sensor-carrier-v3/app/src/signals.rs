@@ -59,4 +59,4 @@ define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_ba
 define_sample_channels!(DHT_CHANNELS, submit_dht_sample, submit_dht_sample_batch:
     DhtSample, cap = 8, subs = 1, count = DHT_COUNT);
 
-pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 1> = Watch::new();
+pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 2> = Watch::new();
