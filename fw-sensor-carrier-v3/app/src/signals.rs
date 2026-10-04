@@ -2,15 +2,19 @@
 //!
 //! Per-sensor `PubSubChannel`s carry raw readout samples (one channel per
 //! sensor instance, indexed by the sensor's id). The global `Watch` carries
-//! the state estimate to its output task.
+//! the latest state estimate to CAN. A bounded queue carries full-rate samples
+//! to the SD task without waiting for card I/O in any producer.
 
+use core::sync::atomic::{AtomicU32, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 
 use crate::sensors::{BAROMETER_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAGNETOMETER_COUNT};
 use crate::types::{
-    BaroSample, DhtSample, GnssSample, ImuSample, MagSample, RawMagSample, StateEstimate,
+    BaroSample, DhtSample, GnssSample, ImuSample, MagSample, RawMagSample, SdLogRecord,
+    StateEstimate,
 };
 
 macro_rules! define_sample_channels {
@@ -59,4 +63,22 @@ define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample, submit_gnss_sample_ba
 define_sample_channels!(DHT_CHANNELS, submit_dht_sample, submit_dht_sample_batch:
     DhtSample, cap = 8, subs = 1, count = DHT_COUNT);
 
-pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 2> = Watch::new();
+pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 1> = Watch::new();
+
+// Readout and estimation never wait for SD writes. The writer reports any
+// overflow so incomplete logs are visible during a bench run.
+pub static SD_LOG_CHANNEL: Channel<CriticalSectionRawMutex, SdLogRecord, 512> = Channel::new();
+pub static SD_LOG_DROPPED: [AtomicU32; 5] = [const { AtomicU32::new(0) }; 5];
+
+pub fn submit_sd_log(record: SdLogRecord) {
+    let index = match record {
+        SdLogRecord::State(_) => 0,
+        SdLogRecord::Imu(_) => 1,
+        SdLogRecord::Magnetometer(_) => 2,
+        SdLogRecord::Gnss(_) => 3,
+        SdLogRecord::Barometer(_) => 4,
+    };
+    if SD_LOG_CHANNEL.try_send(record).is_err() {
+        SD_LOG_DROPPED[index].fetch_add(1, Ordering::Relaxed);
+    }
+}

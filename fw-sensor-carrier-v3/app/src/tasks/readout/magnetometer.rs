@@ -11,7 +11,7 @@ use crate::calibration;
 use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{MAGNETOMETER_STATUS, MagnetometerId, SensorStatus};
 use crate::signals;
-use crate::types::RawMagSample;
+use crate::types::{RawMagSample, SdLogRecord};
 
 const MAG_ODR: MagOutputDataRate = MagOutputDataRate::Hz10;
 pub const SAMPLE_HZ: u32 = match MAG_ODR {
@@ -123,7 +123,9 @@ pub async fn read_task(mut sensor: Option<Sensor>, bus: SharedI2cBus, id: Magnet
                     z,
                 };
                 signals::submit_raw_mag_sample(raw);
-                signals::submit_mag_sample(calibration::mag::apply_calibration(raw));
+                let sample = calibration::mag::apply_calibration(raw);
+                signals::submit_mag_sample(sample);
+                signals::submit_sd_log(SdLogRecord::Magnetometer(sample));
                 trace!("{} x={} y={} z={} LSB", id, raw.x, raw.y, raw.z);
             }
             Err(e) => {

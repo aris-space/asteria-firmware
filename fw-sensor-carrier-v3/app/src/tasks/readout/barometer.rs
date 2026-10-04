@@ -10,7 +10,7 @@ use super::{I2C_RECOVERY_INTERVAL, MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, ba
 use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{BAROMETER_STATUS, BarometerId, SensorStatus};
 use crate::signals;
-use crate::types::BaroSample;
+use crate::types::{BaroSample, SdLogRecord};
 
 pub const SAMPLE_HZ: u32 = 40;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
@@ -80,6 +80,7 @@ pub async fn read_task(mut sensor: Option<Sensor>, bus: SharedI2cBus, id: Barome
                     temperature_c: m.temperature_c,
                 };
                 signals::submit_baro_sample(sample);
+                signals::submit_sd_log(SdLogRecord::Barometer(sample));
                 trace!("{} p={} mbar", id, m.pressure_mbar);
             }
             Err(e) => {

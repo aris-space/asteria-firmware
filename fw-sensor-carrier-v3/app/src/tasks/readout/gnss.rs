@@ -15,7 +15,7 @@ use core::sync::atomic::Ordering;
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
-use crate::types::{GnssSample, Pvt};
+use crate::types::{GnssSample, Pvt, SdLogRecord};
 
 // NAV-PVT is requested every 50 ms; a two-second gap means the UART link is silent.
 const LINK_SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -264,6 +264,7 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                     },
                                 };
                                 signals::submit_gnss_sample(sample);
+                                signals::submit_sd_log(SdLogRecord::Gnss(sample));
                             }
                             Ok(PacketRef::NavStatus(_)) => {
                                 status_count = status_count.saturating_add(1);

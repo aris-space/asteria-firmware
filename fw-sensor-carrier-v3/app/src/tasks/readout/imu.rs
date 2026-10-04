@@ -41,7 +41,7 @@ use crate::calibration;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
 use crate::signals;
-use crate::types::{ImuSample, RawImuSample};
+use crate::types::{ImuSample, RawImuSample, SdLogRecord};
 
 /// Accelerometer output data rate. Keep both ODRs and BDRs at 833 Hz.
 const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
@@ -266,6 +266,9 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             }
 
             signals::submit_imu_sample_batch(&samples);
+            for &sample in &samples {
+                signals::submit_sd_log(SdLogRecord::Imu(sample));
+            }
             pairs_since_report = pairs_since_report.saturating_add(samples.len() as u32);
             if Instant::now() >= report_at {
                 info!(

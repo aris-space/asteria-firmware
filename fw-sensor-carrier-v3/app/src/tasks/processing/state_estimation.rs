@@ -13,7 +13,9 @@ use crate::calibration;
 use crate::sensors::{GnssId, IMU_0, IMU_1};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
-use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, StateEstimate};
+use crate::types::{
+    BaroSample, GnssSample, ImuSample, MagSample, SdLogRecord, SefLogSample, StateEstimate,
+};
 
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
@@ -413,6 +415,29 @@ impl Processor {
             selected_imu,
             redundancy_ready: self.estimator.redundancy_ready(),
         });
+        let scores = self.estimator.consistency_scores();
+        for (index, id) in [IMU_0, IMU_1].into_iter().enumerate() {
+            let imu = asteria_sef_light::ImuId::from_index(index)
+                .expect("firmware IMU ID must map to SEF-light");
+            let chain = self.estimator.state(imu);
+            let uncertainty = self.estimator.uncertainty(imu);
+            signals::submit_sd_log(SdLogRecord::State(SefLogSample {
+                ts,
+                imu: id,
+                selected: index == selected_imu.index(),
+                msl_ready: self.gnss_anchor_ready[index],
+                redundancy_ready: self.estimator.redundancy_ready(),
+                selected_gnss: self.selected_gnss,
+                height_msl_m: chain.height_m,
+                velocity_mps: chain.velocity_mps,
+                barometer_bias_m: chain.barometer_bias_m,
+                height_std_m: libm::sqrtf(uncertainty.height_variance_m2),
+                velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
+                barometer_bias_std_m: uncertainty.barometer_bias_variance_m2.map(libm::sqrtf),
+                consistency_score: scores[index],
+                orientation_body_to_ned_wxyz: self.estimator.orientation_body_to_ned_wxyz(imu),
+            }));
+        }
         self.published_since_status = self.published_since_status.saturating_add(1);
         self.log_full_state(now);
         if self

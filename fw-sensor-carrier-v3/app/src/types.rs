@@ -103,3 +103,31 @@ pub struct StateEstimate {
     pub selected_imu: ImuId,
     pub redundancy_ready: bool,
 }
+
+/// One SEF chain's state at the output cadence, before selecting an IMU.
+#[derive(Clone, Copy, Debug)]
+pub struct SefLogSample {
+    pub ts: Instant,
+    pub imu: ImuId,
+    pub selected: bool,
+    pub msl_ready: bool,
+    pub redundancy_ready: bool,
+    pub selected_gnss: Option<GnssId>,
+    pub height_msl_m: f32,
+    pub velocity_mps: f32,
+    pub barometer_bias_m: [f32; 2],
+    pub height_std_m: f32,
+    pub velocity_std_mps: f32,
+    pub barometer_bias_std_m: [f32; 2],
+    pub consistency_score: f32,
+    pub orientation_body_to_ned_wxyz: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SdLogRecord {
+    State(SefLogSample),
+    Imu(ImuSample),
+    Magnetometer(MagSample),
+    Gnss(GnssSample),
+    Barometer(BaroSample),
+}

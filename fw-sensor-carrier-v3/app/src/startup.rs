@@ -94,6 +94,11 @@ pub async fn spawn_tasks(
         tasks::blinky::task(board.services.yellow_led).expect("Failed to spawn blinky task"),
     );
 
+    let (sd, detect, power) = board.sd_card.setup();
+    thread_spawner.spawn(
+        tasks::sd_logging::task(sd, detect, power).expect("Failed to spawn SD logging task"),
+    );
+
     // --- Readouts -----------------------------------------------------------
     let (imu1_spi, imu1_int1) = board.sensors.imu1;
     let (imu2_spi, imu2_int1) = board.sensors.imu2;
@@ -140,11 +145,6 @@ pub async fn spawn_tasks(
     // --- Processing ---------------------------------------------------------
     thread_spawner.spawn(
         tasks::processing::state_estimation::task().expect("Failed to spawn state estimation task"),
-    );
-
-    let (sd, detect, power) = board.sd_card.setup();
-    thread_spawner.spawn(
-        tasks::sd_logging::task(sd, detect, power).expect("Failed to spawn SD logging task"),
     );
 
     // --- CAN ----------------------------------------------------------------
