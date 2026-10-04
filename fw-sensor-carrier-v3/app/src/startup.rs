@@ -17,6 +17,7 @@ pub struct PreparedBoard {
     pub can: embassy_stm32::can::Can<'static>,
     pub storage: &'static storage::Storage,
     pub usb: resources::usb::UsbDriver,
+    pub sd_card: resources::SdCard,
 }
 
 #[allow(dead_code)]
@@ -66,6 +67,7 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
         can,
         storage,
         usb,
+        sd_card: resources.sd_card,
         services: ServiceResources {
             green_led,
             yellow_led,
@@ -90,6 +92,11 @@ pub async fn spawn_tasks(
 ) {
     level_0_spawner.spawn(
         tasks::blinky::task(board.services.yellow_led).expect("Failed to spawn blinky task"),
+    );
+
+    let (sd, detect, power) = board.sd_card.setup();
+    thread_spawner.spawn(
+        tasks::sd_logging::task(sd, detect, power).expect("Failed to spawn SD logging task"),
     );
 
     // --- Readouts -----------------------------------------------------------
