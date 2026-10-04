@@ -5,7 +5,7 @@
 //! see uncalibrated values or untimed observations.
 
 use embassy_time::Instant;
-use lsm6dso32::types::{Acceleration, AngularRate};
+use lsm6dso32::types::{Acceleration, AccelerationRaw, AngularRate, AngularRateRaw};
 
 use crate::sensors::{BarometerId, DhtId, GnssId, ImuId, MagnetometerId};
 
@@ -17,14 +17,15 @@ pub struct ImuSample {
     pub gyro: AngularRate,
 }
 
-/// Raw IMU sample, sensor frame. Built by the readout, consumed by
-/// `crate::calibration::imu::apply_calibration`, never crosses a channel.
+/// Raw IMU sample, sensor frame, native LSM6DSO32 counts (i16 LSB). Built by
+/// the readout; conversion to g and dps happens at the calibration boundary in
+/// `crate::calibration::imu::apply_calibration`. Never crosses a channel.
 #[derive(Clone, Copy, Debug)]
 pub struct RawImuSample {
     pub src: ImuId,
     pub ts: Instant,
-    pub accel: Acceleration,
-    pub gyro: AngularRate,
+    pub accel: AccelerationRaw,
+    pub gyro: AngularRateRaw,
 }
 
 /// Pressure and temperature in sensor units, timestamped near the pressure
@@ -81,11 +82,17 @@ pub struct MagSample {
 /// GNSS vertical position and velocity used by SEF-light.
 #[derive(Clone, Copy, Debug)]
 pub struct Pvt {
+    /// GPS time of week of the navigation epoch.
+    pub itow_ms: u32,
+    pub num_satellites: u8,
     pub fix_type: ublox::GpsFix,
     pub fix_ok: bool,
+    pub latitude_deg: f64,
+    pub longitude_deg: f64,
     pub height_msl: f32,
     pub vel_down: f32,
     pub pdop: u16,
+    pub horiz_accuracy: u32,
     pub vert_accuracy: u32,
     pub speed_accuracy_mps: f32,
 }
@@ -124,11 +131,39 @@ pub struct SefLogSample {
     pub orientation_body_to_ned_wxyz: [f32; 4],
 }
 
+/// One row of the SD card CSV logs. Sensor rows keep the value before and
+/// after calibration and the instant the readout received it, so latency and
+/// calibration can be refitted offline.
 #[derive(Clone, Copy, Debug)]
 pub enum SdLogRecord {
     State(SefLogSample),
-    Imu(ImuSample),
-    Magnetometer(MagSample),
+    Imu {
+        raw: RawImuSample,
+        cal: ImuSample,
+        read_ts: Instant,
+    },
+    Magnetometer {
+        raw: RawMagSample,
+        cal: MagSample,
+    },
     Gnss(GnssSample),
-    Barometer(BaroSample),
+    Barometer {
+        sample: BaroSample,
+        read_ts: Instant,
+    },
+}
+
+impl SdLogRecord {
+    pub const KIND_COUNT: usize = 5;
+
+    /// Selects this record's CSV file and drop counter.
+    pub const fn kind(&self) -> usize {
+        match self {
+            Self::State(_) => 0,
+            Self::Imu { .. } => 1,
+            Self::Magnetometer { .. } => 2,
+            Self::Gnss(_) => 3,
+            Self::Barometer { .. } => 4,
+        }
+    }
 }

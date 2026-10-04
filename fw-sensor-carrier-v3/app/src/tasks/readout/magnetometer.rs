@@ -123,9 +123,9 @@ pub async fn read_task(mut sensor: Option<Sensor>, bus: SharedI2cBus, id: Magnet
                     z,
                 };
                 signals::submit_raw_mag_sample(raw);
-                let sample = calibration::mag::apply_calibration(raw);
-                signals::submit_mag_sample(sample);
-                signals::submit_sd_log(SdLogRecord::Magnetometer(sample));
+                let cal = calibration::mag::apply_calibration(raw);
+                signals::submit_mag_sample(cal);
+                signals::submit_sd_log(SdLogRecord::Magnetometer { raw, cal });
                 trace!("{} x={} y={} z={} LSB", id, raw.x, raw.y, raw.z);
             }
             Err(e) => {

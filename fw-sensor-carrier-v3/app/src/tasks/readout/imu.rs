@@ -25,15 +25,15 @@
 
 use core::sync::atomic::Ordering;
 
-use defmt::{Debug2Format, debug, error, info, trace, warn};
+use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::mode::Async;
 use embassy_time::{Delay, Duration, Instant, Timer, with_timeout};
 use lsm6dso32::spi::Lsm6Dso32SpiInterface;
 use lsm6dso32::{
-    AccelBatchDataRate, Acceleration, AccelerationRaw, AccelerometerFullScale, AccelerometerOdr,
-    AngularRate, AngularRateRaw, FifoDataOut, FifoMode, GyroBatchDataRate, GyroscopeFullScale,
-    GyroscopeOdr, Initialised, Int1Config, Lsm6dso32, TagSensor, Uninitialised,
+    AccelBatchDataRate, AccelerationRaw, AccelerometerFullScale, AccelerometerOdr, AngularRateRaw,
+    FifoDataOut, FifoMode, GyroBatchDataRate, GyroscopeFullScale, GyroscopeOdr, Initialised,
+    Int1Config, Lsm6dso32, TagSensor, Uninitialised,
 };
 
 use super::{MAX_CONSECUTIVE_ERRORS, backoff};
@@ -52,9 +52,9 @@ const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
 /// Gyroscope batch data rate. Should match [`GYRO_ODR`]
 const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
 /// Accelerometer full-scale range
-const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G8;
+pub const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G8;
 /// Gyroscope full-scale range
-const GYRO_FULL_SCALE: GyroscopeFullScale = GyroscopeFullScale::Dps2000;
+pub const GYRO_FULL_SCALE: GyroscopeFullScale = GyroscopeFullScale::Dps2000;
 pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
     GyroscopeFullScale::Dps250 => 250.0,
     GyroscopeFullScale::Dps500 => 500.0,
@@ -169,118 +169,15 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 {
     async fn run(mut self) -> Inactive<SPI, INT> {
         let mut fifo_buf = [FifoDataOut::new_with_zero(); FIFO_BUFFER_SIZE];
-        let mut this_data_end = Instant::now();
+        let mut last_read = Instant::now();
         let mut errors: u8 = 0;
-        let mut pairs_since_report: u32 = 0;
-        let mut max_fifo_entries: usize = 0;
-        let mut report_at = Instant::now() + Duration::from_secs(10);
 
-        loop {
+        while errors < MAX_CONSECUTIVE_ERRORS {
             let _ = with_timeout(LOOP_TIMEOUT, self.int1.wait_for_rising_edge()).await;
-
-            let fifo_level = match self.sensor.read_fifo_level().await {
-                Ok(level) => level,
-                Err(e) => {
-                    warn!("{} FIFO level read error: {:?}", self.id, Debug2Format(&e));
-                    errors = errors.saturating_add(1);
-                    if errors >= MAX_CONSECUTIVE_ERRORS {
-                        break;
-                    }
-                    continue;
-                }
-            };
-
-            let this_data_start = this_data_end;
-            this_data_end = Instant::now();
-
-            let fifo_entries = (fifo_level as usize).min(fifo_buf.len()) & !1;
-            max_fifo_entries = max_fifo_entries.max(fifo_level as usize);
-            if fifo_entries == 0 {
-                warn!("{} FIFO empty", self.id);
-                errors = errors.saturating_add(1);
-                if errors >= MAX_CONSECUTIVE_ERRORS {
-                    break;
-                }
-                continue;
+            match self.read_batch(&mut fifo_buf, &mut last_read).await {
+                Ok(()) => errors = 0,
+                Err(()) => errors += 1,
             }
-
-            if let Err(e) = self
-                .sensor
-                .read_multiple_fifo_data(&mut fifo_buf[..fifo_entries])
-                .await
-            {
-                warn!("{} FIFO data read error: {:?}", self.id, Debug2Format(&e));
-                errors = errors.saturating_add(1);
-                if errors >= MAX_CONSECUTIVE_ERRORS {
-                    break;
-                }
-                continue;
-            }
-
-            let num_pairs = fifo_entries / 2;
-            let avg_dt_us =
-                this_data_end.duration_since(this_data_start).as_micros() / num_pairs as u64;
-
-            // While the sensor's fifo can in theory produce timestamps, in practice these were
-            // less accurate than simply using the wall clock time and interpolating over samples.
-            let mut samples = heapless::Vec::<ImuSample, 256>::new();
-            for (i, chunk) in fifo_buf[..fifo_entries].chunks_exact(2).enumerate() {
-                let (acc, gyr) = match (chunk[0].tag_sensor(), chunk[1].tag_sensor()) {
-                    (TagSensor::AccelerometerNC, TagSensor::GyroscopeNC) => (chunk[0], chunk[1]),
-                    (TagSensor::GyroscopeNC, TagSensor::AccelerometerNC) => (chunk[1], chunk[0]),
-                    other => {
-                        warn!(
-                            "{} unexpected FIFO tag pair: {:?}",
-                            self.id,
-                            Debug2Format(&other)
-                        );
-                        continue;
-                    }
-                };
-
-                let accel = Acceleration::from_raw(
-                    AccelerationRaw {
-                        x: acc.x(),
-                        y: acc.y(),
-                        z: acc.z(),
-                    },
-                    self.sensor.accel_full_scale(),
-                );
-                let gyro = AngularRate::from_raw(
-                    AngularRateRaw {
-                        x: gyr.x(),
-                        y: gyr.y(),
-                        z: gyr.z(),
-                    },
-                    self.sensor.gyro_full_scale(),
-                );
-
-                let ts = this_data_start + Duration::from_micros(avg_dt_us * i as u64);
-                let raw = RawImuSample {
-                    src: self.id,
-                    ts,
-                    accel,
-                    gyro,
-                };
-                let _ = samples.push(calibration::imu::apply_calibration(raw));
-            }
-
-            signals::submit_imu_sample_batch(&samples);
-            for &sample in &samples {
-                signals::submit_sd_log(SdLogRecord::Imu(sample));
-            }
-            pairs_since_report = pairs_since_report.saturating_add(samples.len() as u32);
-            if Instant::now() >= report_at {
-                info!(
-                    "{} produced {} IMU pairs/10s, max_fifo_entries={}",
-                    self.id, pairs_since_report, max_fifo_entries
-                );
-                pairs_since_report = 0;
-                max_fifo_entries = 0;
-                report_at = Instant::now() + Duration::from_secs(10);
-            }
-            errors = 0;
-            trace!("{} FIFO {} pairs, dt={} us", self.id, num_pairs, avg_dt_us);
         }
 
         error!("{} offline (too many consecutive errors)", self.id);
@@ -290,6 +187,70 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             id: self.id,
             attempt: 0,
         }
+    }
+
+    /// Drains the FIFO and publishes one sample per accel+gyro pair. The
+    /// pairs are spread evenly between the previous read and this one; the
+    /// sensor's own FIFO timestamps were less accurate than this interpolation.
+    async fn read_batch(
+        &mut self,
+        fifo_buf: &mut [FifoDataOut],
+        last_read: &mut Instant,
+    ) -> Result<(), ()> {
+        let fifo_level = self.sensor.read_fifo_level().await.map_err(|e| {
+            warn!("{} FIFO level read error: {:?}", self.id, Debug2Format(&e));
+        })?;
+        let batch_start = *last_read;
+        let read_ts = Instant::now();
+        *last_read = read_ts;
+
+        let fifo_entries = (fifo_level as usize).min(fifo_buf.len()) & !1;
+        if fifo_entries == 0 {
+            warn!("{} FIFO empty", self.id);
+            return Err(());
+        }
+        let fifo = &mut fifo_buf[..fifo_entries];
+        self.sensor
+            .read_multiple_fifo_data(fifo)
+            .await
+            .map_err(|e| warn!("{} FIFO data read error: {:?}", self.id, Debug2Format(&e)))?;
+
+        let pair_dt_us =
+            read_ts.duration_since(batch_start).as_micros() / (fifo_entries / 2) as u64;
+        let mut samples = heapless::Vec::<ImuSample, { FIFO_BUFFER_SIZE / 2 }>::new();
+        for (i, pair) in fifo.chunks_exact(2).enumerate() {
+            let (acc, gyr) = match (pair[0].tag_sensor(), pair[1].tag_sensor()) {
+                (TagSensor::AccelerometerNC, TagSensor::GyroscopeNC) => (pair[0], pair[1]),
+                (TagSensor::GyroscopeNC, TagSensor::AccelerometerNC) => (pair[1], pair[0]),
+                other => {
+                    warn!(
+                        "{} unexpected FIFO tag pair: {:?}",
+                        self.id,
+                        Debug2Format(&other)
+                    );
+                    continue;
+                }
+            };
+            let raw = RawImuSample {
+                src: self.id,
+                ts: batch_start + Duration::from_micros(pair_dt_us * i as u64),
+                accel: AccelerationRaw {
+                    x: acc.x(),
+                    y: acc.y(),
+                    z: acc.z(),
+                },
+                gyro: AngularRateRaw {
+                    x: gyr.x(),
+                    y: gyr.y(),
+                    z: gyr.z(),
+                },
+            };
+            let cal = calibration::imu::apply_calibration(raw);
+            let _ = samples.push(cal);
+            signals::submit_sd_log(SdLogRecord::Imu { raw, cal, read_ts });
+        }
+        signals::submit_imu_sample_batch(&samples);
+        Ok(())
     }
 }
 

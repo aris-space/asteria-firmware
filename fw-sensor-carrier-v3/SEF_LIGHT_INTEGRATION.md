@@ -15,7 +15,7 @@ A source-path audit found one spawned processing task, `state_estimation::task`.
 
 ## Current measurements
 
-Run `python3 fw-sensor-carrier-v3/analyze_sef_soak.py LOG_PATH` to reproduce the ten-minute sensor, selector, and queue summaries from a firmware log.
+The SD card holds the data for tuning: each session writes `LOGnnnn/` with raw and calibrated sensor CSVs and per-chain state. `app/src/tasks/sd_logging.rs` documents the columns. The measurements below came from RTT logs of earlier builds, which no longer print these diagnostics.
 
 The stationary indoor run in `/private/tmp/asteria-reception-order-run.log` lasted 236 s. Every 10 s queue report showed zero dropped and zero late IMU or aiding events. The two barometric pressure altitudes had standard deviations of about 0.27 m and 0.30 m; a 1.5 m observation standard deviation leaves margin for unmeasured effects. Their raw pressure altitudes were about 305 m and 295 m. SEF-light's bias states reconcile them with GNSS MSL height.
 

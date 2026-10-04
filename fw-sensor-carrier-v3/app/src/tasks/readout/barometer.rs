@@ -70,7 +70,8 @@ pub async fn read_task(mut sensor: Option<Sensor>, bus: SharedI2cBus, id: Barome
                 errors = 0;
                 // Pressure is converted in the first half of the D1/D2 cycle.
                 // Use the measured cycle midpoint instead of a fixed read delay.
-                let measurement_duration_us = Instant::now()
+                let read_ts = Instant::now();
+                let measurement_duration_us = read_ts
                     .saturating_duration_since(measurement_started)
                     .as_micros();
                 let sample = BaroSample {
@@ -80,7 +81,7 @@ pub async fn read_task(mut sensor: Option<Sensor>, bus: SharedI2cBus, id: Barome
                     temperature_c: m.temperature_c,
                 };
                 signals::submit_baro_sample(sample);
-                signals::submit_sd_log(SdLogRecord::Barometer(sample));
+                signals::submit_sd_log(SdLogRecord::Barometer { sample, read_ts });
                 trace!("{} p={} mbar", id, m.pressure_mbar);
             }
             Err(e) => {

@@ -25,11 +25,16 @@ fn nav_pvt_sample(id: GnssId, pvt: &ublox::NavPvtRef<'_>) -> GnssSample {
         src: id,
         ts: Instant::now(),
         pvt: Pvt {
+            itow_ms: pvt.itow(),
+            num_satellites: pvt.num_satellites(),
             fix_type: pvt.fix_type(),
             fix_ok: pvt.flags().contains(NavPvtFlags::GPS_FIX_OK),
+            latitude_deg: pvt.lat_degrees(),
+            longitude_deg: pvt.lon_degrees(),
             height_msl: pvt.height_msl() as f32,
             vel_down: pvt.vel_down() as f32,
             pdop: pvt.pdop(),
+            horiz_accuracy: pvt.horiz_accuracy(),
             vert_accuracy: pvt.vert_accuracy(),
             speed_accuracy_mps: pvt.speed_accuracy_estimate() as f32,
         },
@@ -80,12 +85,6 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
 
         let mut consecutive_errors: u8 = 0;
         let mut recv_buf = [0u8; 64];
-        let mut fix_type = GpsFix::NoFix;
-        let mut report_at = Instant::now() + Duration::from_secs(30);
-        let mut valid_packets = 0u32;
-        let mut status_packets = 0u32;
-        let mut pvt_packets = 0u32;
-        let mut received_bytes = 0u32;
         let mut link_active = false;
 
         loop {
@@ -117,70 +116,38 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
                     continue;
                 }
             };
-            received_bytes = received_bytes.saturating_add(n as u32);
 
-            let mut got_fix = false;
-            {
-                let mut parsed = self.parser.consume(&recv_buf[..n]);
-                while let Some(msg) = parsed.next() {
-                    if let Ok(ref packet) = msg {
-                        log_configuration_packet(self.id, packet);
-                        if !link_active {
-                            GNSS_STATUS[self.id.index()]
-                                .store(SensorStatus::Active, Ordering::Relaxed);
-                            info!("{} UBX link active", self.id);
-                            link_active = true;
-                        }
+            let mut fix = None;
+            let mut parsed = self.parser.consume(&recv_buf[..n]);
+            while let Some(msg) = parsed.next() {
+                let packet = match msg {
+                    Ok(packet) => packet,
+                    Err(e) => {
+                        warn!("{} parse error: {:?}", self.id, Debug2Format(&e));
+                        consecutive_errors = consecutive_errors.saturating_add(1);
+                        continue;
                     }
-                    match msg {
-                        Ok(PacketRef::NavStatus(_)) => {
-                            status_packets = status_packets.saturating_add(1);
-                            valid_packets = valid_packets.saturating_add(1);
-                            self.attempt = 0;
-                            consecutive_errors = 0;
-                        }
-                        Ok(PacketRef::NavPvt(pvt)) => {
-                            pvt_packets = pvt_packets.saturating_add(1);
-                            valid_packets = valid_packets.saturating_add(1);
-                            self.attempt = 0;
-                            consecutive_errors = 0;
-                            signals::submit_sd_log(SdLogRecord::Gnss(nav_pvt_sample(
-                                self.id, &pvt,
-                            )));
-                            // NAV-PVT alone is enough to establish a usable link and fix.
-                            if pvt.flags().contains(NavPvtFlags::GPS_FIX_OK)
-                                && matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D)
-                            {
-                                fix_type = pvt.fix_type();
-                                got_fix = true;
-                            }
-                        }
-                        Ok(_) => {
-                            valid_packets = valid_packets.saturating_add(1);
-                            self.attempt = 0;
-                            consecutive_errors = 0;
-                        }
-                        Err(e) => {
-                            warn!("{} parse error: {:?}", self.id, Debug2Format(&e));
-                            consecutive_errors = consecutive_errors.saturating_add(1);
-                        }
+                };
+                log_configuration_packet(self.id, &packet);
+                if !link_active {
+                    GNSS_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
+                    info!("{} UBX link active", self.id);
+                    link_active = true;
+                }
+                self.attempt = 0;
+                consecutive_errors = 0;
+                if let PacketRef::NavPvt(pvt) = packet {
+                    let sample = nav_pvt_sample(self.id, &pvt);
+                    signals::submit_sd_log(SdLogRecord::Gnss(sample));
+                    // NAV-PVT alone is enough to establish a usable link and fix.
+                    if has_fix(&sample.pvt) {
+                        fix = Some(sample.pvt.fix_type);
                     }
                 }
             }
+            drop(parsed);
 
-            if Instant::now() >= report_at {
-                info!(
-                    "{} GNSS link: {} bytes, {} UBX, {} NAV-STATUS, {} NAV-PVT in 30 s",
-                    self.id, received_bytes, valid_packets, status_packets, pvt_packets
-                );
-                received_bytes = 0;
-                valid_packets = 0;
-                status_packets = 0;
-                pvt_packets = 0;
-                report_at = Instant::now() + Duration::from_secs(30);
-            }
-
-            if got_fix {
+            if let Some(fix_type) = fix {
                 info!(
                     "{} initialized (fix type: {:?})",
                     self.id,
@@ -207,77 +174,22 @@ struct Active<'a, RX> {
 impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
     async fn run(mut self) -> Inactive<'a, RX> {
         let mut recv_buf = [0u8; 4096];
-        let mut report_started_at = Instant::now();
-        let mut next_report = report_started_at + Duration::from_secs(1);
-        let mut pvt_count = 0_u32;
-        let mut status_count = 0_u32;
-        let mut last_itow = None;
-        let mut max_epoch_gap_ms = 0_u32;
 
         loop {
             match with_timeout(LINK_SILENCE_TIMEOUT, self.rx.read(&mut recv_buf)).await {
-                Ok(Ok(n)) if n > 0 => {
-                    let mut msgs = self.parser.consume(&recv_buf[..n]);
-                    while let Some(pkt) = msgs.next() {
-                        if let Ok(ref packet) = pkt {
-                            log_configuration_packet(self.id, packet);
-                        }
-                        match pkt {
+                Ok(Ok(n)) => {
+                    let mut parsed = self.parser.consume(&recv_buf[..n]);
+                    while let Some(msg) = parsed.next() {
+                        match msg {
                             Ok(PacketRef::NavPvt(pvt)) => {
-                                pvt_count = pvt_count.saturating_add(1);
-                                if let Some(previous) = last_itow {
-                                    max_epoch_gap_ms =
-                                        max_epoch_gap_ms.max(pvt.itow().wrapping_sub(previous));
-                                }
-                                last_itow = Some(pvt.itow());
-                                let fix_ok = pvt.flags().contains(NavPvtFlags::GPS_FIX_OK);
-                                let now = Instant::now();
-                                if now >= next_report {
-                                    info!(
-                                        "{} GNSS: PVT={}, STATUS={}, report_ms={}, max_epoch_gap={} ms, MSL={} m, vAcc={} mm, vDown={} m/s, sAcc={} m/s, PDOP={}, sats={}, fix={:?}, fixOk={}, utc={}-{}-{}T{}:{}:{} ns={}, iTOW={} ms",
-                                        self.id,
-                                        pvt_count,
-                                        status_count,
-                                        now.saturating_duration_since(report_started_at)
-                                            .as_millis(),
-                                        max_epoch_gap_ms,
-                                        pvt.height_msl(),
-                                        pvt.vert_accuracy(),
-                                        pvt.vel_down(),
-                                        pvt.speed_accuracy_estimate(),
-                                        pvt.pdop(),
-                                        pvt.num_satellites(),
-                                        Debug2Format(&pvt.fix_type()),
-                                        fix_ok,
-                                        pvt.year(),
-                                        pvt.month(),
-                                        pvt.day(),
-                                        pvt.hour(),
-                                        pvt.min(),
-                                        pvt.sec(),
-                                        pvt.nanosecond(),
-                                        pvt.itow(),
-                                    );
-                                    pvt_count = 0;
-                                    status_count = 0;
-                                    max_epoch_gap_ms = 0;
-                                    report_started_at = now;
-                                    next_report = now + Duration::from_secs(1);
-                                }
                                 let sample = nav_pvt_sample(self.id, &pvt);
                                 signals::submit_sd_log(SdLogRecord::Gnss(sample));
-                                if !fix_ok
-                                    || !matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D)
-                                {
-                                    continue;
+                                if has_fix(&sample.pvt) {
+                                    self.errors = 0;
+                                    signals::submit_gnss_sample(sample);
                                 }
-                                self.errors = 0;
-                                signals::submit_gnss_sample(sample);
                             }
-                            Ok(PacketRef::NavStatus(_)) => {
-                                status_count = status_count.saturating_add(1);
-                            }
-                            Ok(_) => {}
+                            Ok(packet) => log_configuration_packet(self.id, &packet),
                             Err(e) => {
                                 warn!("{} parse error: {:?}", self.id, Debug2Format(&e));
                                 self.errors = self.errors.saturating_add(1);
@@ -291,27 +203,29 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                 }
                 Err(_) => {
                     warn!("{} UBX link silent", self.id);
-                    return Inactive {
-                        rx: self.rx,
-                        parser: self.parser,
-                        id: self.id,
-                        attempt: 0,
-                    };
+                    return self.into_inactive();
                 }
-                _ => {}
             }
 
             if self.errors >= MAX_CONSECUTIVE_ERRORS {
                 error!("{} offline (too many consecutive errors)", self.id);
-                return Inactive {
-                    rx: self.rx,
-                    parser: self.parser,
-                    id: self.id,
-                    attempt: 0,
-                };
+                return self.into_inactive();
             }
         }
     }
+
+    fn into_inactive(self) -> Inactive<'a, RX> {
+        Inactive {
+            rx: self.rx,
+            parser: self.parser,
+            id: self.id,
+            attempt: 0,
+        }
+    }
+}
+
+fn has_fix(pvt: &Pvt) -> bool {
+    pvt.fix_ok && matches!(pvt.fix_type, GpsFix::Fix2D | GpsFix::Fix3D)
 }
 
 async fn run_inner<'a, RX: embedded_io_async::Read>(

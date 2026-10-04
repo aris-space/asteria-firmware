@@ -68,17 +68,12 @@ pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 1
 // Readout and estimation never wait for SD writes. The writer reports any
 // overflow so incomplete logs are visible during a bench run.
 pub static SD_LOG_CHANNEL: Channel<CriticalSectionRawMutex, SdLogRecord, 512> = Channel::new();
-pub static SD_LOG_DROPPED: [AtomicU32; 5] = [const { AtomicU32::new(0) }; 5];
+pub static SD_LOG_DROPPED: [AtomicU32; SdLogRecord::KIND_COUNT] =
+    [const { AtomicU32::new(0) }; SdLogRecord::KIND_COUNT];
 
 pub fn submit_sd_log(record: SdLogRecord) {
-    let index = match record {
-        SdLogRecord::State(_) => 0,
-        SdLogRecord::Imu(_) => 1,
-        SdLogRecord::Magnetometer(_) => 2,
-        SdLogRecord::Gnss(_) => 3,
-        SdLogRecord::Barometer(_) => 4,
-    };
+    let kind = record.kind();
     if SD_LOG_CHANNEL.try_send(record).is_err() {
-        SD_LOG_DROPPED[index].fetch_add(1, Ordering::Relaxed);
+        SD_LOG_DROPPED[kind].fetch_add(1, Ordering::Relaxed);
     }
 }

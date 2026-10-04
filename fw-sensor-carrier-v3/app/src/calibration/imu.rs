@@ -11,6 +11,7 @@ use super::Name;
 use crate::sensors::{IMU_0, IMU_1, IMU_COUNT, ImuId};
 use crate::signals::IMU_CHANNELS;
 use crate::storage::Storage;
+use crate::tasks::readout::imu::{ACCEL_FULL_SCALE, GYRO_FULL_SCALE};
 use crate::types::{ImuSample, RawImuSample};
 use fw_sensor_carrier_v3::sef::{ImuWindow, ImuWindowSummary, imu_measurement};
 
@@ -24,8 +25,10 @@ const MAX_ACCEL_NOISE_MPS2: f32 = 0.3;
 // Measurement latency has not been measured, so retain the read-completion
 // timestamp rather than applying an assumed offset.
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
-    let [ax, ay, az] = sensor_to_board([raw.accel.x, raw.accel.y, raw.accel.z]);
-    let [gx, gy, gz] = sensor_to_board([raw.gyro.x, raw.gyro.y, raw.gyro.z]);
+    let accel = Acceleration::from_raw(raw.accel, ACCEL_FULL_SCALE);
+    let gyro = AngularRate::from_raw(raw.gyro, GYRO_FULL_SCALE);
+    let [ax, ay, az] = sensor_to_board([accel.x, accel.y, accel.z]);
+    let [gx, gy, gz] = sensor_to_board([gyro.x, gyro.y, gyro.z]);
     let bias = CAL.try_get().unwrap_or(&DEFAULTS)[raw.src.index()].gyro_bias_dps;
     ImuSample {
         src: raw.src,

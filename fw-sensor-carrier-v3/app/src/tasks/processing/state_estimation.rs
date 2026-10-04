@@ -1,31 +1,32 @@
 //! SEF-light vertical estimation from the calibrated sensor streams.
+//!
+//! Barometers give height through per-chain bias states; GNSS fits those
+//! biases to MSL. Each output tick publishes the selected chain to
+//! [`signals::STATE_ESTIMATE_WATCH`] and logs every chain to SD.
 
-use asteria_sef_light::{EstimatorError, PressureMeasurement};
-use defmt::{Debug2Format, info, warn};
+use asteria_sef_light::{BarometerBiasMeasurement, EstimatorError, PressureMeasurement};
+use defmt::{Debug2Format, warn};
 use embassy_time::{Duration, Instant};
 use fw_sensor_carrier_v3::sef::{
-    BarometerBiasTracker, Estimator, GNSS_HEIGHT_STD_FLOOR_M, GnssVerticalInput, ImuWindow,
-    barometric_pressure_altitude_m, correlated_gnss_height_std_m, gnss_height_std_m,
-    gnss_measurement, imu_measurement, new_estimator, weaker_gnss_disagreement_floor_m,
+    BarometerBiasTracker, Estimator, GNSS_HEIGHT_STD_FLOOR_M, barometric_pressure_altitude_m,
+    correlated_gnss_height_std_m, imu_measurement, new_estimator,
 };
 
 use crate::calibration;
-use crate::sensors::{GnssId, IMU_0, IMU_1};
+use crate::sensors::{BAROMETER_COUNT, GnssId, IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::types::{
     BaroSample, GnssSample, ImuSample, MagSample, SdLogRecord, SefLogSample, StateEstimate,
 };
+use gnss_selection::GnssSelection;
 
 const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
-const GNSS_FRESH: Duration = Duration::from_millis(500);
 const GNSS_FUSION_PERIOD: Duration = Duration::from_millis(45);
 const GNSS_VELOCITY_FRESH: Duration = Duration::from_secs(2);
-const GNSS_SWITCH_IMPROVEMENT: f32 = 1.5;
-const STATE_LOG_PERIOD: Duration = Duration::from_millis(250);
-const STATUS_LOG_PERIOD: Duration = Duration::from_secs(1);
-const IMU_DIAGNOSTIC_PERIOD: Duration = Duration::from_secs(10);
+const BARO_FOR_GNSS_MAX_AGE: Duration = Duration::from_millis(100);
+const WARNING_PERIOD: Duration = Duration::from_secs(1);
 // Both stationary barometers varied by about 0.3 m in the bench run; this
 // larger uncertainty allows for pressure changes and correlated samples.
 const BARO_HEIGHT_STD_M: f32 = 1.5;
@@ -51,54 +52,39 @@ impl Event {
 
 struct Processor {
     estimator: Estimator,
-    gnss_ready: bool,
-    // A later IMU handover must not publish an unanchored chain as MSL.
-    gnss_anchor_ready: [bool; 2],
+    gnss: GnssSelection,
+    /// Time of the first GNSS bias fit accepted by the selected chain.
+    anchored_at: Option<Instant>,
+    /// Per chain: a GNSS bias fit was accepted, and a pressure update followed it.
+    /// A later IMU handover must not publish an unanchored chain as MSL.
+    bias_anchored: [bool; IMU_COUNT],
+    pressure_after_anchor: [bool; IMU_COUNT],
     gnss_height_std_m: f32,
-    gnss_latest: [Option<GnssSample>; 2],
-    // Keep the last paired disagreement through a receiver dropout.
-    gnss_disagreement_floor_m: [f32; 2],
-    selected_gnss: Option<GnssId>,
-    last_gnss_fusion: Option<Instant>,
+    last_gnss_fusion: Option<(GnssId, Instant)>,
     last_gnss_velocity: Option<(Instant, f32)>,
     gnss_displacement_m: f32,
     barometer_bias_tracker: BarometerBiasTracker,
+    last_baro_height: [Option<(Instant, f32)>; BAROMETER_COUNT],
     last_output: Option<Instant>,
-    last_status_log: Option<Instant>,
-    last_state_log: Option<Instant>,
-    last_logged_state: [Option<(f32, f32)>; 2],
-    imu_windows: [ImuWindow; 2],
-    last_imu_report: Instant,
-    last_baro_log: [Option<Instant>; 2],
-    last_mag_log: [Option<Instant>; 2],
     last_warning: Option<Instant>,
-    published_since_status: u32,
 }
 
 impl Processor {
     fn new() -> Result<Self, EstimatorError> {
         Ok(Self {
             estimator: new_estimator(GYRO_RANGE_DPS)?,
-            gnss_ready: false,
-            gnss_anchor_ready: [false; 2],
+            gnss: GnssSelection::default(),
+            anchored_at: None,
+            bias_anchored: [false; IMU_COUNT],
+            pressure_after_anchor: [false; IMU_COUNT],
             gnss_height_std_m: GNSS_HEIGHT_STD_FLOOR_M,
-            gnss_latest: [None; 2],
-            gnss_disagreement_floor_m: [0.0; 2],
-            selected_gnss: None,
             last_gnss_fusion: None,
             last_gnss_velocity: None,
             gnss_displacement_m: 0.0,
             barometer_bias_tracker: BarometerBiasTracker::default(),
+            last_baro_height: [None; BAROMETER_COUNT],
             last_output: None,
-            last_status_log: None,
-            last_state_log: None,
-            last_logged_state: [None; 2],
-            imu_windows: [ImuWindow::default(); 2],
-            last_imu_report: Instant::now(),
-            last_baro_log: [None; 2],
-            last_mag_log: [None; 2],
             last_warning: None,
-            published_since_status: 0,
         })
     }
 
@@ -113,26 +99,25 @@ impl Processor {
             let now = Instant::now();
             if self
                 .last_warning
-                .is_none_or(|last| now.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
+                .is_none_or(|last| now.saturating_duration_since(last) >= WARNING_PERIOD)
             {
                 warn!("SEF-light update failed: {:?}", Debug2Format(&error));
                 self.last_warning = Some(now);
             }
         }
         self.publish();
-        self.report_imu_diagnostics();
     }
 
     fn update_imu(&mut self, sample: ImuSample) -> Result<(), EstimatorError> {
-        let imu = asteria_sef_light::ImuId::from_index(sample.src.index())
-            .expect("firmware IMU ID must map to SEF-light");
         let measurement = imu_measurement(
             [sample.accel.x, sample.accel.y, sample.accel.z],
             [sample.gyro.x, sample.gyro.y, sample.gyro.z],
         );
-        self.estimator
-            .update_imu(imu, sample.ts.as_micros(), measurement)?;
-        self.imu_windows[sample.src.index()].record(measurement);
+        self.estimator.update_imu(
+            sef_imu(sample.src.index()),
+            sample.ts.as_micros(),
+            measurement,
+        )?;
         Ok(())
     }
 
@@ -140,18 +125,9 @@ impl Processor {
         let index = sample.src.index();
         let height_m = barometric_pressure_altitude_m(sample.pressure_mbar)
             .ok_or(EstimatorError::OutOfRangeInput)?;
-        if self.last_baro_log[index]
-            .is_none_or(|last| sample.ts.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
-        {
-            info!(
-                "SEF baro {}: pressure_altitude={} m, pressure={} mbar, temperature={} C",
-                sample.src, height_m, sample.pressure_mbar, sample.temperature_c
-            );
-            self.last_baro_log[index] = Some(sample.ts);
-        }
         let barometer = asteria_sef_light::BarometerId::from_index(index)
             .expect("firmware barometer ID must map to SEF-light");
-        self.estimator.update_pressure(
+        let updates = self.estimator.update_pressure(
             sample.ts.as_micros(),
             barometer,
             PressureMeasurement {
@@ -159,23 +135,28 @@ impl Processor {
                 height_std_m: BARO_HEIGHT_STD_M,
             },
         )?;
-        if self.gnss_ready
-            && self.last_gnss_velocity.is_some_and(|(last, _)| {
-                sample.ts.saturating_duration_since(last) <= GNSS_VELOCITY_FRESH
-            })
-        {
-            if let Some(walk_std) = self.barometer_bias_tracker.observe(
-                index,
-                sample.ts.as_micros(),
-                height_m,
-                self.gnss_displacement_m,
-            ) {
-                self.estimator
-                    .set_barometer_bias_walk_std(barometer, walk_std)?;
-                info!("SEF baro {}: bias walk={} m/sqrt(s)", sample.src, walk_std);
+        self.last_baro_height[index] = Some((sample.ts, height_m));
+        if self.anchored_at.is_some_and(|anchor| sample.ts > anchor) {
+            for (ready, update) in self.pressure_after_anchor.iter_mut().zip(updates) {
+                *ready |= update.accepted;
             }
-        } else {
+        }
+
+        let gnss_velocity_fresh = self.last_gnss_velocity.is_some_and(|(last, _)| {
+            sample.ts.saturating_duration_since(last) <= GNSS_VELOCITY_FRESH
+        });
+        if self.anchored_at.is_none() || !gnss_velocity_fresh {
             self.barometer_bias_tracker.reset_windows();
+            return Ok(());
+        }
+        if let Some(walk_std) = self.barometer_bias_tracker.observe(
+            index,
+            sample.ts.as_micros(),
+            height_m,
+            self.gnss_displacement_m,
+        ) {
+            self.estimator
+                .set_barometer_bias_walk_std(barometer, walk_std)?;
         }
         Ok(())
     }
@@ -184,200 +165,121 @@ impl Processor {
         let index = sample.src.index();
         let field = [sample.x, sample.y, sample.z];
         let field_nt = libm::sqrtf(field.iter().map(|value| value * value).sum());
-        let calibration = calibration::mag::applied()[index];
-        if self.last_mag_log[index]
-            .is_none_or(|last| sample.ts.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
-        {
-            info!(
-                "SEF mag {}: field={} nT, calibrated={}, accepted={}",
-                sample.src,
-                field_nt,
-                calibration.is_calibrated(),
-                calibration.accepts_field(field_nt)
-            );
-            self.last_mag_log[index] = Some(sample.ts);
-        }
-        if !calibration.accepts_field(field_nt) {
+        if !calibration::mag::applied()[index].accepts_field(field_nt) {
             return Ok(());
         }
-        let imu = asteria_sef_light::ImuId::from_index(index)
-            .expect("firmware magnetometer ID must map to SEF-light IMU");
+        // Each magnetometer aids the attitude chain of the IMU with the same index.
         self.estimator
-            .update_magnetometer(imu, sample.ts.as_micros(), field)
+            .update_magnetometer(sef_imu(index), sample.ts.as_micros(), field)
     }
 
     fn update_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
-        let Some(best) = self.select_gnss(sample) else {
-            return Ok(());
-        };
-        if !self.gnss_ready {
-            // An unanchored barometer/IMU startup can leave the vertical state
-            // too far from MSL for the innovation gate to accept the first fix.
-            self.estimator = new_estimator(GYRO_RANGE_DPS)?;
-            self.last_logged_state = [None; 2];
-            self.gnss_anchor_ready = [false; 2];
-            self.last_gnss_velocity = None;
-            self.gnss_displacement_m = 0.0;
-            self.barometer_bias_tracker = BarometerBiasTracker::default();
-        }
-        // Fuse every available NavPVT epoch, up to the receiver's 20 Hz rate.
-        // Adjacent heights are correlated; scale their information by the
-        // actual interval so a 1 Hz receiver is not weakened like a 20 Hz one.
-        if self
-            .last_gnss_fusion
-            .is_some_and(|last| sample.ts.saturating_duration_since(last) < GNSS_FUSION_PERIOD)
-        {
+        if !self.gnss.select(sample) {
             return Ok(());
         }
-        let mut measurements = [None, None];
-        let mut measurement = gnss_measurement(GnssVerticalInput {
-            height_msl_m: best.pvt.height_msl,
-            velocity_down_mps: best.pvt.vel_down,
-            vertical_accuracy_mm: best.pvt.vert_accuracy,
-            speed_accuracy_mps: best.pvt.speed_accuracy_mps,
-            fix_tier: 3,
-            pdop_centi: best.pvt.pdop,
-        });
-        let receiver_height_std_m = measurement.measurement.height_std_m;
-        let pair_floor_m = self.gnss_disagreement_floor_m[best.src.index()];
-        let height_std_m = receiver_height_std_m.max(pair_floor_m);
-        let velocity_std_mps = measurement.measurement.velocity_std_mps;
-        let interval_us = self
+        // Fuse every NavPVT epoch, up to the receiver's 20 Hz rate. Adjacent
+        // heights are correlated; scale their information by the actual
+        // interval so a 1 Hz receiver is not weakened like a 20 Hz one.
+        let since_last_fusion = self
             .last_gnss_fusion
-            .map(|last| sample.ts.saturating_duration_since(last).as_micros())
-            .unwrap_or(1_000_000);
-        measurement.measurement.height_std_m =
-            correlated_gnss_height_std_m(height_std_m, interval_us);
-        let filter_height_std_m = measurement.measurement.height_std_m;
-        measurements[best.src.index()] = Some(measurement);
-        if let Some(updates) = self
-            .estimator
-            .update_gnss(sample.ts.as_micros(), measurements)?
-        {
-            for (ready, update) in self.gnss_anchor_ready.iter_mut().zip(updates.iter()) {
-                *ready |= update.height.accepted;
+            .filter(|&(source, _)| source == sample.src)
+            .map(|(_, last)| sample.ts.saturating_duration_since(last));
+        if since_last_fusion.is_some_and(|elapsed| elapsed < GNSS_FUSION_PERIOD) {
+            return Ok(());
+        }
+        let height_std_m = self.gnss.height_std_m(&sample);
+        let interval_us = since_last_fusion.map_or(1_000_000, |elapsed| elapsed.as_micros());
+        let bias_std_m = libm::hypotf(
+            correlated_gnss_height_std_m(height_std_m, interval_us),
+            BARO_HEIGHT_STD_M,
+        );
+
+        let measurements =
+            self.barometer_bias_measurements(sample.ts, sample.pvt.height_msl, bias_std_m);
+        if measurements.iter().any(Option::is_some) {
+            if self.anchored_at.is_none() {
+                self.restart_for_first_anchor()?;
+            }
+            let updates = self
+                .estimator
+                .update_barometer_biases(sample.ts.as_micros(), measurements)?;
+            for (anchored, chain) in self.bias_anchored.iter_mut().zip(&updates) {
+                *anchored |= chain.iter().flatten().any(|update| update.accepted);
             }
             let selected = &updates[self.estimator.selected_imu().index()];
-            info!(
-                "SEF GNSS update {}: MSL={} m, vDown={} m/s, vAcc={} mm, PDOP={}, hStd={} m, vStd={} m/s, hFilterStd={} m, hPairFloor={} m, hOtherFloor={} m, h accepted={}, innovation={} m, nis={}, v accepted={}, innovation={} m/s, nis={}, anchors=[{},{}]",
-                best.src,
-                best.pvt.height_msl,
-                best.pvt.vel_down,
-                best.pvt.vert_accuracy,
-                best.pvt.pdop,
-                height_std_m,
-                velocity_std_mps,
-                filter_height_std_m,
-                pair_floor_m,
-                self.gnss_disagreement_floor_m[1 - best.src.index()],
-                selected.height.accepted,
-                selected.height.innovation,
-                selected.height.normalized_innovation_squared,
-                selected.velocity.accepted,
-                selected.velocity.innovation,
-                selected.velocity.normalized_innovation_squared,
-                self.gnss_anchor_ready[0],
-                self.gnss_anchor_ready[1],
-            );
-            if selected.height.accepted {
-                self.gnss_ready = true;
+            if selected.iter().flatten().any(|update| update.accepted) {
+                self.anchored_at.get_or_insert(sample.ts);
                 self.gnss_height_std_m = height_std_m;
             }
-            if selected.velocity.accepted {
-                let velocity_mps = -best.pvt.vel_down;
-                if let Some((last, previous_velocity_mps)) = self.last_gnss_velocity {
-                    let elapsed = sample.ts.saturating_duration_since(last);
-                    if elapsed <= GNSS_VELOCITY_FRESH {
-                        self.gnss_displacement_m += 0.5
-                            * (previous_velocity_mps + velocity_mps)
-                            * (elapsed.as_micros() as f32 / 1_000_000.0);
-                    } else {
-                        self.barometer_bias_tracker.reset_windows();
-                    }
-                }
-                self.last_gnss_velocity = Some((sample.ts, velocity_mps));
-            } else {
-                self.last_gnss_velocity = None;
-                self.barometer_bias_tracker.reset_windows();
-            }
-            self.last_gnss_fusion = Some(sample.ts);
+        } else if self.anchored_at.is_none() {
+            return Ok(());
         }
+        self.track_gnss_velocity(sample.ts, -sample.pvt.vel_down);
+        self.last_gnss_fusion = Some((sample.src, sample.ts));
         Ok(())
     }
 
-    fn select_gnss(&mut self, sample: GnssSample) -> Option<GnssSample> {
-        // GNSS uncertainty determines weight; only an unusable solution is
-        // removed here. A weak 3D fix can still provide an absolute anchor.
-        let valid = sample.pvt.height_msl.is_finite()
-            && sample.pvt.vel_down.is_finite()
-            && matches!(
-                sample.pvt.fix_type,
-                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
-            );
-        if !valid {
-            self.gnss_latest[sample.src.index()] = None;
-            return None;
-        }
-        self.gnss_latest[sample.src.index()] = Some(sample);
-        let now = Instant::now();
-        let [first, second] = self.gnss_latest.map(|candidate| {
-            candidate.filter(|candidate| now.saturating_duration_since(candidate.ts) <= GNSS_FRESH)
+    /// Bias observations for barometers sampled close to the GNSS epoch.
+    /// A settled bias is not refitted while pressure is stable; otherwise a
+    /// slowly wandering indoor GNSS fix would move height through the bias.
+    fn barometer_bias_measurements(
+        &self,
+        ts: Instant,
+        gnss_height_m: f32,
+        std_m: f32,
+    ) -> [Option<BarometerBiasMeasurement>; BAROMETER_COUNT] {
+        let bias_variance = ImuId::ALL.map(|id| {
+            self.estimator
+                .uncertainty(sef_imu(id.index()))
+                .barometer_bias_variance_m2
         });
-        if let (Some(first), Some(second)) = (first, second) {
-            // Only the less precise receiver inherits disagreement with the
-            // other fix. This is an uncertainty adjustment, not a height offset.
-            self.gnss_disagreement_floor_m = weaker_gnss_disagreement_floor_m(
-                [first.pvt.height_msl, second.pvt.height_msl],
-                [first.pvt.vel_down, second.pvt.vel_down],
-                [first.ts.as_micros(), second.ts.as_micros()],
-                [
-                    gnss_height_std_m(first.pvt.vert_accuracy, first.pvt.pdop),
-                    gnss_height_std_m(second.pvt.vert_accuracy, second.pvt.pdop),
-                ],
-            );
-        }
-        // Keep the current fresh receiver until another has clearly lower
-        // height uncertainty, including the geometry-based floor.
-        let candidate = match (first, second) {
-            (Some(first), Some(second)) => {
-                if gnss_height_std_m(first.pvt.vert_accuracy, first.pvt.pdop)
-                    < gnss_height_std_m(second.pvt.vert_accuracy, second.pvt.pdop)
-                {
-                    first
-                } else {
-                    second
-                }
+        core::array::from_fn(|index| {
+            let (baro_ts, pressure_altitude_m) = self.last_baro_height[index]?;
+            let close =
+                ts.as_micros().abs_diff(baro_ts.as_micros()) <= BARO_FOR_GNSS_MAX_AGE.as_micros();
+            let needs_fit = self.anchored_at.is_none()
+                || self.barometer_bias_tracker.should_fit(
+                    index,
+                    bias_variance[0][index].max(bias_variance[1][index]),
+                    BARO_HEIGHT_STD_M,
+                );
+            (close && needs_fit).then_some(BarometerBiasMeasurement {
+                bias_m: pressure_altitude_m - gnss_height_m,
+                std_m,
+            })
+        })
+    }
+
+    /// An unanchored startup can leave the vertical state too far from MSL
+    /// for the innovation gate, so the first GNSS fit starts a fresh filter.
+    /// The latest barometer heights are kept: the first fit anchors their
+    /// biases, and the next pressure samples then set MSL height.
+    fn restart_for_first_anchor(&mut self) -> Result<(), EstimatorError> {
+        self.estimator = new_estimator(GYRO_RANGE_DPS)?;
+        self.bias_anchored = [false; IMU_COUNT];
+        self.pressure_after_anchor = [false; IMU_COUNT];
+        self.last_gnss_velocity = None;
+        self.gnss_displacement_m = 0.0;
+        self.barometer_bias_tracker = BarometerBiasTracker::default();
+        Ok(())
+    }
+
+    fn track_gnss_velocity(&mut self, ts: Instant, velocity_mps: f32) {
+        if let Some((last, previous_velocity_mps)) = self.last_gnss_velocity {
+            let elapsed = ts.saturating_duration_since(last);
+            if elapsed <= GNSS_VELOCITY_FRESH {
+                self.gnss_displacement_m += 0.5
+                    * (previous_velocity_mps + velocity_mps)
+                    * (elapsed.as_micros() as f32 / 1_000_000.0);
+            } else {
+                self.barometer_bias_tracker.reset_windows();
             }
-            (Some(first), None) => first,
-            (None, Some(second)) => second,
-            (None, None) => return None,
-        };
-        let best = match self
-            .selected_gnss
-            .and_then(|source| [first, second][source.index()])
-        {
-            Some(current)
-                if current.src != candidate.src
-                    && gnss_height_std_m(candidate.pvt.vert_accuracy, candidate.pvt.pdop)
-                        * GNSS_SWITCH_IMPROVEMENT
-                        >= gnss_height_std_m(current.pvt.vert_accuracy, current.pvt.pdop) =>
-            {
-                current
-            }
-            _ => candidate,
-        };
-        if sample.src != best.src {
-            return None;
         }
-        if self.selected_gnss != Some(best.src) {
-            info!(
-                "SEF GNSS source: {} (vAcc={} mm, PDOP={})",
-                best.src, best.pvt.vert_accuracy, best.pvt.pdop
-            );
-            self.selected_gnss = Some(best.src);
-            self.last_gnss_fusion = None;
-        }
-        Some(best)
+        self.last_gnss_velocity = Some((ts, velocity_mps));
+    }
+
+    fn msl_ready(&self, index: usize) -> bool {
+        self.bias_anchored[index] && self.pressure_after_anchor[index]
     }
 
     fn publish(&mut self) {
@@ -396,41 +298,38 @@ impl Processor {
         if now.saturating_duration_since(ts) > IMU_FRESH || !self.estimator.imu_ready(imu) {
             return;
         }
-        // MSL comes from GNSS. The AHRS orientation is useful before the
-        // barometer bias states have an absolute height reference.
+
+        let selected = imu.index();
         let state = self.estimator.selected_state();
         let uncertainty = self.estimator.selected_uncertainty();
-        let altitude_msl_m = state.height_m;
-        let height_std_m = libm::sqrtf(uncertainty.height_variance_m2).max(self.gnss_height_std_m);
-        let selected_imu = if imu.index() == 0 { IMU_0 } else { IMU_1 };
-        let msl_ready = self.gnss_anchor_ready[imu.index()];
         signals::STATE_ESTIMATE_WATCH.sender().send(StateEstimate {
             ts,
-            msl_ready,
-            height_msl_m: altitude_msl_m,
+            msl_ready: self.msl_ready(selected),
+            height_msl_m: state.height_m,
             velocity_mps: state.velocity_mps,
-            height_std_m,
+            height_std_m: libm::sqrtf(uncertainty.height_variance_m2).max(self.gnss_height_std_m),
             velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
             orientation_body_to_ned_wxyz: self.estimator.orientation_body_to_ned_wxyz(imu),
-            selected_imu,
+            selected_imu: ImuId::ALL[selected],
             redundancy_ready: self.estimator.redundancy_ready(),
         });
+
         let scores = self.estimator.consistency_scores();
-        for (index, id) in [IMU_0, IMU_1].into_iter().enumerate() {
-            let imu = asteria_sef_light::ImuId::from_index(index)
-                .expect("firmware IMU ID must map to SEF-light");
-            let chain = self.estimator.state(imu);
+        for id in ImuId::ALL {
+            let index = id.index();
+            let imu = sef_imu(index);
+            let state = self.estimator.state(imu);
             let uncertainty = self.estimator.uncertainty(imu);
             signals::submit_sd_log(SdLogRecord::State(SefLogSample {
                 ts,
                 imu: id,
-                selected: index == selected_imu.index(),
-                msl_ready: self.gnss_anchor_ready[index],
+                selected: index == selected,
+                msl_ready: self.msl_ready(index),
                 redundancy_ready: self.estimator.redundancy_ready(),
-                selected_gnss: self.selected_gnss,
-                height_msl_m: chain.height_m,
-                velocity_mps: chain.velocity_mps,
-                barometer_bias_m: chain.barometer_bias_m,
+                selected_gnss: self.gnss.selected(),
+                height_msl_m: state.height_m,
+                velocity_mps: state.velocity_mps,
+                barometer_bias_m: state.barometer_bias_m,
                 height_std_m: libm::sqrtf(uncertainty.height_variance_m2),
                 velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
                 barometer_bias_std_m: uncertainty.barometer_bias_variance_m2.map(libm::sqrtf),
@@ -438,112 +337,14 @@ impl Processor {
                 orientation_body_to_ned_wxyz: self.estimator.orientation_body_to_ned_wxyz(imu),
             }));
         }
-        self.published_since_status = self.published_since_status.saturating_add(1);
-        self.log_full_state(now);
-        if self
-            .last_status_log
-            .is_none_or(|last| now.saturating_duration_since(last) >= STATUS_LOG_PERIOD)
-        {
-            if msl_ready {
-                info!(
-                    "SEF-light: altitude_msl={}±{} m, v={}±{} m/s, IMU={}, redundancy_ready={}, published={}",
-                    altitude_msl_m,
-                    height_std_m,
-                    state.velocity_mps,
-                    libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
-                    selected_imu,
-                    self.estimator.redundancy_ready(),
-                    self.published_since_status,
-                );
-            } else {
-                info!("SEF-light: waiting for usable GNSS fix to establish MSL altitude");
-            }
-            self.published_since_status = 0;
-            self.last_status_log = Some(now);
-        }
         self.last_output = Some(now);
-    }
-
-    fn log_full_state(&mut self, now: Instant) {
-        if self
-            .last_state_log
-            .is_some_and(|last| now.saturating_duration_since(last) < STATE_LOG_PERIOD)
-        {
-            return;
-        }
-        let scores = self.estimator.consistency_scores();
-        for (index, id) in [IMU_0, IMU_1].into_iter().enumerate() {
-            let imu = asteria_sef_light::ImuId::from_index(index)
-                .expect("firmware IMU ID must map to SEF-light");
-            let state = self.estimator.state(imu);
-            let uncertainty = self.estimator.uncertainty(imu);
-            let attitude = self.estimator.imu_status(imu);
-            let q = self.estimator.orientation_body_to_ned_wxyz(imu);
-            let previous =
-                self.last_logged_state[index].unwrap_or((state.height_m, state.velocity_mps));
-            info!(
-                "SEF {}: h={} dh={} m, v={} dv={} m/s, bias=[{},{}] m, std=[{},{},{},{}], cov_hv={}, score={}, q=[{},{},{},{}], attitude_error={} rad, ignored={}, mag_error={} rad, mag_ignored={}, flags=[{},{},{}]",
-                id,
-                state.height_m,
-                state.height_m - previous.0,
-                state.velocity_mps,
-                state.velocity_mps - previous.1,
-                state.barometer_bias_m[0],
-                state.barometer_bias_m[1],
-                libm::sqrtf(uncertainty.height_variance_m2),
-                libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
-                libm::sqrtf(uncertainty.barometer_bias_variance_m2[0]),
-                libm::sqrtf(uncertainty.barometer_bias_variance_m2[1]),
-                uncertainty.height_velocity_covariance_m2_per_s,
-                scores[index],
-                q[0],
-                q[1],
-                q[2],
-                q[3],
-                attitude.acceleration_error_rad,
-                attitude.accelerometer_ignored,
-                attitude.magnetic_error_rad,
-                attitude.magnetometer_ignored,
-                attitude.flags.initialising(),
-                attitude.flags.angular_rate_recovery(),
-                attitude.flags.acceleration_recovery(),
-            );
-            self.last_logged_state[index] = Some((state.height_m, state.velocity_mps));
-        }
-        self.last_state_log = Some(now);
-    }
-
-    fn report_imu_diagnostics(&mut self) {
-        let now = Instant::now();
-        if now.saturating_duration_since(self.last_imu_report) < IMU_DIAGNOSTIC_PERIOD {
-            return;
-        }
-        for (index, id) in [IMU_0, IMU_1].into_iter().enumerate() {
-            let Some(summary) = core::mem::take(&mut self.imu_windows[index]).summary() else {
-                continue;
-            };
-            // This drift proxy applies only when the carrier is stationary and
-            // the gravity-norm error projects onto the vertical axis.
-            let window_s = IMU_DIAGNOSTIC_PERIOD.as_secs() as f32;
-            let free_height_drift_m = 0.5 * window_s * window_s * summary.gravity_error_mean_mps2;
-            info!(
-                "IMU {} bench: n={}, gravity_error_mean={} m/s2, gravity_noise={} m/s2, max_accel={} m/s2, gyro_mean=[{},{},{}] rad/s, gyro_noise={} rad/s, max_gyro={} rad/s, free_dh_10s={} m",
-                id,
-                summary.samples,
-                summary.gravity_error_mean_mps2,
-                summary.gravity_error_noise_mps2,
-                summary.max_acceleration_mps2,
-                summary.gyro_mean_rad_s[0],
-                summary.gyro_mean_rad_s[1],
-                summary.gyro_mean_rad_s[2],
-                summary.gyro_noise_rad_s,
-                summary.max_gyro_rad_s,
-                free_height_drift_m,
-            );
-        }
-        self.last_imu_report = now;
     }
 }
 
+fn sef_imu(index: usize) -> asteria_sef_light::ImuId {
+    asteria_sef_light::ImuId::from_index(index).expect("firmware IMU ID must map to SEF-light")
+}
+
+mod gnss_selection;
 mod stream;
 pub use stream::task;

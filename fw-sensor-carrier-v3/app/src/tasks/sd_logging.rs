@@ -1,4 +1,15 @@
 //! Full-rate CSV logging through the async SDMMC and FAT drivers.
+//!
+//! Each session writes one CSV per record kind into a new `LOGnnnn` directory.
+//! Sensor files start with `sample_us,read_us`: the timestamp the estimator
+//! uses and the instant the readout received the data. They are equal for the
+//! magnetometer and GNSS. IMU sample times are interpolated across a FIFO batch
+//! read at `read_us`; the barometer sample time is the midpoint of a conversion
+//! cycle that ends at `read_us`.
+//!
+//! Raw IMU and magnetometer columns are sensor-frame counts at the configured
+//! full scale (accel 4096 LSB/g, gyro 70 mdps/LSB, mag 150 nT/LSB). Calibrated
+//! columns are board frame. Barometer values are the factory-compensated output.
 
 use core::fmt::Write as _;
 use core::sync::atomic::Ordering;
@@ -11,26 +22,98 @@ use embassy_stm32::sdmmc::sd::{Addressable, CmdBlock, StorageDevice};
 use embassy_stm32::time::mhz;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_fatfs::{Error as FatError, FileSystem, FsOptions};
-use embedded_io_async::{Read, Seek, SeekFrom, Write};
+use embedded_io_async::Write;
 use embedded_partitions::mbr::Mbr;
-use heapless::String;
+use heapless::{String, Vec};
 
 use crate::resources::sd::Sd;
 use crate::signals::{SD_LOG_CHANNEL, SD_LOG_DROPPED};
-use crate::types::{SdLogRecord, SefLogSample};
+use crate::types::SdLogRecord;
 
-const FILE_COUNT: usize = 6;
-const PREFIXES: [char; FILE_COUNT] = ['S', 'I', 'M', 'G', 'B', 'L'];
-const HEADERS: [&[u8]; FILE_COUNT] = [
-    b"uptime_us,imu,selected,msl_ready,redundancy_ready,selected_gnss,height_msl_m,velocity_mps,bias0_m,bias1_m,height_std_m,velocity_std_mps,bias0_std_m,bias1_std_m,score,qw,qx,qy,qz\n",
-    b"uptime_us,imu,ax_mps2,ay_mps2,az_mps2,gx_radps,gy_radps,gz_radps\n",
-    b"uptime_us,magnetometer,x_nt,y_nt,z_nt\n",
-    b"uptime_us,receiver,fix_type,fix_ok,height_msl_m,velocity_down_mps,pdop_centi,vertical_accuracy_mm,speed_accuracy_mps\n",
-    b"uptime_us,barometer,pressure_mbar,temperature_c\n",
-    b"uptime_us,dropped_state,dropped_imu,dropped_magnetometer,dropped_gnss,dropped_barometer\n",
+struct CsvFile {
+    name: &'static str,
+    header: &'static str,
+}
+
+const FILE_COUNT: usize = SdLogRecord::KIND_COUNT + 1;
+const DROP_FILE: usize = SdLogRecord::KIND_COUNT;
+// Indexed by `SdLogRecord::kind`, followed by the drop counters.
+const FILES: [CsvFile; FILE_COUNT] = [
+    CsvFile {
+        name: "STATE.CSV",
+        header: "sample_us,imu,selected,msl_ready,redundancy_ready,selected_gnss,height_msl_m,velocity_mps,bias0_m,bias1_m,height_std_m,velocity_std_mps,bias0_std_m,bias1_std_m,score,qw,qx,qy,qz\n",
+    },
+    CsvFile {
+        name: "IMU.CSV",
+        header: "sample_us,read_us,imu,ax_raw,ay_raw,az_raw,gx_raw,gy_raw,gz_raw,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n",
+    },
+    CsvFile {
+        name: "MAG.CSV",
+        header: "sample_us,read_us,magnetometer,x_raw,y_raw,z_raw,x_nt,y_nt,z_nt\n",
+    },
+    CsvFile {
+        name: "GNSS.CSV",
+        header: "sample_us,read_us,receiver,itow_ms,num_satellites,fix_type,fix_ok,latitude_deg,longitude_deg,height_msl_m,velocity_down_mps,horizontal_accuracy_mm,vertical_accuracy_mm,speed_accuracy_mps,pdop_centi\n",
+    },
+    CsvFile {
+        name: "BARO.CSV",
+        header: "sample_us,read_us,barometer,pressure_mbar,temperature_c\n",
+    },
+    CsvFile {
+        name: "DROPS.CSV",
+        header: "uptime_us,state,imu,magnetometer,gnss,barometer\n",
+    },
 ];
 const BUFFER_SIZE: usize = 4096;
 const FLUSH_PERIOD: Duration = Duration::from_secs(1);
+
+type Row = String<256>;
+
+/// A CSV file with a RAM buffer, so the card sees few large writes.
+struct CsvLog<F> {
+    name: &'static str,
+    file: F,
+    buffer: [u8; BUFFER_SIZE],
+    used: usize,
+    rows: u32,
+}
+
+impl<F: Write> CsvLog<F> {
+    fn new(spec: &CsvFile, file: F) -> Self {
+        let mut log = Self {
+            name: spec.name,
+            file,
+            buffer: [0; BUFFER_SIZE],
+            used: spec.header.len(),
+            rows: 0,
+        };
+        log.buffer[..log.used].copy_from_slice(spec.header.as_bytes());
+        log
+    }
+
+    async fn append(&mut self, row: &[u8]) -> Result<(), F::Error> {
+        if self.used + row.len() > BUFFER_SIZE {
+            self.write_buffer().await?;
+        }
+        self.buffer[self.used..][..row.len()].copy_from_slice(row);
+        self.used += row.len();
+        self.rows += 1;
+        Ok(())
+    }
+
+    async fn write_buffer(&mut self) -> Result<(), F::Error> {
+        self.file.write_all(&self.buffer[..self.used]).await?;
+        self.used = 0;
+        Ok(())
+    }
+
+    /// Commits buffered rows to the card and returns how many rows that was.
+    async fn flush(&mut self) -> Result<u32, F::Error> {
+        self.write_buffer().await?;
+        self.file.flush().await?;
+        Ok(core::mem::take(&mut self.rows))
+    }
+}
 
 #[embassy_executor::task]
 pub async fn task(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>) {
@@ -98,300 +181,200 @@ async fn run_session(sdmmc: &mut Sd) {
             return;
         }
     };
+
     let root = fs.root_dir();
-    let mut names = [const { String::<16>::new() }; FILE_COUNT];
-    let mut found = false;
+    let mut dir_name = String::<8>::new();
+    let mut dir = None;
     for number in 1..=9999 {
-        let mut occupied = false;
-        for (index, prefix) in PREFIXES.into_iter().enumerate() {
-            names[index].clear();
-            write!(&mut names[index], "{}{:04}.CSV", prefix, number).unwrap();
-            match root.open_file(names[index].as_str()).await {
-                Ok(_) => occupied = true,
-                Err(FatError::NotFound) => {}
-                Err(e) => {
-                    warn!("SD: log name lookup failed: {}", Debug2Format(&e));
-                    return;
-                }
+        dir_name.clear();
+        write!(dir_name, "LOG{:04}", number).unwrap();
+        match root.open_dir(&dir_name).await {
+            Ok(_) => continue,
+            Err(FatError::NotFound) => {}
+            Err(e) => {
+                warn!("SD: log directory lookup failed: {}", Debug2Format(&e));
+                return;
             }
         }
-        if !occupied {
-            found = true;
-            break;
+        match root.create_dir(&dir_name).await {
+            Ok(created) => {
+                dir = Some(created);
+                break;
+            }
+            Err(e) => {
+                warn!(
+                    "SD: {} create failed: {}",
+                    dir_name.as_str(),
+                    Debug2Format(&e)
+                );
+                return;
+            }
         }
     }
-    if !found {
-        warn!("SD: all log filenames are occupied");
+    let Some(dir) = dir else {
+        warn!("SD: all log directory names are occupied");
         return;
-    }
+    };
 
-    macro_rules! create_log {
-        ($index:expr) => {{
-            match root.create_file(names[$index].as_str()).await {
-                Ok(file) => file,
-                Err(e) => {
-                    warn!(
-                        "SD: {} create failed: {}",
-                        names[$index].as_str(),
-                        Debug2Format(&e)
-                    );
-                    return;
-                }
+    let mut logs = Vec::<_, FILE_COUNT>::new();
+    for spec in &FILES {
+        match dir.create_file(spec.name).await {
+            Ok(file) => {
+                let _ = logs.push(CsvLog::new(spec, file));
             }
-        }};
-    }
-    let mut files = [
-        create_log!(0),
-        create_log!(1),
-        create_log!(2),
-        create_log!(3),
-        create_log!(4),
-        create_log!(5),
-    ];
-    let mut readback = [0u8; 256];
-    for (index, file) in files.iter_mut().enumerate() {
-        let header = HEADERS[index];
-        if let Err(e) = file.write_all(header).await {
-            warn!(
-                "SD: {} header write failed: {}",
-                names[index].as_str(),
-                Debug2Format(&e)
-            );
-            return;
-        }
-        if let Err(e) = file.flush().await {
-            warn!(
-                "SD: {} header flush failed: {}",
-                names[index].as_str(),
-                Debug2Format(&e)
-            );
-            return;
-        }
-        if let Err(e) = file.seek(SeekFrom::Start(0)).await {
-            warn!(
-                "SD: {} header seek failed: {}",
-                names[index].as_str(),
-                Debug2Format(&e)
-            );
-            return;
-        }
-        if let Err(e) = file.read_exact(&mut readback[..header.len()]).await {
-            warn!(
-                "SD: {} header readback failed: {}",
-                names[index].as_str(),
-                Debug2Format(&e)
-            );
-            return;
-        }
-        if readback[..header.len()] != *header {
-            warn!("SD: {} header readback mismatch", names[index].as_str());
-            return;
-        }
-        if let Err(e) = file.seek(SeekFrom::End(0)).await {
-            warn!(
-                "SD: {} seek failed: {}",
-                names[index].as_str(),
-                Debug2Format(&e)
-            );
-            return;
+            Err(e) => {
+                warn!("SD: {} create failed: {}", spec.name, Debug2Format(&e));
+                return;
+            }
         }
     }
-    info!("SD: CSV session {} ready", names[0].as_str());
+    info!("SD: logging to {}", dir_name.as_str());
 
-    let mut buffers = [[0u8; BUFFER_SIZE]; FILE_COUNT];
-    let mut used = [0usize; FILE_COUNT];
-    let mut rows = [0u32; FILE_COUNT];
     let mut last_flush = Instant::now();
     loop {
-        if let Either::First(record) =
-            select(SD_LOG_CHANNEL.receive(), Timer::after(FLUSH_PERIOD)).await
+        if let Either::First(record) = select(
+            SD_LOG_CHANNEL.receive(),
+            Timer::at(last_flush + FLUSH_PERIOD),
+        )
+        .await
         {
-            let Some((index, row)) = format_record(record) else {
-                warn!("SD: CSV row exceeded buffer");
+            let log = &mut logs[record.kind()];
+            let Ok(row) = format_record(&record) else {
+                warn!("SD: {} row exceeded buffer", log.name);
                 continue;
             };
-            let bytes = row.as_bytes();
-            if used[index] + bytes.len() > BUFFER_SIZE {
-                if let Err(e) = files[index].write_all(&buffers[index][..used[index]]).await {
-                    warn!(
-                        "SD: {} write failed: {}",
-                        names[index].as_str(),
-                        Debug2Format(&e)
-                    );
+            if let Err(e) = log.append(row.as_bytes()).await {
+                warn!("SD: {} write failed: {}", log.name, Debug2Format(&e));
+                return;
+            }
+        }
+        if Instant::now() < last_flush + FLUSH_PERIOD {
+            continue;
+        }
+
+        let dropped: [u32; SdLogRecord::KIND_COUNT] =
+            core::array::from_fn(|kind| SD_LOG_DROPPED[kind].swap(0, Ordering::Relaxed));
+        if dropped.iter().any(|&count| count > 0) {
+            let mut row = Row::new();
+            write!(row, "{}", Instant::now().as_micros()).unwrap();
+            for count in dropped {
+                write!(row, ",{}", count).unwrap();
+            }
+            row.push('\n').unwrap();
+            let log = &mut logs[DROP_FILE];
+            if let Err(e) = log.append(row.as_bytes()).await {
+                warn!("SD: {} write failed: {}", log.name, Debug2Format(&e));
+                return;
+            }
+        }
+
+        let mut rows = [0u32; FILE_COUNT];
+        for (log, rows) in logs.iter_mut().zip(&mut rows) {
+            match log.flush().await {
+                Ok(count) => *rows = count,
+                Err(e) => {
+                    warn!("SD: {} flush failed: {}", log.name, Debug2Format(&e));
                     return;
                 }
-                used[index] = 0;
             }
-            buffers[index][used[index]..used[index] + bytes.len()].copy_from_slice(bytes);
-            used[index] += bytes.len();
-            rows[index] += 1;
         }
-        if Instant::now().saturating_duration_since(last_flush) >= FLUSH_PERIOD {
-            let dropped: [u32; 5] =
-                core::array::from_fn(|i| SD_LOG_DROPPED[i].swap(0, Ordering::Relaxed));
-            if dropped.iter().any(|&count| count > 0) {
-                let mut line = String::<128>::new();
-                write!(
-                    &mut line,
-                    "{},{},{},{},{},{}\n",
-                    Instant::now().as_micros(),
-                    dropped[0],
-                    dropped[1],
-                    dropped[2],
-                    dropped[3],
-                    dropped[4]
-                )
-                .unwrap();
-                let index = 5;
-                let bytes = line.as_bytes();
-                if used[index] + bytes.len() > BUFFER_SIZE {
-                    if let Err(e) = files[index].write_all(&buffers[index][..used[index]]).await {
-                        warn!("SD: loss log write failed: {}", Debug2Format(&e));
-                        return;
-                    }
-                    used[index] = 0;
-                }
-                buffers[index][used[index]..used[index] + bytes.len()].copy_from_slice(bytes);
-                used[index] += bytes.len();
-                rows[index] += 1;
-            }
-            for index in 0..FILE_COUNT {
-                if used[index] > 0 {
-                    if let Err(e) = files[index].write_all(&buffers[index][..used[index]]).await {
-                        warn!(
-                            "SD: {} write failed: {}",
-                            names[index].as_str(),
-                            Debug2Format(&e)
-                        );
-                        return;
-                    }
-                    used[index] = 0;
-                }
-                if rows[index] > 0 {
-                    if let Err(e) = files[index].flush().await {
-                        warn!(
-                            "SD: {} flush failed: {}",
-                            names[index].as_str(),
-                            Debug2Format(&e)
-                        );
-                        return;
-                    }
-                }
-            }
-            info!(
-                "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, dropped=[{},{},{},{},{}]",
-                rows[0],
-                rows[1],
-                rows[2],
-                rows[3],
-                rows[4],
-                dropped[0],
-                dropped[1],
-                dropped[2],
-                dropped[3],
-                dropped[4],
-            );
-            rows = [0; FILE_COUNT];
-            last_flush = Instant::now();
-        }
+        info!(
+            "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, dropped={}",
+            rows[0], rows[1], rows[2], rows[3], rows[4], dropped,
+        );
+        last_flush = Instant::now();
     }
 }
 
-fn format_record(record: SdLogRecord) -> Option<(usize, String<512>)> {
-    let mut row = String::new();
-    let index = match record {
-        SdLogRecord::State(sample) => {
-            format_state(&mut row, sample).ok()?;
-            0
-        }
-        SdLogRecord::Imu(sample) => {
+fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
+    let mut row = Row::new();
+    match record {
+        SdLogRecord::State(s) => {
+            let [qw, qx, qy, qz] = s.orientation_body_to_ned_wxyz;
             write!(
-                &mut row,
-                "{},{},{:.5},{:.5},{:.5},{:.6},{:.6},{:.6}\n",
-                sample.ts.as_micros(),
-                sample.src.index(),
-                sample.accel.x,
-                sample.accel.y,
-                sample.accel.z,
-                sample.gyro.x,
-                sample.gyro.y,
-                sample.gyro.z,
-            )
-            .ok()?;
-            1
+                row,
+                "{},{},{},{},{},{},{:.3},{:.4},{:.3},{:.3},{:.3},{:.4},{:.3},{:.3},{:.3},{:.6},{:.6},{:.6},{:.6}\n",
+                s.ts.as_micros(),
+                s.imu.index(),
+                u8::from(s.selected),
+                u8::from(s.msl_ready),
+                u8::from(s.redundancy_ready),
+                s.selected_gnss.map_or(-1, |id| id.index() as i8),
+                s.height_msl_m,
+                s.velocity_mps,
+                s.barometer_bias_m[0],
+                s.barometer_bias_m[1],
+                s.height_std_m,
+                s.velocity_std_mps,
+                s.barometer_bias_std_m[0],
+                s.barometer_bias_std_m[1],
+                s.consistency_score,
+                qw,
+                qx,
+                qy,
+                qz,
+            )?;
         }
-        SdLogRecord::Magnetometer(sample) => {
-            write!(
-                &mut row,
-                "{},{},{:.2},{:.2},{:.2}\n",
-                sample.ts.as_micros(),
-                sample.src.index(),
-                sample.x,
-                sample.y,
-                sample.z,
-            )
-            .ok()?;
-            2
-        }
-        SdLogRecord::Gnss(sample) => {
-            write!(
-                &mut row,
-                "{},{},{},{},{:.3},{:.4},{},{},{:.4}\n",
-                sample.ts.as_micros(),
-                sample.src.index(),
-                sample.pvt.fix_type as u8,
-                u8::from(sample.pvt.fix_ok),
-                sample.pvt.height_msl,
-                sample.pvt.vel_down,
-                sample.pvt.pdop,
-                sample.pvt.vert_accuracy,
-                sample.pvt.speed_accuracy_mps,
-            )
-            .ok()?;
-            3
-        }
-        SdLogRecord::Barometer(sample) => {
-            write!(
-                &mut row,
-                "{},{},{:.3},{:.3}\n",
-                sample.ts.as_micros(),
-                sample.src.index(),
-                sample.pressure_mbar,
-                sample.temperature_c,
-            )
-            .ok()?;
-            4
-        }
-    };
-    Some((index, row))
-}
-
-fn format_state(row: &mut String<512>, sample: SefLogSample) -> core::fmt::Result {
-    let [w, x, y, z] = sample.orientation_body_to_ned_wxyz;
-    write!(
-        row,
-        "{},{},{},{},{},{},{:.3},{:.4},{:.3},{:.3},{:.3},{:.4},{:.3},{:.3},{:.3},{:.6},{:.6},{:.6},{:.6}\n",
-        sample.ts.as_micros(),
-        sample.imu.index(),
-        u8::from(sample.selected),
-        u8::from(sample.msl_ready),
-        u8::from(sample.redundancy_ready),
-        sample
-            .selected_gnss
-            .map(|id| id.index() as i8)
-            .unwrap_or(-1),
-        sample.height_msl_m,
-        sample.velocity_mps,
-        sample.barometer_bias_m[0],
-        sample.barometer_bias_m[1],
-        sample.height_std_m,
-        sample.velocity_std_mps,
-        sample.barometer_bias_std_m[0],
-        sample.barometer_bias_std_m[1],
-        sample.consistency_score,
-        w,
-        x,
-        y,
-        z,
-    )
+        SdLogRecord::Imu { raw, cal, read_ts } => write!(
+            row,
+            "{},{},{},{},{},{},{},{},{},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4}\n",
+            raw.ts.as_micros(),
+            read_ts.as_micros(),
+            raw.src.index(),
+            raw.accel.x,
+            raw.accel.y,
+            raw.accel.z,
+            raw.gyro.x,
+            raw.gyro.y,
+            raw.gyro.z,
+            cal.accel.x,
+            cal.accel.y,
+            cal.accel.z,
+            cal.gyro.x,
+            cal.gyro.y,
+            cal.gyro.z,
+        )?,
+        SdLogRecord::Magnetometer { raw, cal } => write!(
+            row,
+            "{},{},{},{},{},{},{:.2},{:.2},{:.2}\n",
+            raw.ts.as_micros(),
+            raw.ts.as_micros(),
+            raw.src.index(),
+            raw.x,
+            raw.y,
+            raw.z,
+            cal.x,
+            cal.y,
+            cal.z,
+        )?,
+        SdLogRecord::Gnss(g) => write!(
+            row,
+            "{},{},{},{},{},{},{},{:.8},{:.8},{:.3},{:.4},{},{},{:.4},{}\n",
+            g.ts.as_micros(),
+            g.ts.as_micros(),
+            g.src.index(),
+            g.pvt.itow_ms,
+            g.pvt.num_satellites,
+            g.pvt.fix_type as u8,
+            u8::from(g.pvt.fix_ok),
+            g.pvt.latitude_deg,
+            g.pvt.longitude_deg,
+            g.pvt.height_msl,
+            g.pvt.vel_down,
+            g.pvt.horiz_accuracy,
+            g.pvt.vert_accuracy,
+            g.pvt.speed_accuracy_mps,
+            g.pvt.pdop,
+        )?,
+        SdLogRecord::Barometer { sample, read_ts } => write!(
+            row,
+            "{},{},{},{:.3},{:.3}\n",
+            sample.ts.as_micros(),
+            read_ts.as_micros(),
+            sample.src.index(),
+            sample.pressure_mbar,
+            sample.temperature_c,
+        )?,
+    }
+    Ok(row)
 }
