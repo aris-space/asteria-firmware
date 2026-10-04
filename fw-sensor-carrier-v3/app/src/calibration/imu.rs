@@ -3,7 +3,7 @@ use core::fmt;
 use defmt::{info, warn};
 use embassy_futures::select::{Either, select};
 use embassy_sync::once_lock::OnceLock;
-use embassy_time::Duration;
+use embassy_time::{Duration, Instant, with_timeout};
 use lsm6dso32::{Acceleration, AngularRate};
 use serde::{Deserialize, Serialize};
 
@@ -14,13 +14,6 @@ use crate::storage::Storage;
 use crate::tasks::readout::imu::{ACCEL_FULL_SCALE, GYRO_FULL_SCALE};
 use crate::types::{ImuSample, RawImuSample};
 use fw_sensor_carrier_v3::sef::{ImuWindow, ImuWindowSummary, imu_measurement};
-
-static CAL: OnceLock<[StoredCal; IMU_COUNT]> = OnceLock::new();
-const DEFAULTS: [StoredCal; IMU_COUNT] = [StoredCal::DEFAULT; IMU_COUNT];
-const CALIBRATION_TIME: Duration = Duration::from_secs(5);
-const MIN_SAMPLES: u32 = 1_000;
-const MAX_GYRO_NOISE_RAD_S: f32 = 0.01;
-const MAX_ACCEL_NOISE_MPS2: f32 = 0.3;
 
 // Measurement latency has not been measured, so retain the read-completion
 // timestamp rather than applying an assumed offset.
@@ -43,6 +36,47 @@ pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
             y: gy - bias[1],
             z: gz - bias[2],
         },
+    }
+}
+
+pub async fn load(storage: &Storage) {
+    let cal = [
+        load_one(storage, IMU_0).await,
+        load_one(storage, IMU_1).await,
+    ];
+    let _ = CAL.init(cal);
+}
+
+pub fn applied() -> [StoredCal; IMU_COUNT] {
+    *CAL.try_get().unwrap_or(&DEFAULTS)
+}
+
+pub async fn stored(storage: &Storage) -> [Option<StoredCal>; IMU_COUNT] {
+    [
+        storage.load::<StoredCal>(&IMU_0.key()).await,
+        storage.load::<StoredCal>(&IMU_1.key()).await,
+    ]
+}
+
+/// Live per-sensor cal, written once at startup; a reset reloads and applies it.
+static CAL: OnceLock<[StoredCal; IMU_COUNT]> = OnceLock::new();
+
+const DEFAULTS: [StoredCal; IMU_COUNT] = [StoredCal::DEFAULT; IMU_COUNT];
+
+async fn load_one(storage: &Storage, id: ImuId) -> StoredCal {
+    match storage.load::<StoredCal>(&id.key()).await {
+        Some(cal) if cal.gyro_bias_dps.iter().all(|v| v.is_finite()) => {
+            info!(
+                "{}: gyro cal \"{}\" loaded from flash",
+                id,
+                cal.name.as_str()
+            );
+            cal
+        }
+        _ => {
+            warn!("{}: no valid gyro cal in flash, using zero offset", id);
+            StoredCal::DEFAULT
+        }
     }
 }
 
@@ -78,53 +112,19 @@ impl fmt::Display for StoredCal {
     }
 }
 
-pub async fn load(storage: &Storage) {
-    let cal = [
-        load_one(storage, IMU_0).await,
-        load_one(storage, IMU_1).await,
-    ];
-    let _ = CAL.init(cal);
-}
+const CALIBRATION_TIME: Duration = Duration::from_secs(5);
+const MIN_SAMPLES: u32 = 1_000;
+const MAX_GYRO_NOISE_RAD_S: f32 = 0.01;
+const MAX_ACCEL_NOISE_MPS2: f32 = 0.3;
 
-async fn load_one(storage: &Storage, id: ImuId) -> StoredCal {
-    match storage.load::<StoredCal>(&id.key()).await {
-        Some(cal) if cal.gyro_bias_dps.iter().all(|v| v.is_finite()) => {
-            info!(
-                "{}: gyro cal \"{}\" loaded from flash",
-                id,
-                cal.name.as_str()
-            );
-            cal
-        }
-        _ => {
-            warn!("{}: no valid gyro cal in flash, using zero offset", id);
-            StoredCal::DEFAULT
-        }
-    }
-}
-
-pub fn applied() -> [StoredCal; IMU_COUNT] {
-    *CAL.try_get().unwrap_or(&DEFAULTS)
-}
-
-pub async fn stored(storage: &Storage) -> [Option<StoredCal>; IMU_COUNT] {
-    [
-        storage.load::<StoredCal>(&IMU_0.key()).await,
-        storage.load::<StoredCal>(&IMU_1.key()).await,
-    ]
-}
-
+/// Stationary gyro calibration: [`collect`](Self::collect) records both IMUs
+/// for [`CALIBRATION_TIME`], then [`finish`](Self::finish) stores the result.
+#[derive(Default)]
 pub struct ImuCal {
     windows: [ImuWindow; IMU_COUNT],
 }
 
 impl ImuCal {
-    pub fn new() -> Self {
-        Self {
-            windows: [ImuWindow::default(); IMU_COUNT],
-        }
-    }
-
     pub async fn collect(&mut self) {
         let mut imu_0 = IMU_CHANNELS[IMU_0.index()]
             .subscriber()
@@ -132,8 +132,8 @@ impl ImuCal {
         let mut imu_1 = IMU_CHANNELS[IMU_1.index()]
             .subscriber()
             .expect("second IMU subscriber unavailable");
-        let deadline = embassy_time::Instant::now() + CALIBRATION_TIME;
-        while embassy_time::Instant::now() < deadline {
+        let deadline = Instant::now() + CALIBRATION_TIME;
+        while Instant::now() < deadline {
             // Drain one sample per source before waiting, so FIFO bursts from
             // either IMU cannot starve the other calibration window.
             let first = imu_0.try_next_message_pure();
@@ -144,9 +144,9 @@ impl ImuCal {
                 }
                 continue;
             }
-            let remaining = deadline - embassy_time::Instant::now();
+            let remaining = deadline - Instant::now();
             let next = select(imu_0.next_message_pure(), imu_1.next_message_pure());
-            let sample = match embassy_time::with_timeout(remaining, next).await {
+            let sample = match with_timeout(remaining, next).await {
                 Ok(Either::First(sample)) | Ok(Either::Second(sample)) => sample,
                 Err(_) => break,
             };

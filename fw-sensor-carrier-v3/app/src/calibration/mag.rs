@@ -216,7 +216,7 @@ const _: () = assert!(
     "MagCal is written for exactly two magnetometers"
 );
 
-/// Magnetometer calibration: the caller drives the collection loop (`collect_tick`
+/// Magnetometer calibration: the caller runs the collection loop (`collect_tick`
 /// per window, then `finish`). One `magcal` solver per sensor.
 pub struct MagCal {
     solvers: [Solver; MAG_COUNT],

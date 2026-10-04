@@ -216,7 +216,7 @@ async fn cmd_cal_imu(
         return;
     };
     say(class, "gyro cal: keep the board still for 5 seconds\n").await;
-    let mut cal = imu::ImuCal::new();
+    let mut cal = imu::ImuCal::default();
     cal.collect().await;
     let counts = cal.counts();
     let mut s: String<80> = String::new();
