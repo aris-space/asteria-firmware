@@ -1,3 +1,5 @@
+use core::sync::atomic::Ordering;
+
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
@@ -6,7 +8,10 @@ use embassy_stm32::usart::{UartRx, UartTx};
 
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
-use crate::sensors::{BARO_BUS_1, BARO_BUS_2, GNSS_0, GNSS_1, IMU_0, IMU_1, MAG_BUS_1, MAG_BUS_2};
+use crate::sensors::{
+    BARO_BUS_1, BARO_BUS_2, DHT_STATUS, GNSS_0, GNSS_1, IMU_0, IMU_1, MAG_BUS_1, MAG_BUS_2,
+    SensorStatus,
+};
 
 use crate::{calibration, resources, storage, tasks};
 
@@ -117,20 +122,23 @@ pub async fn spawn_tasks(
 
     // DHT readout is disabled for the height bench. Initializing DHT caused
     // both I2C barometers to time out; the barometers stay active without it.
+    for status in &DHT_STATUS {
+        status.store(SensorStatus::Disabled, Ordering::Relaxed);
+    }
     level_0_spawner.spawn(
-        tasks::readout::magnetometer::read_task(mag1, board.sensors.bus1, MAG_BUS_1)
+        tasks::readout::magnetometer::task(mag1, board.sensors.bus1, MAG_BUS_1)
             .expect("Failed to spawn magnetometer 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::barometer::read_task(baro1, board.sensors.bus1, BARO_BUS_1)
+        tasks::readout::barometer::task(baro1, board.sensors.bus1, BARO_BUS_1)
             .expect("Failed to spawn barometer 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::magnetometer::read_task(mag2, board.sensors.bus2, MAG_BUS_2)
+        tasks::readout::magnetometer::task(mag2, board.sensors.bus2, MAG_BUS_2)
             .expect("Failed to spawn magnetometer 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::barometer::read_task(baro2, board.sensors.bus2, BARO_BUS_2)
+        tasks::readout::barometer::task(baro2, board.sensors.bus2, BARO_BUS_2)
             .expect("Failed to spawn barometer 1 task"),
     );
     level_0_spawner.spawn(

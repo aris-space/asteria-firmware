@@ -151,10 +151,11 @@ pub enum SdLogRecord {
         sample: BaroSample,
         read_ts: Instant,
     },
+    Dht(DhtSample),
 }
 
 impl SdLogRecord {
-    pub const KIND_COUNT: usize = 5;
+    pub const KIND_COUNT: usize = 6;
 
     /// Selects this record's CSV file and drop counter.
     pub const fn kind(&self) -> usize {
@@ -164,6 +165,7 @@ impl SdLogRecord {
             Self::Magnetometer { .. } => 2,
             Self::Gnss(_) => 3,
             Self::Barometer { .. } => 4,
+            Self::Dht(_) => 5,
         }
     }
 }

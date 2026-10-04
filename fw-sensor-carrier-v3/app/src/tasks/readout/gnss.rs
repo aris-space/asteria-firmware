@@ -1,3 +1,7 @@
+//! u-blox GNSS readout over UART. NAV-PVT epochs are logged to SD from the
+//! first packet; only fixes reach the estimator. `Inactive` already reports
+//! the UART link as active before the first fix.
+
 use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{UartRx, UartTx};
@@ -12,7 +16,7 @@ use ublox::{
 
 use core::sync::atomic::Ordering;
 
-use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use super::{MAX_CONSECUTIVE_ERRORS, State, backoff};
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
 use crate::types::{GnssSample, Pvt, SdLogRecord};
@@ -75,11 +79,15 @@ fn log_configuration_packet(id: GnssId, packet: &PacketRef<'_>) {
 struct Inactive<'a, RX> {
     rx: RX,
     parser: Parser<ublox::FixedLinearBuffer<'a>>,
+    /// Present for GNSS_1, whose configuration this firmware sends.
+    tx: Option<UartTx<'static, Async>>,
     id: GnssId,
     attempt: u8,
 }
 
-impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
+impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
+    type Next = Active<'a, RX>;
+
     async fn run(mut self) -> Active<'a, RX> {
         debug!("{} initializing", self.id);
 
@@ -149,15 +157,20 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
 
             if let Some(fix_type) = fix {
                 info!(
-                    "{} initialized (fix type: {:?})",
+                    "{} active (fix type: {:?})",
                     self.id,
                     Debug2Format(&fix_type)
                 );
+                if let Some(tx) = self.tx.as_mut() {
+                    // Poll after the receive loop has survived startup UART errors.
+                    embassy_time::Timer::after_millis(100).await;
+                    poll_gnss_1_configuration(tx).await;
+                }
                 return Active {
                     rx: self.rx,
                     parser: self.parser,
+                    tx: self.tx,
                     id: self.id,
-                    errors: 0,
                 };
             }
         }
@@ -167,13 +180,16 @@ impl<'a, RX: embedded_io_async::Read> Inactive<'a, RX> {
 struct Active<'a, RX> {
     rx: RX,
     parser: Parser<ublox::FixedLinearBuffer<'a>>,
+    tx: Option<UartTx<'static, Async>>,
     id: GnssId,
-    errors: u8,
 }
 
-impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
+impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
+    type Next = Inactive<'a, RX>;
+
     async fn run(mut self) -> Inactive<'a, RX> {
         let mut recv_buf = [0u8; 4096];
+        let mut errors: u8 = 0;
 
         loop {
             match with_timeout(LINK_SILENCE_TIMEOUT, self.rx.read(&mut recv_buf)).await {
@@ -185,21 +201,21 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                                 let sample = nav_pvt_sample(self.id, &pvt);
                                 signals::submit_sd_log(SdLogRecord::Gnss(sample));
                                 if has_fix(&sample.pvt) {
-                                    self.errors = 0;
+                                    errors = 0;
                                     signals::submit_gnss_sample(sample);
                                 }
                             }
                             Ok(packet) => log_configuration_packet(self.id, &packet),
                             Err(e) => {
                                 warn!("{} parse error: {:?}", self.id, Debug2Format(&e));
-                                self.errors = self.errors.saturating_add(1);
+                                errors = errors.saturating_add(1);
                             }
                         }
                     }
                 }
                 Ok(Err(e)) => {
                     warn!("{} read error: {:?}", self.id, Debug2Format(&e));
-                    self.errors = self.errors.saturating_add(1);
+                    errors = errors.saturating_add(1);
                 }
                 Err(_) => {
                     warn!("{} UBX link silent", self.id);
@@ -207,17 +223,20 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
                 }
             }
 
-            if self.errors >= MAX_CONSECUTIVE_ERRORS {
+            if errors >= MAX_CONSECUTIVE_ERRORS {
                 error!("{} offline (too many consecutive errors)", self.id);
                 return self.into_inactive();
             }
         }
     }
+}
 
+impl<'a, RX> Active<'a, RX> {
     fn into_inactive(self) -> Inactive<'a, RX> {
         Inactive {
             rx: self.rx,
             parser: self.parser,
+            tx: self.tx,
             id: self.id,
             attempt: 0,
         }
@@ -226,32 +245,6 @@ impl<'a, RX: embedded_io_async::Read> Active<'a, RX> {
 
 fn has_fix(pvt: &Pvt) -> bool {
     pvt.fix_ok && matches!(pvt.fix_type, GpsFix::Fix2D | GpsFix::Fix3D)
-}
-
-async fn run_inner<'a, RX: embedded_io_async::Read>(
-    rx: RX,
-    parser: Parser<ublox::FixedLinearBuffer<'a>>,
-    id: GnssId,
-    mut tx: Option<UartTx<'static, Async>>,
-) -> ! {
-    let mut inactive = Inactive {
-        rx,
-        parser,
-        id,
-        attempt: 0,
-    };
-
-    loop {
-        let active = inactive.run().await;
-        if let Some(tx) = tx.as_mut() {
-            // Poll after the receive loop has survived startup UART errors.
-            embassy_time::Timer::after_millis(100).await;
-            poll_gnss_1_configuration(tx).await;
-        }
-        GNSS_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
-        inactive = active.run().await;
-        GNSS_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
-    }
 }
 
 async fn configure_gnss_1_port(
@@ -355,5 +348,12 @@ pub async fn task(
     let linear_buf = ublox::FixedLinearBuffer::new(&mut parse_buf);
     let parser = Parser::new(linear_buf);
 
-    run_inner(rx, parser, id, tx).await
+    let inactive = Inactive {
+        rx,
+        parser,
+        tx,
+        id,
+        attempt: 0,
+    };
+    super::run(&GNSS_STATUS[id.index()], inactive).await
 }

@@ -1,12 +1,5 @@
 //! LSM6DSO32 IMU readout.
 //!
-//! Like every readout in this module, the task follows the shared
-//! `Inactive` <-> `Active` shape (see [`super`]): `Inactive` tries to
-//! init the sensor and retries with exponential backoff on failure;
-//! `Active` runs the FIFO drain loop until too many consecutive errors
-//! push it back to `Inactive`. Each transition flips
-//! [`crate::sensors::IMU_STATUS`] so we can publish the state to CAN.
-//!
 //! The sensor batches accel and gyro samples into its hardware FIFO at the
 //! configured ODR. Each FIFO entry carries a `TagSensor` byte that says
 //! whether it's an accel or gyro reading; because [`ACCEL_ODR`] and [`GYRO_ODR`]
@@ -16,14 +9,12 @@
 //! One of the interrupt lines (INT1) is configured to fire when the FIFO
 //! crosses [`FIFO_WATERMARK`]. We then drain whatever is queued into a local
 //! scratch buffer ([`FIFO_BUFFER_SIZE`] entries) with a single SPI transaction, iterate
-//! it as accel+gyro pairs, apply the sensor-to-board axis flip, and publish one [`ImuSample`]
+//! it as accel+gyro pairs, calibrate them, and publish one [`ImuSample`]
 //! per pair. Sample timestamps are interpolated across the batch using the wall-clock
 //! interval between consecutive interrupts.
 //!
 //! [`LOOP_TIMEOUT`] bounds the wait on INT1 so a missed interrupt is
 //! recovered after roughly two expected periods.
-
-use core::sync::atomic::Ordering;
 
 use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::exti::ExtiInput;
@@ -36,10 +27,10 @@ use lsm6dso32::{
     Int1Config, Lsm6dso32, TagSensor, Uninitialised,
 };
 
-use super::{MAX_CONSECUTIVE_ERRORS, backoff};
+use super::{MAX_CONSECUTIVE_ERRORS, State, backoff};
 use crate::calibration;
 use crate::resources::sensors::SpiDevice;
-use crate::sensors::{IMU_STATUS, ImuId, SensorStatus};
+use crate::sensors::{IMU_STATUS, ImuId};
 use crate::signals;
 use crate::types::{ImuSample, RawImuSample, SdLogRecord};
 
@@ -125,9 +116,11 @@ struct Inactive<SPI, INT> {
     attempt: u8,
 }
 
-impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::Wait>
-    Inactive<SPI, INT>
+impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::Wait> State
+    for Inactive<SPI, INT>
 {
+    type Next = Active<SPI, INT>;
+
     async fn run(mut self) -> Active<SPI, INT> {
         loop {
             debug!("{} initializing", self.id);
@@ -135,7 +128,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             match uninit.init(&mut Delay).await {
                 Ok(mut sensor) => match configure(&mut sensor).await {
                     Ok(()) => {
-                        info!("{} initialized", self.id);
+                        info!("{} active", self.id);
                         return Active {
                             sensor,
                             int1: self.int1,
@@ -164,9 +157,11 @@ struct Active<SPI, INT> {
     id: ImuId,
 }
 
-impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::Wait>
-    Active<SPI, INT>
+impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::Wait> State
+    for Active<SPI, INT>
 {
+    type Next = Inactive<SPI, INT>;
+
     async fn run(mut self) -> Inactive<SPI, INT> {
         let mut fifo_buf = [FifoDataOut::new_with_zero(); FIFO_BUFFER_SIZE];
         let mut last_read = Instant::now();
@@ -188,7 +183,11 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
             attempt: 0,
         }
     }
+}
 
+impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::Wait>
+    Active<SPI, INT>
+{
     /// Drains the FIFO and publishes one sample per accel+gyro pair. The
     /// pairs are spread evenly between the previous read and this one; the
     /// sensor's own FIFO timestamps were less accurate than this interpolation.
@@ -254,27 +253,13 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
     }
 }
 
-async fn run_inner<SPI, INT>(spi: SPI, int1: INT, id: ImuId) -> !
-where
-    SPI: embedded_hal_async::spi::SpiDevice,
-    INT: embedded_hal_async::digital::Wait,
-{
-    let mut inactive = Inactive {
+#[embassy_executor::task(pool_size = 2)]
+pub async fn task(spi: SpiDevice, int1: ExtiInput<'static, Async>, id: ImuId) -> ! {
+    let inactive = Inactive {
         iface: Lsm6Dso32SpiInterface { spi },
         int1,
         id,
         attempt: 0,
     };
-
-    loop {
-        let active = inactive.run().await;
-        IMU_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
-        inactive = active.run().await;
-        IMU_STATUS[id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
-    }
-}
-
-#[embassy_executor::task(pool_size = 2)]
-pub async fn task(spi: SpiDevice, int1: ExtiInput<'static, Async>, id: ImuId) -> ! {
-    run_inner(spi, int1, id).await
+    super::run(&IMU_STATUS[id.index()], inactive).await
 }

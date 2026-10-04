@@ -1,94 +1,132 @@
-use core::future::pending;
-use core::sync::atomic::Ordering;
+//! SHT4x humidity and temperature readout on a shared I2C bus.
 
-use defmt::{Debug2Format, debug, error, info, trace, warn};
+use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
 use sht4x::{Precision, Sht4xAsync};
 
-use super::{MAX_CONSECUTIVE_ERRORS, MAX_INIT_ATTEMPTS, backoff};
-use crate::resources::buses::{SharedI2c, SharedI2cBus};
-use crate::sensors::{DHT_STATUS, DhtId, SensorStatus};
+use super::{MAX_CONSECUTIVE_ERRORS, State, backoff, init_at_startup, wait_for_sample};
+use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
+use crate::sensors::{DHT_STATUS, DhtId};
 use crate::signals;
-use crate::types::DhtSample;
+use crate::types::{DhtSample, SdLogRecord};
 
-pub const SAMPLE_HZ: u32 = 1;
+const SAMPLE_HZ: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 type BusDevice = I2cDevice<'static, CriticalSectionRawMutex, SharedI2c>;
 /// A fully-initialized humidity/temperature sensor, ready to read.
 pub type Sensor = Sht4xAsync<BusDevice, Delay>;
 
-/// Bring the DHT up, retrying a bounded number of times. Returns the live sensor,
-/// or `None` (and marks it `Disabled`) if it never answered. Call this sequentially
-/// at startup, before any read task runs, so a stuck bus can't starve a healthy one
-/// mid-transaction.
+async fn configure(bus: SharedI2cBus, id: DhtId) -> Result<Sensor, ()> {
+    let mut sensor = Sht4xAsync::new(I2cDevice::new(bus));
+    sensor
+        .soft_reset(&mut Delay)
+        .await
+        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+    sensor
+        .measure(Precision::Low, &mut Delay)
+        .await
+        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+    Ok(sensor)
+}
+
+/// Brings the DHT up at startup; see [`super`] for why this is separate.
 pub async fn init(bus: SharedI2cBus, id: DhtId) -> Option<Sensor> {
-    for attempt in 1..=MAX_INIT_ATTEMPTS {
-        debug!("{} initializing (attempt {})", id, attempt);
-        let mut sensor = Sht4xAsync::new(I2cDevice::new(bus));
-        let result = match sensor.soft_reset(&mut Delay).await {
-            Ok(()) => sensor.measure(Precision::Low, &mut Delay).await.map(|_| ()),
-            Err(e) => Err(e),
-        };
-        match result {
-            Ok(()) => {
-                info!("{} initialized", id);
-                return Some(sensor);
-            }
-            Err(e) => {
-                error!("{} init failed: {:?}", id, Debug2Format(&e));
-                if attempt < MAX_INIT_ATTEMPTS {
-                    Timer::after(backoff(attempt)).await;
+    init_at_startup(id, async || configure(bus, id).await).await
+}
+
+struct Inactive {
+    /// Initialized by [`init`] at startup, if it succeeded.
+    sensor: Option<Sensor>,
+    bus: SharedI2cBus,
+    id: DhtId,
+    attempt: u8,
+}
+
+impl State for Inactive {
+    type Next = Active;
+
+    async fn run(mut self) -> Active {
+        loop {
+            let sensor = match self.sensor.take() {
+                Some(sensor) => Ok(sensor),
+                None => {
+                    debug!("{} initializing", self.id);
+                    configure(self.bus, self.id).await
                 }
+            };
+            if let Ok(sensor) = sensor {
+                info!("{} active", self.id);
+                return Active {
+                    sensor,
+                    bus: self.bus,
+                    id: self.id,
+                };
             }
+            buses::recover(self.bus).await;
+            self.attempt = self.attempt.saturating_add(1);
+            Timer::after(backoff(self.attempt)).await;
         }
     }
-    warn!("{} not detected; not polling", id);
-    DHT_STATUS[id.index()].store(SensorStatus::Disabled, Ordering::Relaxed);
-    None
+}
+
+struct Active {
+    sensor: Sensor,
+    bus: SharedI2cBus,
+    id: DhtId,
+}
+
+impl State for Active {
+    type Next = Inactive;
+
+    async fn run(mut self) -> Inactive {
+        let mut errors: u8 = 0;
+        while errors < MAX_CONSECUTIVE_ERRORS {
+            let next_sample = Instant::now() + SAMPLE_INTERVAL;
+            match self.read().await {
+                Ok(()) => errors = 0,
+                Err(()) => errors += 1,
+            }
+            wait_for_sample(next_sample, self.id).await;
+        }
+        error!("{} offline (too many consecutive errors)", self.id);
+        Inactive {
+            sensor: None,
+            bus: self.bus,
+            id: self.id,
+            attempt: 0,
+        }
+    }
+}
+
+impl Active {
+    async fn read(&mut self) -> Result<(), ()> {
+        let m = self
+            .sensor
+            .measure(Precision::Low, &mut Delay)
+            .await
+            .map_err(|e| warn!("{} read error: {:?}", self.id, Debug2Format(&e)))?;
+        let sample = DhtSample {
+            src: self.id,
+            ts: Instant::now(),
+            temperature_c: m.temperature_celsius().to_num(),
+            humidity_rh: m.humidity_percent().to_num(),
+        };
+        signals::submit_dht_sample(sample);
+        signals::submit_sd_log(SdLogRecord::Dht(sample));
+        Ok(())
+    }
 }
 
 #[embassy_executor::task(pool_size = 2)]
-pub async fn read_task(mut sensor: Sensor, id: DhtId) -> ! {
-    DHT_STATUS[id.index()].store(SensorStatus::Active, Ordering::Relaxed);
-    let mut errors: u8 = 0;
-
-    loop {
-        let next_sample = Instant::now() + SAMPLE_INTERVAL;
-
-        match sensor.measure(Precision::Low, &mut Delay).await {
-            Ok(m) => {
-                errors = 0;
-                let temperature_c: f32 = m.temperature_celsius().to_num();
-                let humidity_rh: f32 = m.humidity_percent().to_num();
-                let sample = DhtSample {
-                    src: id,
-                    ts: Instant::now(),
-                    temperature_c,
-                    humidity_rh,
-                };
-                signals::submit_dht_sample(sample);
-                trace!("{} t={} c rh={} %", id, temperature_c, humidity_rh);
-            }
-            Err(e) => {
-                warn!("{} read error: {:?}", id, Debug2Format(&e));
-                errors = errors.saturating_add(1);
-                if errors >= MAX_CONSECUTIVE_ERRORS {
-                    error!("{} offline; no longer polling", id);
-                    DHT_STATUS[id.index()].store(SensorStatus::Disabled, Ordering::Relaxed);
-                    loop {
-                        pending::<()>().await;
-                    }
-                }
-            }
-        }
-
-        if Instant::now() > next_sample {
-            warn!("{} can't keep up with sample interval", id);
-        } else {
-            Timer::at(next_sample).await;
-        }
-    }
+pub async fn task(sensor: Option<Sensor>, bus: SharedI2cBus, id: DhtId) -> ! {
+    let inactive = Inactive {
+        sensor,
+        bus,
+        id,
+        attempt: super::MAX_INIT_ATTEMPTS,
+    };
+    super::run(&DHT_STATUS[id.index()], inactive).await
 }

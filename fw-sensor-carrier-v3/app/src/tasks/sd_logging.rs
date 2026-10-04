@@ -3,7 +3,7 @@
 //! Each session writes one CSV per record kind into a new `LOGnnnn` directory.
 //! Sensor files start with `sample_us,read_us`: the timestamp the estimator
 //! uses and the instant the readout received the data. They are equal for the
-//! magnetometer and GNSS. IMU sample times are interpolated across a FIFO batch
+//! magnetometer, GNSS, and DHT. IMU sample times are interpolated across a FIFO batch
 //! read at `read_us`; the barometer sample time is the midpoint of a conversion
 //! cycle that ends at `read_us`.
 //!
@@ -60,8 +60,12 @@ const FILES: [CsvFile; FILE_COUNT] = [
         header: "sample_us,read_us,barometer,pressure_mbar,temperature_c\n",
     },
     CsvFile {
+        name: "DHT.CSV",
+        header: "sample_us,read_us,dht,temperature_c,humidity_rh\n",
+    },
+    CsvFile {
         name: "DROPS.CSV",
-        header: "uptime_us,state,imu,magnetometer,gnss,barometer\n",
+        header: "uptime_us,state,imu,magnetometer,gnss,barometer,dht\n",
     },
 ];
 const BUFFER_SIZE: usize = 4096;
@@ -279,8 +283,8 @@ async fn run_session(sdmmc: &mut Sd) {
             }
         }
         info!(
-            "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, dropped={}",
-            rows[0], rows[1], rows[2], rows[3], rows[4], dropped,
+            "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, DHT={}, dropped={}",
+            rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], dropped,
         );
         last_flush = Instant::now();
     }
@@ -374,6 +378,15 @@ fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
             sample.src.index(),
             sample.pressure_mbar,
             sample.temperature_c,
+        )?,
+        SdLogRecord::Dht(sample) => write!(
+            row,
+            "{},{},{},{:.2},{:.2}\n",
+            sample.ts.as_micros(),
+            sample.ts.as_micros(),
+            sample.src.index(),
+            sample.temperature_c,
+            sample.humidity_rh,
         )?,
     }
     Ok(row)
