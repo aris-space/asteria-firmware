@@ -133,9 +133,8 @@ pub async fn spawn_tasks(
             .expect("Failed to spawn GNSS 1 task"),
     );
 
-    thread_spawner.spawn(
-        tasks::processing::state_estimation::task().expect("Failed to spawn state estimation task"),
-    );
+    thread_spawner
+        .spawn(tasks::state_estimation::task().expect("Failed to spawn state estimation task"));
 
     let (can_tx, can_rx, _options) = board.can.split();
     thread_spawner.spawn(tasks::can::rx::task(can_rx).expect("Failed to spawn CAN RX task"));
