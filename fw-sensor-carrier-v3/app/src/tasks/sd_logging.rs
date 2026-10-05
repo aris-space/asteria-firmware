@@ -26,7 +26,7 @@ use embassy_stm32::time::mhz;
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_fatfs::{Error as FatError, FileSystem, FsOptions};
-use embedded_io_async::Write;
+use embedded_io_async::{Seek, SeekFrom, Write};
 use embedded_partitions::mbr::Mbr;
 use heapless::{String, Vec};
 
@@ -91,9 +91,9 @@ type Row = String<256>;
 #[repr(align(4))]
 struct Buffer([u8; BUFFER_SIZE]);
 
-/// A CSV file with a RAM buffer that reaches the card only in whole blocks, so
-/// every file write is one multi-block transfer. Less than one block per file
-/// stays in RAM between flushes.
+/// A CSV file with a RAM buffer that reaches the card in whole blocks, so every
+/// bulk write is one multi-block transfer. A flush also writes the partial last
+/// block, then steps back to its start so the next write rewrites it whole.
 struct CsvLog<F> {
     name: &'static str,
     file: F,
@@ -102,7 +102,7 @@ struct CsvLog<F> {
     rows: u32,
 }
 
-impl<F: Write> CsvLog<F> {
+impl<F: Write + Seek> CsvLog<F> {
     fn new(spec: &CsvFile, file: F) -> Self {
         let mut log = Self {
             name: spec.name,
@@ -134,10 +134,16 @@ impl<F: Write> CsvLog<F> {
         Ok(())
     }
 
-    /// Commits the buffered whole blocks to the card and returns how many rows
-    /// were appended since the last flush.
+    /// Commits every buffered row to the card and returns how many rows were
+    /// appended since the last flush.
     async fn flush(&mut self) -> Result<u32, F::Error> {
         self.write_blocks().await?;
+        if self.used > 0 {
+            self.file.write_all(&self.buffer.0[..self.used]).await?;
+            self.file
+                .seek(SeekFrom::Current(-(self.used as i64)))
+                .await?;
+        }
         self.file.flush().await?;
         Ok(core::mem::take(&mut self.rows))
     }
