@@ -8,6 +8,7 @@
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
+use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 
 use crate::types::{
@@ -37,3 +38,7 @@ define_sample_channel!(STATE_CHANNEL, submit_state: SefLogSample, cap = 64, subs
 define_sample_channel!(MARK_CHANNEL, submit_mark: Mark, cap = 4, subs = 1);
 
 pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 3> = Watch::new();
+
+// Latest USB link state for the buzzer. A suspended bus also occurs when the
+// host sleeps, since this board has no USB VBUS sense pin.
+pub static USB_LINK_SIGNAL: Signal<CriticalSectionRawMutex, bool> = Signal::new();

@@ -1,6 +1,6 @@
-//! Audible status on the piezo: a chime at start-up, and a chirp when the
-//! board gains or loses a 3D GNSS fix on either receiver.
+//! Audible status on the piezo: start-up, USB link, and 3D GNSS fix changes.
 
+use embassy_futures::select::{Either, select};
 use embassy_stm32::time::Hertz;
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
@@ -43,6 +43,10 @@ const STARTUP: &[Step] = &[
 const FIX_ACQUIRED: &[Step] = &[tone(2_093, 60), rest(40), tone(2_637, 140)];
 /// A falling pair, E7 G6.
 const FIX_LOST: &[Step] = &[tone(2_637, 60), rest(40), tone(1_568, 200)];
+/// Short rising pair on USB enumeration.
+const USB_CONNECTED: &[Step] = &[tone(1_000, 70), rest(30), tone(1_500, 90)];
+/// Short falling pair when USB activity stops.
+const USB_DISCONNECTED: &[Step] = &[tone(1_500, 70), rest(30), tone(1_000, 90)];
 
 #[embassy_executor::task]
 pub async fn task(mut pwm: BuzzerPwm) -> ! {
@@ -54,8 +58,32 @@ pub async fn task(mut pwm: BuzzerPwm) -> ! {
     let mut last_fix: [Option<Instant>; GNSS_COUNT] = [None; GNSS_COUNT];
     let mut announced = false;
     let mut changed_since: Option<Instant> = None;
+    let mut usb_active = false;
     loop {
-        if let Ok(WaitResult::Message(reading)) = with_timeout(FIX_STALE, gnss.next_message()).await
+        let reading = match select(
+            with_timeout(FIX_STALE, gnss.next_message()),
+            signals::USB_LINK_SIGNAL.wait(),
+        )
+        .await
+        {
+            Either::First(reading) => reading,
+            Either::Second(active) => {
+                if active != usb_active {
+                    usb_active = active;
+                    play(
+                        &mut pwm,
+                        if active {
+                            USB_CONNECTED
+                        } else {
+                            USB_DISCONNECTED
+                        },
+                    )
+                    .await;
+                }
+                continue;
+            }
+        };
+        if let Ok(WaitResult::Message(reading)) = reading
             && reading.cal.pvt.has_3d_fix()
         {
             last_fix[reading.cal.src.index()] = Some(Instant::now());
