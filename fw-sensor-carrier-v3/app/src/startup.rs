@@ -15,6 +15,7 @@ use crate::{calibration, resources, storage, tasks};
 
 pub struct PreparedBoard {
     pub yellow_led: Output<'static>,
+    pub buzzer: resources::buzzer::BuzzerPwm,
     pub sensors: SensorResources,
     pub can: embassy_stm32::can::Can<'static>,
     pub storage: &'static storage::Storage,
@@ -43,6 +44,7 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let imu2 = resources.imu2.setup();
 
     let yellow_led = resources.yellow_led.setup();
+    let buzzer = resources.buzzer.setup();
 
     let bus1 = resources.bus1.setup();
     let bus2 = resources.bus2.setup();
@@ -57,6 +59,7 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
         usb,
         sd_card: resources.sd_card,
         yellow_led,
+        buzzer,
         sensors: SensorResources {
             gps1_rx,
             gps2_rx,
@@ -76,6 +79,7 @@ pub async fn spawn_tasks(
 ) {
     level_0_spawner
         .spawn(tasks::blinky::task(board.yellow_led).expect("Failed to spawn blinky task"));
+    thread_spawner.spawn(tasks::buzzer::task(board.buzzer).expect("Failed to spawn buzzer task"));
 
     let (sd, detect, power) = board.sd_card.setup();
     thread_spawner.spawn(

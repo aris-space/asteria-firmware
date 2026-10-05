@@ -146,6 +146,17 @@ pub struct Pvt {
     pub speed_accuracy_mps: f32,
 }
 
+impl Pvt {
+    /// A valid 3D solution, the quality SEF-light fuses.
+    pub fn has_3d_fix(&self) -> bool {
+        self.fix_ok
+            && matches!(
+                self.fix_type,
+                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
+            )
+    }
+}
+
 /// A console `mark <label>`, logged to label part of an SD session.
 #[derive(Clone, Debug)]
 pub struct Mark {

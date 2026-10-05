@@ -1,4 +1,5 @@
 pub mod blinky;
+pub mod buzzer;
 pub mod can;
 pub mod console;
 pub mod readout;
