@@ -1,9 +1,9 @@
 use core::sync::atomic::Ordering;
 
 use defmt::{error, trace};
-use embassy_executor::Spawner;
+use embassy_executor::SendSpawner;
 use embassy_stm32::can::CanTx;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Duration, Instant, Ticker, with_timeout};
@@ -24,9 +24,9 @@ const BUILD_INFO_PERIOD: Duration = Duration::from_secs(5);
 // Just under 20 Hz, so the 20 Hz estimate is never throttled by jitter.
 const STATE_MIN_PERIOD: Duration = Duration::from_millis(41);
 
-static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
+static CAN_TX: OnceLock<Mutex<CriticalSectionRawMutex, CanTx<'static>>> = OnceLock::new();
 
-pub fn spawn(can_tx: CanTx<'static>, spawner: Spawner) {
+pub fn spawn(can_tx: CanTx<'static>, spawner: SendSpawner) {
     CAN_TX
         .init(Mutex::new(can_tx))
         .ok()
@@ -39,7 +39,7 @@ pub fn spawn(can_tx: CanTx<'static>, spawner: Spawner) {
 }
 
 async fn send<M: CanMessage + Clone + defmt::Format>(
-    can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>,
+    can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>,
     msg: M,
 ) {
     let mut tx = can_tx.lock().await;
@@ -51,7 +51,7 @@ async fn send<M: CanMessage + Clone + defmt::Format>(
 }
 
 #[embassy_executor::task]
-async fn state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+async fn state_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::{OrientationData, VerticalStateData};
     let mut rx = signals::STATE_ESTIMATE_WATCH
         .receiver()
@@ -97,7 +97,7 @@ async fn state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) 
 }
 
 #[embassy_executor::task]
-async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+async fn status_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
     use hermes_can::messages::board_status::{
         SensorCarrierStatus, SensorsHealth, StatusCommonMessage,
     };
@@ -136,7 +136,7 @@ async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>)
 }
 
 #[embassy_executor::task]
-async fn build_information_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
+async fn build_information_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
     use hermes_can::messages::debug_info::SensorCarrierBuildInfo;
     let msg = SensorCarrierBuildInfo {
         data: crate::built::can_build_information(),

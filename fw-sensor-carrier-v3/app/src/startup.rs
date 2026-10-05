@@ -72,6 +72,7 @@ pub async fn spawn_tasks(
     board: PreparedBoard,
     thread_spawner: Spawner,
     level_0_spawner: SendSpawner,
+    level_1_spawner: SendSpawner,
 ) {
     level_0_spawner
         .spawn(tasks::blinky::task(board.yellow_led).expect("Failed to spawn blinky task"));
@@ -130,12 +131,12 @@ pub async fn spawn_tasks(
             .expect("Failed to spawn GNSS 1 task"),
     );
 
-    thread_spawner
+    level_1_spawner
         .spawn(tasks::state_estimation::task().expect("Failed to spawn state estimation task"));
 
     let (can_tx, can_rx, _options) = board.can.split();
-    thread_spawner.spawn(tasks::can::rx::task(can_rx).expect("Failed to spawn CAN RX task"));
-    tasks::can::tx::spawn(can_tx, thread_spawner);
+    level_1_spawner.spawn(tasks::can::rx::task(can_rx).expect("Failed to spawn CAN RX task"));
+    tasks::can::tx::spawn(can_tx, level_1_spawner);
 
     tasks::console::spawn(board.usb, board.storage, thread_spawner);
 }
