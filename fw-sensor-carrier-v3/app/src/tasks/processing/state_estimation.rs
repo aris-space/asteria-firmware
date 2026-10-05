@@ -4,13 +4,13 @@
 //! Each output tick publishes the selected chain to
 //! [`signals::STATE_ESTIMATE_WATCH`] and logs every chain to SD.
 
-use asteria_sef_light::{EstimatorError, PressureMeasurement};
-use defmt::{Debug2Format, warn};
-use embassy_time::{Duration, Instant};
-use fw_sensor_carrier_v3::sef::{
+use crate::sef::{
     Estimator, GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement,
     imu_measurement, new_estimator,
 };
+use asteria_sef_light::{EstimatorError, PressureMeasurement};
+use defmt::{Debug2Format, warn};
+use embassy_time::{Duration, Instant};
 
 use crate::calibration;
 use crate::sensors::{GNSS_COUNT, IMU_COUNT, ImuId};
