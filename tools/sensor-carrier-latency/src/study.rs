@@ -2,6 +2,7 @@
 //! the latencies the simulator used.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use crate::log::Log;
 use crate::models::fit_all;
@@ -14,9 +15,25 @@ struct Tally {
     runs: usize,
 }
 
-pub fn run(seeds: u64, only: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(
+    seeds: u64,
+    only: Option<&str>,
+    csv_path: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::temp_dir().join("sensor-carrier-latency-study");
     println!("simulated logs in {}\n", root.display());
+    let mut csv = csv_path.map(csv::Writer::from_path).transpose()?;
+    if let Some(csv) = csv.as_mut() {
+        csv.write_record([
+            "scenario",
+            "seed",
+            "sensor",
+            "true_ms",
+            "fit_ms",
+            "sigma_ms",
+            "observable",
+        ])?;
+    }
     for scenario in SCENARIOS
         .iter()
         .filter(|s| only.is_none_or(|name| s.name == name))
@@ -30,6 +47,20 @@ pub fn run(seeds: u64, only: Option<&str>) -> Result<(), Box<dyn std::error::Err
                 for estimate in report.into_iter().flat_map(|r| r.estimates) {
                     let tally = tallies.entry(estimate.name.clone()).or_default();
                     tally.runs += 1;
+                    let observable = estimate
+                        .sigma_s
+                        .is_some_and(|sigma| sigma < crate::OBSERVABLE_SIGMA_S);
+                    if let Some(csv) = csv.as_mut() {
+                        csv.serialize((
+                            scenario.name,
+                            seed,
+                            &estimate.name,
+                            true_latency(&estimate.name) * 1e3,
+                            estimate.latency_s * 1e3,
+                            estimate.sigma_s.map(|sigma| sigma * 1e3),
+                            observable,
+                        ))?;
+                    }
                     if let Some(sigma) = estimate.sigma_s.filter(|&s| s < crate::OBSERVABLE_SIGMA_S)
                     {
                         tally
@@ -69,6 +100,9 @@ pub fn run(seeds: u64, only: Option<&str>) -> Result<(), Box<dyn std::error::Err
             );
         }
         println!();
+    }
+    if let Some(csv) = csv.as_mut() {
+        csv.flush()?;
     }
     Ok(())
 }

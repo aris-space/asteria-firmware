@@ -64,6 +64,9 @@ enum Command {
         /// Run only this scenario.
         #[arg(long)]
         scenario: Option<String>,
+        /// Save every simulated fit as CSV for plotting.
+        #[arg(long)]
+        csv: Option<PathBuf>,
     },
 }
 
@@ -92,7 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 out.display()
             );
         }
-        Command::Study { seeds, scenario } => study::run(seeds, scenario.as_deref())?,
+        Command::Study {
+            seeds,
+            scenario,
+            csv,
+        } => study::run(seeds, scenario.as_deref(), csv.as_deref())?,
     }
     Ok(())
 }

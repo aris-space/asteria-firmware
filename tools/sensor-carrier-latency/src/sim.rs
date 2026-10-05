@@ -120,27 +120,33 @@ pub const SCENARIOS: [Scenario; 9] = [
     },
     Scenario {
         name: "flight",
-        description: "20 s on the pad, 3 s boost at 6 g, coast to ~1.6 km, descent at 20 m/s",
-        duration_s: 110.0,
+        description: "20 s on the pad, 3 s boost at 6 g, coast to ~1.2 km, descent at 20 m/s",
+        duration_s: 90.0,
         gnss_fix: true,
-        up_accel: |t, v| match t {
-            t if t < 20.0 => 0.0,
-            t if t < 23.0 => 60.0,
-            _ if v > 0.0 => -STANDARD_GRAVITY - 4e-4 * v * v,
-            _ => -STANDARD_GRAVITY + 0.0245 * v * v,
+        up_accel: |t, v| {
+            let airborne = smooth_ramp(t, 20.0, 0.2);
+            let boost = smooth_window(t, 20.0, 23.0, 0.2);
+            let coast = if v > 0.0 {
+                -STANDARD_GRAVITY - 4e-4 * v * v
+            } else {
+                -STANDARD_GRAVITY + 0.0245 * v * v
+            };
+            60.0 * boost + (airborne - boost) * coast
         },
-        body_rate: |t| match t {
-            t if t < 20.0 => [0.0; 3],
-            t if t < 38.0 => [
+        body_rate: |t| {
+            let boost = smooth_ramp(t, 20.0, 0.5) * (1.0 - smooth_ramp(t, 37.5, 1.0));
+            let descent = smooth_ramp(t, 37.5, 1.0);
+            let boost_rate = [
                 3.0,
                 0.05 * (TAU * 0.5 * t).sin(),
                 0.05 * (TAU * 0.5 * t).cos(),
-            ],
-            _ => [
+            ];
+            let descent_rate = [
                 0.3 * (TAU * 0.2 * t).sin(),
                 0.3 * (TAU * 0.15 * t).cos(),
                 0.5,
-            ],
+            ];
+            std::array::from_fn(|i| boost * boost_rate[i] + descent * descent_rate[i])
         },
     },
     Scenario {
@@ -148,20 +154,62 @@ pub const SCENARIOS: [Scenario; 9] = [
         description: "30 s tumble, 10 s still, 30 s shake, 20 s still, indoors",
         duration_s: 90.0,
         gnss_fix: false,
-        up_accel: |t, _| {
-            if (40.0..70.0).contains(&t) {
-                sine_accel(0.3, 1.2, t)
-            } else {
-                0.0
-            }
-        },
-        body_rate: |t| match t {
-            t if t < 30.0 => tumble(t),
-            t if (40.0..70.0).contains(&t) => wobble(t),
-            _ => [0.0; 3],
+        up_accel: |t, _| windowed_height_accel(0.3, 1.2, t, 40.0, 70.0, 0.5),
+        body_rate: |t| {
+            let tumble_weight = smooth_window(t, 0.0, 30.0, 0.5);
+            let wobble_weight = smooth_window(t, 40.0, 70.0, 0.5);
+            let tumble_rate = tumble(t);
+            let wobble_rate = wobble(t);
+            std::array::from_fn(|i| tumble_weight * tumble_rate[i] + wobble_weight * wobble_rate[i])
         },
     },
 ];
+
+/// Quintic ramp with zero slope and curvature at both ends.
+fn smooth_ramp(t: f64, start: f64, duration: f64) -> f64 {
+    smooth_ramp_kinematics(t, start, duration).0
+}
+
+fn smooth_window(t: f64, start: f64, end: f64, fade_s: f64) -> f64 {
+    smooth_ramp(t, start, fade_s) * (1.0 - smooth_ramp(t, end - fade_s, fade_s))
+}
+
+fn smooth_ramp_kinematics(t: f64, start: f64, duration: f64) -> (f64, f64, f64) {
+    let u = (t - start) / duration;
+    if u <= 0.0 {
+        return (0.0, 0.0, 0.0);
+    }
+    if u >= 1.0 {
+        return (1.0, 0.0, 0.0);
+    }
+    (
+        u.powi(3) * (10.0 - 15.0 * u + 6.0 * u * u),
+        30.0 * u * u * (1.0 - u).powi(2) / duration,
+        60.0 * u * (1.0 - 3.0 * u + 2.0 * u * u) / duration.powi(2),
+    )
+}
+
+/// Second derivative of an oscillating height with a smooth start and stop.
+fn windowed_height_accel(
+    amplitude: f64,
+    frequency: f64,
+    t: f64,
+    start: f64,
+    end: f64,
+    fade_s: f64,
+) -> f64 {
+    let (rise, rise_d1, rise_d2) = smooth_ramp_kinematics(t, start, fade_s);
+    let (fall, fall_d1, fall_d2) = smooth_ramp_kinematics(t, end - fade_s, fade_s);
+    let window = rise * (1.0 - fall);
+    let window_d1 = rise_d1 * (1.0 - fall) - rise * fall_d1;
+    let window_d2 = rise_d2 * (1.0 - fall) - 2.0 * rise_d1 * fall_d1 - rise * fall_d2;
+    let phase = TAU * frequency * (t - start);
+    let omega = TAU * frequency;
+    amplitude
+        * (window_d2 * (1.0 - phase.cos())
+            + 2.0 * window_d1 * omega * phase.sin()
+            + window * omega * omega * phase.cos())
+}
 
 fn tumble(t: f64) -> [f64; 3] {
     [
@@ -179,9 +227,9 @@ fn wobble(t: f64) -> [f64; 3] {
     ]
 }
 
-/// Upward acceleration of `amplitude·sin(2π·f·t)` metres of height.
+/// Upward acceleration of a height that starts at rest and oscillates ±amplitude.
 fn sine_accel(amplitude: f64, frequency: f64, t: f64) -> f64 {
-    -amplitude * (TAU * frequency).powi(2) * (TAU * frequency * t).sin()
+    amplitude * (TAU * frequency).powi(2) * (TAU * frequency * t).cos()
 }
 
 /// The true motion on a fine grid.
@@ -218,8 +266,11 @@ impl Truth {
             truth.accel.push(a);
             truth.attitude.push(q);
             truth.rate.push(w);
-            v += a * Self::DT;
-            h += v * Self::DT;
+            let predicted_v = v + a * Self::DT;
+            let next_a = (scenario.up_accel)(t + Self::DT, predicted_v);
+            let next_v = v + 0.5 * (a + next_a) * Self::DT;
+            h += 0.5 * (v + next_v) * Self::DT;
+            v = next_v;
             q *= UnitQuaternion::from_scaled_axis(Vector3::from(w) * Self::DT);
         }
         truth
@@ -417,4 +468,51 @@ pub fn write(scenario: &Scenario, seed: u64, dir: &Path) -> std::io::Result<()> 
         "uptime_us,state,imu,mag,gnss,baro,dht\n",
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SCENARIOS, Truth};
+
+    #[test]
+    fn oscillating_height_does_not_drift() {
+        for (name, max_range) in [
+            ("hand-lift", 0.9),
+            ("hand-shake", 0.7),
+            ("bench-session", 0.7),
+        ] {
+            let scenario = SCENARIOS
+                .iter()
+                .find(|scenario| scenario.name == name)
+                .unwrap();
+            let truth = Truth::new(scenario);
+            let min = truth.height.iter().copied().fold(f64::INFINITY, f64::min);
+            let max = truth
+                .height
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert!(
+                max - min < max_range,
+                "{name} height range: {} m",
+                max - min
+            );
+            assert!(
+                truth.height.last().unwrap().abs() < 0.05,
+                "{name} ends at {} m",
+                truth.height.last().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn flight_ends_before_touchdown() {
+        let flight = SCENARIOS
+            .iter()
+            .find(|scenario| scenario.name == "flight")
+            .unwrap();
+        let truth = Truth::new(flight);
+        assert!(truth.height.iter().all(|&height| height >= 0.0));
+        assert!(*truth.height.last().unwrap() > 0.0);
+    }
 }
