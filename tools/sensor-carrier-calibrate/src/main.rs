@@ -9,7 +9,7 @@
 //! acceleration. They are relative to IMU_0. `mark still` and `mark tumble`
 //! in the console narrow which stretches are used.
 //!
-//! `--plots` writes SVG plots to check the gyro and magnetometer fits by eye.
+//! `--plots` writes SVG plots to check the fits by eye.
 //!
 //! `simulate` writes logs with known latencies in the same format, and
 //! `study` runs the fits on many simulated scenarios.
@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use crate::calibrate::Calibration;
-use crate::fit::FitReport;
+use crate::fit::{Estimate, FitReport};
 use crate::log::{Log, STANDARD_GRAVITY, pressure_altitude_m};
 
 /// A latency whose standard deviation exceeds this is not determined by the log.
@@ -55,7 +55,7 @@ enum Command {
         /// Ignore samples after this many seconds into the session.
         #[arg(long, default_value_t = f64::INFINITY)]
         to: f64,
-        /// Write SVG plots of the gyro and magnetometer fits into this directory.
+        /// Write SVG plots of the fits into this directory.
         #[arg(long)]
         plots: Option<PathBuf>,
     },
@@ -93,11 +93,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut log = Log::read(&log)?;
             print_overview(&log);
             log.crop(from, to);
-            let latencies = fit_latencies(&log);
+            let estimates = fit_latencies(&log);
+            let latencies = std::iter::once(("IMU_0".to_string(), 0.0))
+                .chain(
+                    estimates
+                        .iter()
+                        .filter(|e| e.sigma_s.is_some_and(|sigma| sigma < OBSERVABLE_SIGMA_S))
+                        .map(|e| (e.name.clone(), e.latency_s)),
+                )
+                .collect();
             let calibration = Calibration::fit(&log);
             calibration.print(&log, &latencies);
             if let Some(dir) = plots {
-                plot::write(&dir, &log, &calibration)?;
+                plot::write(&dir, &log, &calibration, &estimates)?;
                 println!("\nwrote plots to {}", dir.display());
             }
         }
@@ -210,22 +218,15 @@ fn print_overview(log: &Log) {
     println!();
 }
 
-/// Prints every latency fit and returns the determined latencies.
-fn fit_latencies(log: &Log) -> BTreeMap<String, f64> {
-    let mut latencies = BTreeMap::from([("IMU_0".to_string(), 0.0)]);
+/// Prints every latency fit and returns its estimates.
+fn fit_latencies(log: &Log) -> Vec<Estimate> {
+    let mut estimates = Vec::new();
     for (title, report) in models::fit_all(log) {
         println!("{title}");
         match report {
             Some(report) => {
                 print_report(&report);
-                for estimate in report.estimates {
-                    if estimate
-                        .sigma_s
-                        .is_some_and(|sigma| sigma < OBSERVABLE_SIGMA_S)
-                    {
-                        latencies.insert(estimate.name, estimate.latency_s);
-                    }
-                }
+                estimates.extend(report.estimates);
             }
             None => println!("  not enough data\n"),
         }
@@ -236,7 +237,7 @@ fn fit_latencies(log: &Log) -> BTreeMap<String, f64> {
             offset_s * 1e3
         );
     }
-    latencies
+    estimates
 }
 
 fn print_report(report: &FitReport) {

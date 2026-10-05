@@ -31,14 +31,27 @@ pub struct Estimate {
     pub latency_s: f64,
     /// `None` if the data cannot determine this latency.
     pub sigma_s: Option<f64>,
+    /// The fit at latencies around the estimate.
+    pub profile: Vec<ProfilePoint>,
+}
+
+pub struct ProfilePoint {
+    pub latency_s: f64,
+    /// Increase of the normalized χ² over the best fit.
+    pub increase: f64,
+    /// The increase the covariance predicts.
+    pub predicted: f64,
 }
 
 // The covariance describes the fit only near its minimum. Without real
 // motion that minimum is a ripple in the noise, and moving the latency changes
 // the fit far less than the covariance predicts. A latency counts as determined
-// only if the fit at these shifts worsens by at least a quarter of the
-// predicted amount, and clearly (five standard deviations).
-const TEST_SHIFTS_S: [f64; 4] = [-0.1, -0.05, 0.05, 0.1];
+// only if the fit at least TEST_MIN_STEPS profile steps away worsens by at least
+// a quarter of the predicted amount, and clearly (five standard deviations).
+const PROFILE_STEP_S: f64 = 0.005;
+// The profile spans ±PROFILE_STEPS steps around the estimate.
+const PROFILE_STEPS: i32 = 20;
+const TEST_MIN_STEPS: i32 = 10;
 const MIN_PREDICTED_FRACTION: f64 = 0.25;
 const MIN_CHI2_INCREASE: f64 = 25.0;
 
@@ -76,8 +89,9 @@ pub fn fit(model: &dyn Model) -> FitReport {
                 .as_ref()
                 .map(|c| c[(i, i)].sqrt())
                 .filter(|sigma| sigma.is_finite());
-            let determined = sigma.is_some_and(|sigma| {
-                TEST_SHIFTS_S.iter().all(|&shift| {
+            let profile: Vec<ProfilePoint> = (-PROFILE_STEPS..=PROFILE_STEPS)
+                .map(|step| {
+                    let shift = f64::from(step) * PROFILE_STEP_S;
                     let mut latencies = best.clone();
                     latencies[i] += shift;
                     let mut shifted = Projection {
@@ -85,15 +99,24 @@ pub fn fit(model: &dyn Model) -> FitReport {
                         ..problem.empty()
                     };
                     shifted.update();
-                    let increase = (shifted.residuals.norm_squared() - chi2) / scale;
-                    let predicted = (shift / sigma).powi(2);
-                    increase > MIN_CHI2_INCREASE.max(MIN_PREDICTED_FRACTION * predicted)
+                    ProfilePoint {
+                        latency_s: best[i] + shift,
+                        increase: (shifted.residuals.norm_squared() - chi2) / scale,
+                        predicted: sigma.map_or(0.0, |sigma| (shift / sigma).powi(2)),
+                    }
                 })
-            });
+                .collect();
+            let determined = sigma.is_some()
+                && profile.iter().zip(-PROFILE_STEPS..).all(|(point, step)| {
+                    step.abs() < TEST_MIN_STEPS
+                        || point.increase
+                            > MIN_CHI2_INCREASE.max(MIN_PREDICTED_FRACTION * point.predicted)
+                });
             Estimate {
                 name,
                 latency_s: best[i],
                 sigma_s: sigma.filter(|_| determined),
+                profile,
             }
         })
         .collect();
