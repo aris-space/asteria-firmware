@@ -13,6 +13,7 @@ use asteria_sef_light::{
 };
 use defmt::{Debug2Format, warn};
 use embassy_futures::select::{Either, Either4, select, select4};
+use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
@@ -60,10 +61,10 @@ pub async fn task() -> ! {
             .map(|(index, event)| (index, event.ts() + HOLDBACK));
         let due = oldest.map_or(Instant::MAX, |(_, due)| due);
         let next = select4(
-            imu.next_message_pure(),
-            mag.next_message_pure(),
-            gnss.next_message_pure(),
-            baro.next_message_pure(),
+            imu.next_message(),
+            mag.next_message(),
+            gnss.next_message(),
+            baro.next_message(),
         );
         let event = match select(Timer::at(due), next).await {
             Either::First(()) => {
@@ -71,13 +72,27 @@ pub async fn task() -> ! {
                 processor.handle(pending.swap_remove(index));
                 continue;
             }
-            Either::Second(Either4::First(reading)) => Event::Imu(reading.cal),
-            Either::Second(Either4::Second(reading)) => Event::Mag(reading.cal),
-            Either::Second(Either4::Third(reading)) => Event::Gnss(reading.cal),
-            Either::Second(Either4::Fourth(reading)) => Event::Baro(reading.cal),
+            Either::Second(Either4::First(m)) => received(m, "IMU", |r| Event::Imu(r.cal)),
+            Either::Second(Either4::Second(m)) => received(m, "mag", |r| Event::Mag(r.cal)),
+            Either::Second(Either4::Third(m)) => received(m, "GNSS", |r| Event::Gnss(r.cal)),
+            Either::Second(Either4::Fourth(m)) => received(m, "baro", |r| Event::Baro(r.cal)),
+        };
+        let Some(event) = event else {
+            continue;
         };
         if pending.push(event).is_err() {
             warn!("SEF: input buffer full, dropped a sample");
+        }
+    }
+}
+
+/// The event for a received reading, or `None` after reporting lost ones.
+fn received<T: Clone>(message: WaitResult<T>, kind: &str, event: fn(T) -> Event) -> Option<Event> {
+    match message {
+        WaitResult::Message(reading) => Some(event(reading)),
+        WaitResult::Lagged(lost) => {
+            warn!("SEF: fell behind and lost {} {} readings", lost, kind);
+            None
         }
     }
 }
@@ -101,18 +116,8 @@ impl Event {
     }
 }
 
-/// Both receivers' solutions for one GPS epoch. SEF-light selects or blends
-/// the receivers per epoch, so it must see them together.
-#[derive(Clone, Copy)]
-struct GnssEpoch {
-    itow_ms: u32,
-    ts: Instant,
-    samples: [Option<GnssSample>; GNSS_COUNT],
-}
-
 struct Processor {
     estimator: DualVerticalEstimator<HISTORY_CAPACITY>,
-    gnss_epoch: Option<GnssEpoch>,
     /// Per chain: a GNSS height update was accepted, so its height is MSL.
     msl_ready: [bool; IMU_COUNT],
     last_output: Option<Instant>,
@@ -163,7 +168,6 @@ impl Processor {
                 gnss,
                 MAX_AIDING_DELAY_US,
             )?,
-            gnss_epoch: None,
             msl_ready: [false; IMU_COUNT],
             last_output: None,
             last_warning: None,
@@ -229,50 +233,26 @@ impl Processor {
         self.publish();
     }
 
-    /// Collects each receiver's solution into its GPS epoch. An epoch is fused
-    /// once both receivers reported it, or when the next epoch starts.
+    /// Fuses one receiver's solution on its own, weighted by its reported accuracy.
     fn update_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
-        if let Some(epoch) = self.gnss_epoch
-            && epoch.itow_ms != sample.pvt.itow_ms
-        {
-            self.gnss_epoch = None;
-            self.fuse_gnss(epoch)?;
-        }
-        let epoch = self.gnss_epoch.get_or_insert(GnssEpoch {
-            itow_ms: sample.pvt.itow_ms,
-            ts: sample.ts,
-            samples: [None; GNSS_COUNT],
+        let mut samples = [None; GNSS_COUNT];
+        samples[sample.src.index()] = Some(asteria_sef_light::GnssSample {
+            measurement: VerticalGnssMeasurement {
+                height_m: sample.pvt.height_msl_m,
+                velocity_mps: -sample.pvt.velocity_down_mps,
+                height_std_m: (sample.pvt.vertical_accuracy_mm as f32 / 1_000.0).max(GNSS_MIN_STD),
+                velocity_std_mps: sample.pvt.speed_accuracy_mps.max(GNSS_MIN_STD),
+            },
+            // SEF-light's convention: 3 is a usable 3D fix; it ignores tiers below.
+            fix_tier: match sample.pvt.fix_type {
+                _ if !sample.pvt.fix_ok => 0,
+                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
+                ublox::GpsFix::Fix2D => 2,
+                _ => 0,
+            },
+            pdop_centi: sample.pvt.pdop_centi,
         });
-        epoch.samples[sample.src.index()] = Some(sample);
-        if epoch.samples.iter().all(Option::is_some) {
-            let epoch = *epoch;
-            self.gnss_epoch = None;
-            self.fuse_gnss(epoch)?;
-        }
-        Ok(())
-    }
-
-    fn fuse_gnss(&mut self, epoch: GnssEpoch) -> Result<(), EstimatorError> {
-        let samples = epoch.samples.map(|sample| {
-            sample.map(|sample| asteria_sef_light::GnssSample {
-                measurement: VerticalGnssMeasurement {
-                    height_m: sample.pvt.height_msl_m,
-                    velocity_mps: -sample.pvt.velocity_down_mps,
-                    height_std_m: (sample.pvt.vertical_accuracy_mm as f32 / 1_000.0)
-                        .max(GNSS_MIN_STD),
-                    velocity_std_mps: sample.pvt.speed_accuracy_mps.max(GNSS_MIN_STD),
-                },
-                // SEF-light's convention: 3 is a usable 3D fix; it ignores tiers below.
-                fix_tier: match sample.pvt.fix_type {
-                    _ if !sample.pvt.fix_ok => 0,
-                    ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
-                    ublox::GpsFix::Fix2D => 2,
-                    _ => 0,
-                },
-                pdop_centi: sample.pvt.pdop_centi,
-            })
-        });
-        if let Some(updates) = self.estimator.update_gnss(epoch.ts.as_micros(), samples)? {
+        if let Some(updates) = self.estimator.update_gnss(sample.ts.as_micros(), samples)? {
             for (ready, update) in self.msl_ready.iter_mut().zip(updates) {
                 *ready |= update.height.accepted;
             }

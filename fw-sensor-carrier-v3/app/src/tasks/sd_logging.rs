@@ -229,6 +229,7 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
         .subscriber()
         .expect("SD: subscriber slot");
     let mut dropped = [0u64; RECORD_KINDS];
+    let mut longest_write = Duration::from_ticks(0);
     let mut last_flush = Instant::now();
     loop {
         let next = select6(
@@ -255,9 +256,11 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
                         warn!("SD: {} row exceeded buffer", log.name);
                         continue;
                     };
+                    let started = Instant::now();
                     log.append(row.as_bytes()).await.map_err(|e| {
                         warn!("SD: {} write failed: {}", log.name, Debug2Format(&e))
                     })?;
+                    longest_write = longest_write.max(started.elapsed());
                 }
                 Err(lost) => dropped[kind] += lost,
             }
@@ -280,17 +283,29 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
         }
 
         let mut rows = [0u32; FILE_COUNT];
+        let started = Instant::now();
         for (log, rows) in logs.iter_mut().zip(&mut rows) {
             *rows = log
                 .flush()
                 .await
                 .map_err(|e| warn!("SD: {} flush failed: {}", log.name, Debug2Format(&e)))?;
         }
+        longest_write = longest_write.max(started.elapsed());
+        // Readings arriving during a card operation wait in the channels, so
+        // this must stay well below the time those channels can hold.
         info!(
-            "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, DHT={}, dropped={}",
-            rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], dropped,
+            "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, DHT={}, dropped={}, longest card write={} ms",
+            rows[0],
+            rows[1],
+            rows[2],
+            rows[3],
+            rows[4],
+            rows[5],
+            dropped,
+            longest_write.as_millis(),
         );
         dropped = [0; RECORD_KINDS];
+        longest_write = Duration::from_ticks(0);
         last_flush = Instant::now();
     }
 }
