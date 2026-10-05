@@ -22,12 +22,16 @@ import sdlog
 
 # Units and axes as in the firmware's calibration/<kind>.rs.
 GYRO_DPS_PER_LSB = 0.07
+ACCEL_G_PER_LSB = 1 / 4096
 MAG_NT_PER_LSB = 150.0
 IMU_HZ = 833.0
 # A one-second window counts as still if no axis varies more than this.
 STILL_WINDOW_S = 1.0
 STILL_MAX_SPREAD_DPS = 0.5
 MIN_STILL_S = 5.0
+# Plausible accelerometer correction; anything beyond means a bad fit.
+MAX_ACCEL_OFFSET_G = 0.2
+ACCEL_SCALE_RANGE = (0.9, 1.1)
 # Plausible Earth-field magnitude, as in the firmware.
 MIN_FIELD_NT = 22_000.0
 MAX_FIELD_NT = 67_000.0
@@ -43,6 +47,11 @@ def imu_board_dps(imu) -> np.ndarray:
     return imu[["gx_raw", "gy_raw", "gz_raw"]].to_numpy() * [-1, 1, -1] * GYRO_DPS_PER_LSB
 
 
+def imu_board_g(imu) -> np.ndarray:
+    """LSM6DSO32 sensor-to-board remap, as for the gyro."""
+    return imu[["ax_raw", "ay_raw", "az_raw"]].to_numpy() * [-1, 1, -1] * ACCEL_G_PER_LSB
+
+
 def mag_board_counts(mag) -> np.ndarray:
     """LSM303AGR sensor-to-board remap: negate all axes."""
     return -mag[["x_raw", "y_raw", "z_raw"]].to_numpy()
@@ -55,6 +64,20 @@ class GyroFit:
     rate_dps: np.ndarray
     still: np.ndarray
     bias_dps: np.ndarray | None
+
+
+@dataclass
+class AccelFit:
+    sensor: str
+    # Mean acceleration of each still window, in board axes and g.
+    rest_g: np.ndarray
+    offset_g: np.ndarray | None = None
+    scale: np.ndarray | None = None
+    error_percent: float = 0.0
+
+    def corrected(self) -> np.ndarray:
+        """`(board − offset) · scale` per axis, in g."""
+        return (self.rest_g - self.offset_g) * self.scale
 
 
 @dataclass
@@ -104,6 +127,34 @@ def fit_gyro(log, imu: int) -> GyroFit:
     return GyroFit(f"IMU_{imu}", t, rate, still, bias)
 
 
+def fit_accel(log, imu: int) -> AccelFit:
+    samples = log.sensor("imu", imu)
+    t, accel = samples.t.to_numpy(), imu_board_g(samples)
+    still = auto_still(t, imu_board_dps(samples))
+    window = np.floor(t / STILL_WINDOW_S)
+    rest = np.array([accel[still & (window == w)].mean(axis=0) for w in np.unique(window[still])]).reshape(-1, 3)
+    fit = AccelFit(f"IMU_{imu}", rest)
+    # Every axis must have pointed both up and down, or its offset and scale
+    # are not determined.
+    if len(rest) == 0 or np.any(rest.max(axis=0) < 0.5) or np.any(rest.min(axis=0) > -0.5):
+        return fit
+    # Axis-aligned ellipsoid a·x² + b·y² + c·z² + 2d·x + 2e·y + 2f·z = 1.
+    coefficients = np.linalg.lstsq(np.column_stack([rest**2, 2 * rest]), np.ones(len(rest)), rcond=None)[0]
+    squares, linear = coefficients[:3], coefficients[3:]
+    if np.any(squares <= 0):
+        return fit
+    offset = -linear / squares
+    radius = np.sqrt((1 + np.sum(squares * offset**2)) / squares)
+    scale = 1 / radius
+    if np.linalg.norm(offset) > MAX_ACCEL_OFFSET_G or np.any(
+        (scale < ACCEL_SCALE_RANGE[0]) | (scale > ACCEL_SCALE_RANGE[1])
+    ):
+        return fit
+    fit.offset_g, fit.scale = offset, scale
+    fit.error_percent = float(np.sqrt(np.mean((np.linalg.norm(fit.corrected(), axis=1) - 1) ** 2)) * 100)
+    return fit
+
+
 def fit_mag(log, mag: int) -> MagFit:
     samples = log.sensor("mag", mag)
     t, board = samples.t.to_numpy(), mag_board_counts(samples).astype(float)
@@ -140,11 +191,11 @@ def floats(values, digits: int) -> str:
     return ",".join(f"{v:.{digits}f}" for v in np.ravel(values))
 
 
-def print_lines(name: str, gyros, mags, estimates) -> None:
+def print_lines(name: str, gyros, accels, mags, estimates) -> None:
     latencies = {"IMU_0": 0.0} | {e.name: e.latency_s for e in estimates if e.observable}
     latency_us = {sensor: round(s * 1e6) for sensor, s in latencies.items()}
     print("Paste into the console, then `reset` and `cal show`:")
-    for fit in gyros:
+    for fit, accel in zip(gyros, accels):
         us = latency_us.get(fit.sensor)
         if fit.bias_dps is None:
             print(f"# {fit.sensor}: only {fit.still.sum() / IMU_HZ:.1f} s still, need {MIN_STILL_S:.0f} s; no line")
@@ -155,7 +206,18 @@ def print_lines(name: str, gyros, mags, estimates) -> None:
                 print(
                     f"# {fit.sensor}: WARNING IMU timestamps disagree by {us / 1000:.1f} ms; check the readout before using this"
                 )
-            print(f"cal set {fit.sensor} name={name} latency_us={us} gyro_bias_dps={floats(fit.bias_dps, 4)}")
+            if accel.offset_g is None:
+                print(f"# {fit.sensor}: accelerometer not fitted (rest it on all six sides); identity")
+                offset, scale = np.zeros(3), np.ones(3)
+            else:
+                print(
+                    f"# {fit.sensor}: accelerometer error {accel.error_percent:.2f} % over {len(accel.rest_g)} still s"
+                )
+                offset, scale = accel.offset_g, accel.scale
+            print(
+                f"cal set {fit.sensor} name={name} latency_us={us} gyro_bias_dps={floats(fit.bias_dps, 4)}"
+                f" accel_offset_g={floats(offset, 4)} accel_scale={floats(scale, 5)}"
+            )
     for fit in mags:
         us = latency_us.get(fit.sensor)
         if fit.hard_iron is None:
@@ -178,7 +240,7 @@ def print_lines(name: str, gyros, mags, estimates) -> None:
             print(f"# {sensor}: latency not observable; no line")
 
 
-def plot(gyros, mags, estimates) -> None:
+def plot(gyros, accels, mags, estimates) -> None:
     _, axes = plt.subplots(len(gyros), 1, sharex=True, num="Gyro while still")
     for ax, fit in zip(axes, gyros):
         t, rate = fit.t[fit.still], fit.rate_dps[fit.still]
@@ -196,6 +258,15 @@ def plot(gyros, mags, estimates) -> None:
         )
         ax.legend()
     axes[-1].set_xlabel("time (s)")
+
+    _, axes = plt.subplots(len(accels), 1, num="Accelerometer at rest")
+    for ax, fit in zip(axes, accels):
+        ax.plot(np.linalg.norm(fit.rest_g, axis=1), ".", label="uncorrected")
+        if fit.offset_g is not None:
+            ax.plot(np.linalg.norm(fit.corrected(), axis=1), ".", label="corrected")
+        ax.axhline(1.0, color="gray")
+        ax.set(title=f"{fit.sensor} |a| per still second, line at 1 g", xlabel="still second", ylabel="|a| (g)")
+        ax.legend()
 
     _, axes = plt.subplots(len(mags), 1, sharex=True, num="Magnetometer field magnitude")
     for ax, fit in zip(axes, mags):
@@ -242,10 +313,11 @@ def main() -> None:
     log.crop(args.start, args.end)
     estimates = latency.fit_all(log)
     gyros = [fit_gyro(log, i) for i in range(2)]
+    accels = [fit_accel(log, i) for i in range(2)]
     mags = [fit_mag(log, i) for i in range(2)]
-    print_lines(log.dir.name, gyros, mags, estimates)
+    print_lines(log.dir.name, gyros, accels, mags, estimates)
     if args.plot:
-        plot(gyros, mags, estimates)
+        plot(gyros, accels, mags, estimates)
 
 
 if __name__ == "__main__":
