@@ -45,7 +45,7 @@ pub struct Scenario {
     body_rate: fn(f64) -> [f64; 3],
 }
 
-pub const SCENARIOS: [Scenario; 9] = [
+pub const SCENARIOS: [Scenario; 10] = [
     Scenario {
         name: "still",
         description: "board lying on a table",
@@ -115,6 +115,27 @@ pub const SCENARIOS: [Scenario; 9] = [
                 0.05 * (TAU * 0.7 * t).sin(),
                 0.05 * (TAU * 0.5 * t).sin(),
                 0.2 * (TAU * t / 20.0).sin(),
+            ]
+        },
+    },
+    // Idealized drone motion; motor magnetic fields and prop wash are not modeled.
+    Scenario {
+        name: "drone",
+        description: "15 s still, takeoff to 8 m, yaw sweeps and ±2 m climbs, then landing",
+        duration_s: 120.0,
+        gnss_fix: true,
+        up_accel: |t, _| {
+            8.0 * smooth_ramp_kinematics(t, 15.0, 8.0).2
+                + windowed_height_accel(2.0, 0.2, t, 40.0, 90.0, 5.0)
+                - 8.0 * smooth_ramp_kinematics(t, 100.0, 10.0).2
+        },
+        body_rate: |t| {
+            let yaw = smooth_window(t, 25.0, 40.0, 1.0) + smooth_window(t, 50.0, 90.0, 1.0);
+            let maneuver = smooth_window(t, 40.0, 90.0, 1.0);
+            [
+                maneuver * 0.12 * (TAU * 0.3 * t).sin(),
+                maneuver * 0.10 * (TAU * 0.4 * t).sin(),
+                yaw * 0.8 * (TAU * 0.25 * t).sin(),
             ]
         },
     },
@@ -514,5 +535,17 @@ mod tests {
         let truth = Truth::new(flight);
         assert!(truth.height.iter().all(|&height| height >= 0.0));
         assert!(*truth.height.last().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn drone_returns_to_start_height() {
+        let drone = SCENARIOS
+            .iter()
+            .find(|scenario| scenario.name == "drone")
+            .unwrap();
+        let truth = Truth::new(drone);
+        assert!(truth.height.iter().all(|&height| height > -0.01));
+        assert!(truth.height.iter().all(|&height| height < 12.1));
+        assert!(truth.height.last().unwrap().abs() < 0.05);
     }
 }
