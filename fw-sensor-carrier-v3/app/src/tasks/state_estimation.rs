@@ -44,6 +44,9 @@ const MAX_AIDING_DELAY_US: u64 = 400_000;
 const BARO_HEIGHT_STD_M: f32 = 1.5;
 // Smallest GNSS standard deviation passed on, for receivers reporting zero.
 const GNSS_MIN_STD: f32 = 0.1;
+// GNSS height errors persist for a minute or more, so 20 Hz epochs are not
+// independent: at rest the height spread 9 m while the receiver reported 3 m.
+const GNSS_HEIGHT_STD_SCALE: f32 = 10.0;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
@@ -316,7 +319,9 @@ impl Processor {
             measurement: VerticalGnssMeasurement {
                 height_m: sample.pvt.height_msl_m,
                 velocity_mps: -sample.pvt.velocity_down_mps,
-                height_std_m: (sample.pvt.vertical_accuracy_mm as f32 / 1_000.0).max(GNSS_MIN_STD),
+                height_std_m: (sample.pvt.vertical_accuracy_mm as f32 / 1_000.0
+                    * GNSS_HEIGHT_STD_SCALE)
+                    .max(GNSS_MIN_STD),
                 velocity_std_mps: sample.pvt.speed_accuracy_mps.max(GNSS_MIN_STD),
             },
             // SEF-light's convention: 3 is a usable 3D fix; it ignores tiers below.
