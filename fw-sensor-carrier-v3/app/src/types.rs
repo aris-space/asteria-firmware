@@ -152,7 +152,6 @@ pub struct SefLogSample {
     pub selected: bool,
     pub msl_ready: bool,
     pub redundancy_ready: bool,
-    pub selected_gnss: Option<GnssId>,
     pub height_msl_m: f32,
     pub velocity_mps: f32,
     pub barometer_bias_m: [f32; 2],

@@ -24,15 +24,6 @@ pub struct PressureMeasurement {
     pub height_std_m: f32,
 }
 
-/// Absolute-height reference for one barometer's additive pressure-altitude bias.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BarometerBiasMeasurement {
-    /// Barometric pressure altitude minus reference MSL height, in metres.
-    pub bias_m: f32,
-    /// Standard deviation of that difference in metres.
-    pub std_m: f32,
-}
-
 /// Result of attempting to fuse one scalar measurement.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeasurementUpdate {
@@ -337,27 +328,6 @@ impl VerticalFilter {
             measurement.height_m - predicted_height_m,
             &measurement_jacobian,
             square(measurement.height_std_m),
-            None,
-        ))
-    }
-
-    /// Fits one barometer bias to an absolute-height reference without directly changing height
-    /// or vertical velocity. A later pressure update applies the corrected bias to height.
-    pub fn update_barometer_bias(
-        &mut self,
-        barometer: BarometerId,
-        measurement: BarometerBiasMeasurement,
-    ) -> Result<MeasurementUpdate, EstimatorError> {
-        validate_finite(&[measurement.bias_m])?;
-        validate_positive(&[measurement.std_m])?;
-        let bias_index = idx::BIAS_0 + barometer.index();
-        let mut jacobian = Vector4::zeros();
-        jacobian[bias_index] = 1.0;
-        Ok(self.update_scalar(
-            measurement.bias_m - self.state[bias_index],
-            &jacobian,
-            square(measurement.std_m),
-            Some(bias_index),
         ))
     }
 
@@ -380,7 +350,6 @@ impl VerticalFilter {
             measurement.height_m - prediction[0],
             &height_jacobian,
             square(measurement.height_std_m),
-            None,
         );
 
         let prediction = generated::gnss_model(&self.state, None);
@@ -389,7 +358,6 @@ impl VerticalFilter {
             measurement.velocity_mps - prediction[1],
             &velocity_jacobian,
             square(measurement.velocity_std_mps),
-            None,
         );
         Ok(VerticalGnssUpdate { height, velocity })
     }
@@ -399,7 +367,6 @@ impl VerticalFilter {
         innovation: f32,
         measurement_jacobian: &Vector4,
         measurement_noise_variance: f32,
-        only_state: Option<usize>,
     ) -> MeasurementUpdate {
         let covariance_times_jacobian = self.covariance * measurement_jacobian;
         let innovation_variance =
@@ -407,14 +374,7 @@ impl VerticalFilter {
         let normalized_innovation_squared = square(innovation) / innovation_variance;
         let accepted = normalized_innovation_squared <= self.measurement_gate_squared;
         if accepted {
-            let mut kalman_gain = covariance_times_jacobian / innovation_variance;
-            if let Some(index) = only_state {
-                for row in 0..idx::SIZE {
-                    if row != index {
-                        kalman_gain[row] = 0.0;
-                    }
-                }
-            }
+            let kalman_gain = covariance_times_jacobian / innovation_variance;
             self.state += kalman_gain * innovation;
             let joseph_correction =
                 Matrix4::identity() - kalman_gain * measurement_jacobian.transpose();

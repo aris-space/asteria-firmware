@@ -23,9 +23,8 @@ pub use asteria_estimator_selector::{
 pub use dual::{DualVerticalEstimator, VerticalDisagreement, VerticalEstimatorSelectorConfig};
 pub use error::EstimatorError;
 pub use filter::{
-    BarometerBiasMeasurement, MeasurementUpdate, PressureMeasurement, VerticalFilter,
-    VerticalFilterConfig, VerticalGnssMeasurement, VerticalGnssUpdate, VerticalState,
-    VerticalUncertainty,
+    MeasurementUpdate, PressureMeasurement, VerticalFilter, VerticalFilterConfig,
+    VerticalGnssMeasurement, VerticalGnssUpdate, VerticalState, VerticalUncertainty,
 };
 pub use imu::{
     ImuAttitudeConfig, ImuAttitudeFlags, ImuAttitudeStatus, ImuMeasurement, ImuVerticalizer,

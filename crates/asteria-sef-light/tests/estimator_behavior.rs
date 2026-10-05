@@ -1,9 +1,8 @@
 use asteria_sef_light::{
-    BARO_BUS_1, BarometerBiasMeasurement, DualVerticalEstimator, EstimatorError, GnssSample,
-    GnssSelectorConfig, IMU_0, IMU_1, ImuAttitudeConfig, ImuMeasurement, ImuVerticalizer,
-    PressureMeasurement, SelectorConfig, VerticalEstimatorSelectorConfig, VerticalFilter,
-    VerticalFilterConfig, VerticalGnssMeasurement, VerticalGnssUpdate, VerticalState,
-    VerticalUncertainty,
+    BARO_BUS_1, DualVerticalEstimator, EstimatorError, GnssSample, GnssSelectorConfig, IMU_0,
+    IMU_1, ImuAttitudeConfig, ImuMeasurement, ImuVerticalizer, PressureMeasurement, SelectorConfig,
+    VerticalEstimatorSelectorConfig, VerticalFilter, VerticalFilterConfig, VerticalGnssMeasurement,
+    VerticalGnssUpdate, VerticalState, VerticalUncertainty,
 };
 
 const STATIONARY_IMU: ImuMeasurement = ImuMeasurement {
@@ -189,133 +188,6 @@ fn pressure_updates_only_the_selected_barometer_bias() {
     let state = filter.state();
     assert!(state.barometer_bias_m[0] > 5.0);
     assert!(state.barometer_bias_m[1].abs() < f32::EPSILON);
-}
-
-#[test]
-fn gnss_bias_reference_changes_height_only_after_pressure_update() {
-    let config =
-        VerticalFilterConfig::new(0.2, 2.0, [0.01, 0.01], 1_000.0, 3.0, [200.0, 200.0], 6.0)
-            .unwrap();
-    let mut filter = VerticalFilter::new(config);
-    let before = filter.state();
-    let update = filter
-        .update_barometer_bias(
-            BARO_BUS_1,
-            BarometerBiasMeasurement {
-                bias_m: -20.0,
-                std_m: 1.0,
-            },
-        )
-        .unwrap();
-    assert!(update.accepted);
-    assert_eq!(filter.state().height_m, before.height_m);
-    assert_eq!(filter.state().velocity_mps, before.velocity_mps);
-    assert!(filter.state().barometer_bias_m[0] < -15.0);
-    assert_eq!(filter.state().barometer_bias_m[1], 0.0);
-
-    filter
-        .update_pressure(BARO_BUS_1, pressure_at_height(100.0))
-        .unwrap();
-    assert!(filter.state().height_m > 100.0);
-}
-
-#[test]
-fn delayed_gnss_bias_reference_matches_chronological_fusion() {
-    let mut chronological = estimator::<64>(200_000).unwrap();
-    let mut delayed = estimator::<64>(200_000).unwrap();
-    let reference = [
-        Some(BarometerBiasMeasurement {
-            bias_m: -20.0,
-            std_m: 1.0,
-        }),
-        None,
-    ];
-    for step in 0..=10 {
-        let time_us = step * 10_000;
-        update_both(&mut chronological, time_us);
-        update_both(&mut delayed, time_us);
-        if time_us == 50_000 {
-            chronological
-                .update_barometer_biases(time_us, reference)
-                .unwrap();
-        }
-        if time_us == 70_000 {
-            for estimator in [&mut chronological, &mut delayed] {
-                estimator
-                    .update_pressure(time_us, BARO_BUS_1, pressure_at_height(100.0))
-                    .unwrap();
-            }
-        }
-    }
-    delayed.update_barometer_biases(50_000, reference).unwrap();
-    for imu in [IMU_0, IMU_1] {
-        assert_state_close(chronological.state(imu), delayed.state(imu));
-        assert_uncertainty_close(chronological.uncertainty(imu), delayed.uncertainty(imu));
-    }
-}
-
-#[test]
-fn stationary_barometer_limits_slow_gnss_height_wander() {
-    let config = VerticalFilterConfig::new(
-        10.0,
-        20.0,
-        [0.005, 0.005],
-        1_000.0,
-        3.0,
-        [200.0, 200.0],
-        5.0,
-    )
-    .unwrap();
-    let mut filter = VerticalFilter::new(config);
-    filter
-        .update_barometer_bias(
-            BARO_BUS_1,
-            BarometerBiasMeasurement {
-                bias_m: 316.0 - 440.0,
-                std_m: 3.0,
-            },
-        )
-        .unwrap();
-    filter
-        .update_pressure(
-            BARO_BUS_1,
-            PressureMeasurement {
-                height_m: 316.0,
-                height_std_m: 1.5,
-            },
-        )
-        .unwrap();
-    let initial_height = filter.state().height_m;
-
-    for step in 1..=3_600 {
-        filter.predict(0.0, 0.05).unwrap();
-        filter
-            .update_pressure(
-                BARO_BUS_1,
-                PressureMeasurement {
-                    height_m: 316.0,
-                    height_std_m: 1.5,
-                },
-            )
-            .unwrap();
-        let gnss_height_m = 440.0 + 10.0 * step as f32 / 3_600.0;
-        if filter.uncertainty().barometer_bias_variance_m2[0] > 1.5 * 1.5 {
-            filter
-                .update_barometer_bias(
-                    BARO_BUS_1,
-                    BarometerBiasMeasurement {
-                        bias_m: 316.0 - gnss_height_m,
-                        std_m: 13.5,
-                    },
-                )
-                .unwrap();
-        }
-    }
-    assert!(
-        (filter.state().height_m - initial_height).abs() < 3.0,
-        "stationary height moved from {initial_height} to {}",
-        filter.state().height_m
-    );
 }
 
 #[test]
