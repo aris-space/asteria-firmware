@@ -20,3 +20,5 @@ target = "thumbv7em-none-eabihf" # Cortex-M7F (with single and double-precision 
 # every TX times out and the idle bus emits Bus(Stuff) RX errors at high rate.
 # Drop the `,fw_sensor_carrier_v3::tasks::can=off` suffix to re-enable them.
 DEFMT_LOG = "info,fw_sensor_carrier_v3::tasks::can=off"
+# Room for bursts such as the boot messages before the probe catches up.
+DEFMT_RTT_BUFFER_SIZE = "16384"
