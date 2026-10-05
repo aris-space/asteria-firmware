@@ -8,12 +8,17 @@ use heapless::String;
 
 use super::Class;
 
+/// Full-speed USB bulk packet size.
+pub const PACKET_SIZE: usize = 64;
+// Longest formatted message; longer output is cut off.
+const MESSAGE_LEN: usize = 512;
+
 /// `embedded-io-async` adapter over the CDC class so noline can read and write.
 /// CDC reads come a USB packet at a time, so a one-packet buffer hands bytes out
 /// in whatever chunk sizes the caller asks for; writes go out a packet at a time.
 pub struct ConsoleIo<'a> {
     class: &'a mut Class,
-    rx: [u8; 64],
+    rx: [u8; PACKET_SIZE],
     rx_pos: usize,
     rx_len: usize,
 }
@@ -22,7 +27,7 @@ impl<'a> ConsoleIo<'a> {
     pub fn new(class: &'a mut Class) -> Self {
         Self {
             class,
-            rx: [0; 64],
+            rx: [0; PACKET_SIZE],
             rx_pos: 0,
             rx_len: 0,
         }
@@ -63,7 +68,7 @@ impl Read for ConsoleIo<'_> {
 
 impl Write for ConsoleIo<'_> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, IoError> {
-        let n = buf.len().min(64);
+        let n = buf.len().min(PACKET_SIZE);
         self.class
             .write_packet(&buf[..n])
             .await
@@ -88,7 +93,7 @@ pub async fn say(io: &mut ConsoleIo<'_>, msg: &str) {
 
 /// [`say`] for a formatted message.
 pub async fn sayf(io: &mut ConsoleIo<'_>, args: fmt::Arguments<'_>) {
-    let mut msg: String<512> = String::new();
+    let mut msg: String<MESSAGE_LEN> = String::new();
     let _ = msg.write_fmt(args);
     say(io, &msg).await;
 }

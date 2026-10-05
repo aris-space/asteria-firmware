@@ -13,6 +13,8 @@ pub mod tx;
 
 pub const THIS_BOARD_ID: hermes_can::messages::BoardId =
     hermes_can::messages::BoardId::SensorCarrier;
+// The largest CAN FD payload.
+const MAX_FD_PAYLOAD: usize = 64;
 
 #[derive(Debug, thiserror::Error, defmt::Format)]
 pub enum CanError {
@@ -41,7 +43,7 @@ pub trait CanReceiver {
 
 impl CanTransmitter for CanTx<'_> {
     async fn transmit<M: CanMessage>(&mut self, msg: M) -> Result<(), CanError> {
-        let mut buf = [0u8; 64];
+        let mut buf = [0u8; MAX_FD_PAYLOAD];
         let (id, len) = msg.try_write_into(&mut buf)?;
         let dlc = next_valid_length(len).ok_or(CanError::Other)?;
         let payload = &buf[..dlc];
