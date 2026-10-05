@@ -31,13 +31,20 @@ use heapless::String;
 use noline::builder::EditorBuilder;
 use static_cell::StaticCell;
 
-use self::io::{ConsoleIo, say, sayf};
+use self::io::{ConsoleIo, PACKET_SIZE, say, sayf};
 use crate::resources::usb::UsbDriver;
 use crate::signals;
 use crate::storage::Storage;
 use crate::types::Mark;
 
 type Class = CdcAcmClass<'static, UsbDriver>;
+
+const DESCRIPTOR_LEN: usize = 256;
+// Endpoint 0's packet size.
+const CONTROL_BUF_LEN: usize = 64;
+// Fits the longest `cal set` line, the magnetometer's.
+const LINE_LEN: usize = 256;
+const HISTORY_LEN: usize = 256;
 
 const PROMPT: &str = "asteria> ";
 const HELP: &str = r"commands:
@@ -55,10 +62,10 @@ const HELP: &str = r"commands:
 /// Build the USB device + CDC class from static buffers and spawn the device
 /// and console tasks.
 pub fn spawn(driver: UsbDriver, storage: &'static Storage, spawner: Spawner) {
-    static CONFIG_DESC: StaticCell<[u8; 256]> = StaticCell::new();
-    static BOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
+    static CONFIG_DESC: StaticCell<[u8; DESCRIPTOR_LEN]> = StaticCell::new();
+    static BOS_DESC: StaticCell<[u8; DESCRIPTOR_LEN]> = StaticCell::new();
     static MSOS_DESC: StaticCell<[u8; 0]> = StaticCell::new();
-    static CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+    static CONTROL_BUF: StaticCell<[u8; CONTROL_BUF_LEN]> = StaticCell::new();
     static STATE: StaticCell<State> = StaticCell::new();
 
     let mut config = embassy_usb::Config::new(0xc0de, 0xca10);
@@ -69,12 +76,12 @@ pub fn spawn(driver: UsbDriver, storage: &'static Storage, spawner: Spawner) {
     let mut builder = Builder::new(
         driver,
         config,
-        CONFIG_DESC.init([0; 256]),
-        BOS_DESC.init([0; 256]),
+        CONFIG_DESC.init([0; DESCRIPTOR_LEN]),
+        BOS_DESC.init([0; DESCRIPTOR_LEN]),
         MSOS_DESC.init([]),
-        CONTROL_BUF.init([0; 64]),
+        CONTROL_BUF.init([0; CONTROL_BUF_LEN]),
     );
-    let class = CdcAcmClass::new(&mut builder, STATE.init(State::new()), 64);
+    let class = CdcAcmClass::new(&mut builder, STATE.init(State::new()), PACKET_SIZE as u16);
     let usb = builder.build();
 
     spawner.spawn(usb_device_task(usb).expect("spawn usb device task"));
@@ -88,9 +95,8 @@ async fn usb_device_task(mut device: UsbDevice<'static, UsbDriver>) -> ! {
 
 #[embassy_executor::task]
 async fn console_task(mut class: Class, storage: &'static Storage) -> ! {
-    // Fits the longest `cal set` line, the magnetometer's.
-    let mut line_buf = [0u8; 256];
-    let mut history = [0u8; 256];
+    let mut line_buf = [0u8; LINE_LEN];
+    let mut history = [0u8; HISTORY_LEN];
     loop {
         class.wait_connection().await;
         let mut io = ConsoleIo::new(&mut class);
@@ -142,11 +148,14 @@ async fn mark(io: &mut ConsoleIo<'_>, args: &mut SplitAsciiWhitespace<'_>) {
             });
         }
         None => {
-            say(
+            sayf(
                 io,
-                paint!(
-                    red,
-                    "usage: mark <label> (one word, up to 16 characters, no commas)\n"
+                format_args!(
+                    paint!(
+                        red,
+                        "usage: mark <label> (one word, up to {} characters, no commas)\n"
+                    ),
+                    Mark::LABEL_LEN
                 ),
             )
             .await

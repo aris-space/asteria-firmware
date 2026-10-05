@@ -150,7 +150,11 @@ pub struct Pvt {
 #[derive(Clone, Debug)]
 pub struct Mark {
     pub ts: Instant,
-    pub label: heapless::String<16>,
+    pub label: heapless::String<{ Mark::LABEL_LEN }>,
+}
+
+impl Mark {
+    pub const LABEL_LEN: usize = 16;
 }
 
 /// Selected SEF-light state, including MSL height and body-to-NED attitude.

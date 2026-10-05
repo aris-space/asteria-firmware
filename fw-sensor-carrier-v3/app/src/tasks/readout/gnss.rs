@@ -18,6 +18,12 @@ use crate::types::{GnssSample, Pvt, RawGnssSample, Reading};
 
 // The receivers send NAV-PVT every 50 ms; a two-second gap means the link is silent.
 const LINK_SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
+// Reads while waiting for the link only check that bytes arrive.
+const PROBE_LEN: usize = 64;
+const RECV_LEN: usize = 4096;
+const UART_RING_LEN: usize = 4096;
+// Holds the largest UBX frame being assembled.
+const PARSE_LEN: usize = 4096;
 
 struct Inactive<'a, RX> {
     rx: RX,
@@ -33,7 +39,7 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
         debug!("{}: initializing", self.id);
 
         let mut consecutive_errors: u8 = 0;
-        let mut recv_buf = [0u8; 64];
+        let mut recv_buf = [0u8; PROBE_LEN];
         let mut link_active = false;
 
         loop {
@@ -119,7 +125,7 @@ impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
     type Next = Inactive<'a, RX>;
 
     async fn run(mut self) -> Inactive<'a, RX> {
-        let mut recv_buf = [0u8; 4096];
+        let mut recv_buf = [0u8; RECV_LEN];
         let mut errors: u8 = 0;
 
         loop {
@@ -204,8 +210,8 @@ fn has_fix(pvt: &Pvt) -> bool {
 
 #[embassy_executor::task(pool_size = 2)]
 pub async fn task(rx: UartRx<'static, Async>, id: GnssId) -> ! {
-    let mut uart_ring_buf = [0u8; 4096];
-    let mut parse_buf = [0u8; 4096];
+    let mut uart_ring_buf = [0u8; UART_RING_LEN];
+    let mut parse_buf = [0u8; PARSE_LEN];
     let inactive = Inactive {
         rx: rx.into_ring_buffered(&mut uart_ring_buf),
         parser: Parser::new(ublox::FixedLinearBuffer::new(&mut parse_buf)),

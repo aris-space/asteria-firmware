@@ -10,7 +10,7 @@ use hermes_can::messages::debug_info::BuildInformationCommon;
 include!(concat!(env!("OUT_DIR"), "/built.rs"));
 
 pub fn can_build_information() -> BuildInformationCommon {
-    let mut commit_hash = [0; 7];
+    let mut commit_hash = [0; _];
     if let Some(hash) = GIT_COMMIT_HASH_SHORT {
         let len = hash.len().min(commit_hash.len());
         commit_hash[..len].copy_from_slice(&hash.as_bytes()[..len]);

@@ -6,7 +6,8 @@ use super::Usb;
 
 pub type UsbDriver = Driver<'static, peripherals::USB_OTG_HS>;
 
-static EP_OUT_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
+const EP_OUT_BUFFER_LEN: usize = 256;
+static EP_OUT_BUFFER: StaticCell<[u8; EP_OUT_BUFFER_LEN]> = StaticCell::new();
 
 impl Usb {
     pub fn setup(self) -> UsbDriver {
@@ -14,7 +15,7 @@ impl Usb {
             OTG_HS => usb::InterruptHandler<peripherals::USB_OTG_HS>;
         });
 
-        let ep_out_buffer = EP_OUT_BUFFER.init([0u8; 256]);
+        let ep_out_buffer = EP_OUT_BUFFER.init([0u8; EP_OUT_BUFFER_LEN]);
         let mut config = usb::Config::default();
         // Bus-powered; vbus_detection requires the pin wired, which this board
         // doesn't, so leave it off.
