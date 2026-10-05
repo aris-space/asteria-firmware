@@ -146,6 +146,13 @@ pub struct Pvt {
     pub speed_accuracy_mps: f32,
 }
 
+/// A console `mark <label>`, logged to label part of an SD session.
+#[derive(Clone, Debug)]
+pub struct Mark {
+    pub ts: Instant,
+    pub label: heapless::String<16>,
+}
+
 /// Selected SEF-light state, including MSL height and body-to-NED attitude.
 #[derive(Clone, Copy, Debug)]
 pub struct StateEstimate {

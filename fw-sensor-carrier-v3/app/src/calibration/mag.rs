@@ -3,74 +3,68 @@
 
 use core::fmt;
 
-use defmt::{Debug2Format, info, warn};
-use embassy_time::{Duration, Instant, with_deadline};
-use magcal::{Solver, SolverTier};
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use super::{Calibrations, Name};
-use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MAG_COUNT, MagId};
-use crate::signals::MAG_CHANNEL;
-use crate::storage::Storage;
+use super::{Calibrations, Floats, parse_floats};
+use crate::sensors::{MAG_COUNT, MagId};
 use crate::types::{MagSample, RawMagSample};
 
-// The LSM303AGR reports 150 nT per count; the solver fits in native counts and
-// results scale back to nT.
+// The LSM303AGR reports 150 nT per count.
 const LSB_TO_NT: f32 = 150.0;
+// Plausible Earth-field magnitude band; samples outside it are not fused.
+const MIN_VALID_NT: f32 = 22_000.0;
+const MAX_VALID_NT: f32 = 67_000.0;
 
-/// Sensor-to-board axis remap on this board: negate all three axes, in the
-/// magnetometer's native counts (so the cal solver fits at full resolution).
+/// Sensor-to-board axis remap on this board: negate all three axes.
 fn sensor_to_board(counts: [i16; 3]) -> [i16; 3] {
     counts.map(i16::saturating_neg)
 }
 
 /// Hard- and soft-iron correction, applied as `soft_iron * (board - hard_iron)`
-/// in nT, with the fit that produced it. The soft-iron matrix also absorbs any
-/// residual mounting rotation.
+/// in nT. The soft-iron matrix also absorbs any residual mounting rotation.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Correction {
-    field_nt: f32,
-    fit_error_pc: f32,
-    samples: u16,
-    hard_iron: [f32; 3],
+    hard_iron_nt: [f32; 3],
     soft_iron: [f32; 9],
 }
 
 impl super::Correction for Correction {
     const DEFAULT: Self = Self {
-        field_nt: 0.0,
-        fit_error_pc: 0.0,
-        samples: 0,
-        hard_iron: [0.0, 0.0, 0.0],
+        hard_iron_nt: [0.0; 3],
         soft_iron: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
     };
-}
+    const FIELDS: &'static [&'static str] = &["hard_nt", "soft"];
 
-impl Correction {
-    fn from_fit(cal: &magcal::MagCal, samples: usize) -> Self {
-        let s = cal.soft_iron;
-        Self {
-            field_nt: cal.field_strength * LSB_TO_NT,
-            fit_error_pc: cal.fit_error_percent,
-            samples: samples.min(u16::MAX as usize) as u16,
-            hard_iron: cal.hard_iron.map(|h| h * LSB_TO_NT),
-            soft_iron: [
-                s[0][0], s[0][1], s[0][2], s[1][0], s[1][1], s[1][2], s[2][0], s[2][1], s[2][2],
-            ],
+    fn set(&mut self, key: &str, value: &str) -> bool {
+        match key {
+            "hard_nt" => parse_floats(value).map(|v| self.hard_iron_nt = v).is_some(),
+            "soft" => parse_floats(value).map(|v| self.soft_iron = v).is_some(),
+            _ => false,
         }
     }
 
+    fn is_valid(&self) -> bool {
+        self.hard_iron_nt
+            .iter()
+            .chain(&self.soft_iron)
+            .all(|v| v.is_finite())
+    }
+}
+
+impl Correction {
+    /// Whether this is a measured correction rather than the identity default.
     pub fn is_calibrated(&self) -> bool {
         *self != <Self as super::Correction>::DEFAULT
     }
 
+    /// Accept only calibrated samples with a plausible Earth-field magnitude.
     pub fn accepts_field(&self, field_nt: f32) -> bool {
         self.is_calibrated() && (MIN_VALID_NT..=MAX_VALID_NT).contains(&field_nt)
     }
 
     fn correct_board_field(&self, board: Vector3<f32>) -> Vector3<f32> {
-        let hard_iron = Vector3::from(self.hard_iron);
+        let hard_iron = Vector3::from(self.hard_iron_nt);
         let soft_iron = Matrix3::from_row_slice(&self.soft_iron);
         soft_iron * (board - hard_iron)
     }
@@ -78,31 +72,11 @@ impl Correction {
 
 impl fmt::Display for Correction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let h = self.hard_iron;
-        let s = self.soft_iron;
-        writeln!(
-            f,
-            "  field {:.1} uT  error {:.2} %  ({} samples)",
-            self.field_nt / 1000.0,
-            self.fit_error_pc,
-            self.samples,
-        )?;
-        writeln!(f, "  axis  hard uT   {:^27}", "soft-iron")?;
         write!(
             f,
-            "   x   [{:6.1} ]  [{:8.3}{:8.3}{:8.3} ]\n   y   [{:6.1} ]  [{:8.3}{:8.3}{:8.3} ]\n   z   [{:6.1} ]  [{:8.3}{:8.3}{:8.3} ]",
-            h[0] / 1000.0,
-            s[0],
-            s[1],
-            s[2],
-            h[1] / 1000.0,
-            s[3],
-            s[4],
-            s[5],
-            h[2] / 1000.0,
-            s[6],
-            s[7],
-            s[8],
+            " hard_nt={} soft={}",
+            Floats(&self.hard_iron_nt),
+            Floats(&self.soft_iron)
         )
     }
 }
@@ -119,162 +93,5 @@ pub fn apply_calibration(raw: RawMagSample) -> MagSample {
         x: corrected.x,
         y: corrected.y,
         z: corrected.z,
-    }
-}
-
-const TICK: Duration = Duration::from_secs(3);
-pub const PROGRESS_TICKS: usize = 10;
-// Plausible Earth-field magnitude band; fits outside it are discarded.
-const MIN_VALID_NT: f32 = 22_000.0;
-const MAX_VALID_NT: f32 = 67_000.0;
-
-const _: () = assert!(
-    MAG_COUNT == 2,
-    "MagCal is written for exactly two magnetometers"
-);
-
-pub struct MagCal {
-    solvers: [Solver; MAG_COUNT],
-}
-
-impl Default for MagCal {
-    fn default() -> Self {
-        Self {
-            solvers: [Solver::new(), Solver::new()],
-        }
-    }
-}
-
-impl MagCal {
-    pub async fn collect_tick(&mut self) {
-        let mut samples = MAG_CHANNEL
-            .subscriber()
-            .expect("mag calibration subscriber slot must be free");
-        let deadline = Instant::now() + TICK;
-        while let Ok(reading) = with_deadline(deadline, samples.next_message_pure()).await {
-            let raw = reading.raw;
-            self.solvers[raw.src.index()].push_sample(sensor_to_board([raw.x, raw.y, raw.z]));
-        }
-    }
-
-    pub fn counts(&self) -> [usize; MAG_COUNT] {
-        [
-            self.solvers[0].sample_count(),
-            self.solvers[1].sample_count(),
-        ]
-    }
-
-    pub async fn finish(self, name: &str, storage: &Storage) -> [CalReport; MAG_COUNT] {
-        let [mut s0, mut s1] = self.solvers;
-        [
-            Self::finish_one(&mut s0, MAG_BUS_1, name, storage).await,
-            Self::finish_one(&mut s1, MAG_BUS_2, name, storage).await,
-        ]
-    }
-
-    async fn finish_one(
-        solver: &mut Solver,
-        id: MagId,
-        name: &str,
-        storage: &Storage,
-    ) -> CalReport {
-        let samples = solver.sample_count();
-        let cal = match solver.solve() {
-            Ok(cal) => cal,
-            Err(_) => {
-                warn!("{}: fit failed, too few samples ({})", id, samples);
-                return CalReport {
-                    id,
-                    samples,
-                    outcome: CalOutcome::TooFewSamples,
-                };
-            }
-        };
-
-        let field_nt = cal.field_strength * LSB_TO_NT;
-        info!(
-            "{}: fit {} B={=f32} nT err={=f32} %",
-            id,
-            Debug2Format(&cal.tier),
-            field_nt,
-            cal.fit_error_percent
-        );
-
-        if !(MIN_VALID_NT..=MAX_VALID_NT).contains(&field_nt) {
-            warn!("{}: implausible field {=f32} nT, discarding", id, field_nt);
-            return CalReport {
-                id,
-                samples,
-                outcome: CalOutcome::ImplausibleField {
-                    tier: cal.tier,
-                    field_nt,
-                },
-            };
-        }
-
-        let correction = Correction::from_fit(&cal, samples);
-        let fit = Fit {
-            tier: cal.tier,
-            correction,
-        };
-        let outcome = if CAL
-            .store_correction(storage, id, Name::new(name), correction)
-            .await
-        {
-            CalOutcome::Stored(fit)
-        } else {
-            CalOutcome::StoreFailed(fit)
-        };
-        CalReport {
-            id,
-            samples,
-            outcome,
-        }
-    }
-}
-
-struct Fit {
-    tier: SolverTier,
-    correction: Correction,
-}
-
-pub struct CalReport {
-    id: MagId,
-    samples: usize,
-    outcome: CalOutcome,
-}
-
-enum CalOutcome {
-    Stored(Fit),
-    StoreFailed(Fit),
-    ImplausibleField { tier: SolverTier, field_nt: f32 },
-    TooFewSamples,
-}
-
-impl CalReport {
-    pub fn stored(&self) -> bool {
-        matches!(self.outcome, CalOutcome::Stored(_))
-    }
-}
-
-impl fmt::Display for CalReport {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = self.id.name();
-        match &self.outcome {
-            CalOutcome::Stored(fit) | CalOutcome::StoreFailed(fit) => {
-                let status = if self.stored() {
-                    "stored"
-                } else {
-                    "FLASH WRITE FAILED"
-                };
-                write!(f, "{name}  ({:?}) -> {status}{}", fit.tier, fit.correction,)
-            }
-            CalOutcome::ImplausibleField { tier, field_nt } => write!(
-                f,
-                "{name}: {tier:?} fit, {} samples -> implausible field {field_nt} nT, discarded",
-                self.samples
-            ),
-            CalOutcome::TooFewSamples => write!(f, "{name}: too few samples ({})", self.samples),
-        }
     }
 }

@@ -33,7 +33,7 @@ use heapless::{String, Vec};
 use crate::resources::sd::Sd;
 use crate::signals;
 use crate::types::{
-    BaroReading, DhtReading, GnssReading, ImuReading, MagReading, Reading, SefLogSample,
+    BaroReading, DhtReading, GnssReading, ImuReading, MagReading, Mark, Reading, SefLogSample,
 };
 
 struct CsvFile {
@@ -70,8 +70,12 @@ const FILES: [CsvFile; FILE_COUNT] = [
         header: "read_us,raw_us,cal_us,dht,temperature_c,humidity_rh\n",
     },
     CsvFile {
+        name: "MARKS.CSV",
+        header: "uptime_us,label\n",
+    },
+    CsvFile {
         name: "DROPS.CSV",
-        header: "uptime_us,state,imu,mag,gnss,baro,dht\n",
+        header: "uptime_us,state,imu,mag,gnss,baro,dht,mark\n",
     },
 ];
 const BUFFER_SIZE: usize = 4096;
@@ -228,11 +232,14 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
     let mut dht = signals::DHT_CHANNEL
         .subscriber()
         .expect("SD: subscriber slot");
+    let mut mark = signals::MARK_CHANNEL
+        .subscriber()
+        .expect("SD: subscriber slot");
     let mut dropped = [0u64; RECORD_KINDS];
     let mut longest_write = Duration::from_ticks(0);
     let mut last_flush = Instant::now();
     loop {
-        let next = select6(
+        let sensors = select6(
             state.next_message(),
             imu.next_message(),
             mag.next_message(),
@@ -240,14 +247,16 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
             baro.next_message(),
             dht.next_message(),
         );
+        let next = select(sensors, mark.next_message());
         if let Either::First(next) = select(next, Timer::at(last_flush + FLUSH_PERIOD)).await {
             let (kind, received) = match next {
-                Either6::First(message) => (0, received(message, Record::State)),
-                Either6::Second(message) => (1, received(message, Record::Imu)),
-                Either6::Third(message) => (2, received(message, Record::Mag)),
-                Either6::Fourth(message) => (3, received(message, Record::Gnss)),
-                Either6::Fifth(message) => (4, received(message, Record::Baro)),
-                Either6::Sixth(message) => (5, received(message, Record::Dht)),
+                Either::First(Either6::First(message)) => (0, received(message, Record::State)),
+                Either::First(Either6::Second(message)) => (1, received(message, Record::Imu)),
+                Either::First(Either6::Third(message)) => (2, received(message, Record::Mag)),
+                Either::First(Either6::Fourth(message)) => (3, received(message, Record::Gnss)),
+                Either::First(Either6::Fifth(message)) => (4, received(message, Record::Baro)),
+                Either::First(Either6::Sixth(message)) => (5, received(message, Record::Dht)),
+                Either::Second(message) => (6, received(message, Record::Mark)),
             };
             match received {
                 Ok(record) => {
@@ -318,9 +327,10 @@ enum Record {
     Gnss(GnssReading),
     Baro(BaroReading),
     Dht(DhtReading),
+    Mark(Mark),
 }
 
-const RECORD_KINDS: usize = 6;
+const RECORD_KINDS: usize = 7;
 
 fn received<T: Clone>(message: WaitResult<T>, record: fn(T) -> Record) -> Result<Record, u64> {
     match message {
@@ -412,6 +422,7 @@ fn format_record(record: &Record) -> Result<Row, core::fmt::Error> {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
             writeln!(row, ",{:.2},{:.2}", cal.temperature_c, cal.humidity_rh)?;
         }
+        Record::Mark(mark) => writeln!(row, "{},{}", mark.ts.as_micros(), mark.label)?,
     }
     Ok(row)
 }

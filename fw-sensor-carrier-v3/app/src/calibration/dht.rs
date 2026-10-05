@@ -13,6 +13,11 @@ pub struct Correction;
 
 impl super::Correction for Correction {
     const DEFAULT: Self = Self;
+    const FIELDS: &'static [&'static str] = &[];
+
+    fn set(&mut self, _: &str, _: &str) -> bool {
+        false
+    }
 }
 
 impl fmt::Display for Correction {
