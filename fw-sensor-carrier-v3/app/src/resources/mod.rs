@@ -26,16 +26,12 @@ assign_resources! {
     gps1_uart: Gps1Uart {
         periph: UART8,
         rx: PE0,
-        tx: PE1,
         rx_dma: DMA1_CH0,
-        tx_dma: DMA1_CH1,
     }
     gps2_uart: Gps2Uart {
         periph: UART7,
         rx: PE7,
-        tx: PE8,
         rx_dma: DMA1_CH2,
-        tx_dma: DMA1_CH3,
     }
     imu1: Imu1 {
         periph: SPI1,
