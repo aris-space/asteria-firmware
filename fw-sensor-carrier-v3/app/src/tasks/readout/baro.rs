@@ -11,7 +11,7 @@ use crate::calibration;
 use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{BARO_STATUS, BaroId};
 use crate::signals;
-use crate::types::{RawBaroSample, SdLogRecord};
+use crate::types::{RawBaroSample, Reading};
 
 const SAMPLE_HZ: u32 = 40;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
@@ -114,8 +114,7 @@ impl Active {
             temperature_c: m.temperature_c,
         };
         let cal = calibration::baro::apply_calibration(raw);
-        signals::submit_baro_sample(cal);
-        signals::submit_sd_log(SdLogRecord::Baro { raw, cal });
+        signals::submit_baro(Reading { raw, cal });
         Ok(())
     }
 }

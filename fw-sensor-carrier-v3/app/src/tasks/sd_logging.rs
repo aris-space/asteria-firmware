@@ -16,14 +16,14 @@
 //! once.
 
 use core::fmt::Write as _;
-use core::sync::atomic::Ordering;
 
 use block_device_adapters::BufStream;
 use defmt::{Debug2Format, info, warn};
-use embassy_futures::select::{Either, select};
+use embassy_futures::select::{Either, Either6, select, select6};
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::sdmmc::sd::{Addressable, CmdBlock, StorageDevice};
 use embassy_stm32::time::mhz;
+use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_fatfs::{Error as FatError, FileSystem, FsOptions};
 use embedded_io_async::Write;
@@ -31,17 +31,19 @@ use embedded_partitions::mbr::Mbr;
 use heapless::{String, Vec};
 
 use crate::resources::sd::Sd;
-use crate::signals::{SD_LOG_CHANNEL, SD_LOG_DROPPED};
-use crate::types::SdLogRecord;
+use crate::signals;
+use crate::types::{
+    BaroReading, DhtReading, GnssReading, ImuReading, MagReading, Reading, SefLogSample,
+};
 
 struct CsvFile {
     name: &'static str,
     header: &'static str,
 }
 
-const FILE_COUNT: usize = SdLogRecord::KIND_COUNT + 1;
-const DROP_FILE: usize = SdLogRecord::KIND_COUNT;
-// Indexed by `SdLogRecord::kind`, followed by the drop counters.
+const FILE_COUNT: usize = RECORD_KINDS + 1;
+const DROP_FILE: usize = RECORD_KINDS;
+// One file per `Record` kind, in its order, followed by the drop counters.
 const FILES: [CsvFile; FILE_COUNT] = [
     CsvFile {
         name: "STATE.CSV",
@@ -209,29 +211,63 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
     }
     info!("SD: logging to {}", dir_name.as_str());
 
+    let mut state = signals::STATE_CHANNEL
+        .subscriber()
+        .expect("SD: subscriber slot");
+    let mut imu = signals::IMU_CHANNEL
+        .subscriber()
+        .expect("SD: subscriber slot");
+    let mut mag = signals::MAG_CHANNEL
+        .subscriber()
+        .expect("SD: subscriber slot");
+    let mut gnss = signals::GNSS_CHANNEL
+        .subscriber()
+        .expect("SD: subscriber slot");
+    let mut baro = signals::BARO_CHANNEL
+        .subscriber()
+        .expect("SD: subscriber slot");
+    let mut dht = signals::DHT_CHANNEL
+        .subscriber()
+        .expect("SD: subscriber slot");
+    // Readings lost while the writer was busy with the card, per record kind.
+    let mut dropped = [0u64; RECORD_KINDS];
     let mut last_flush = Instant::now();
     loop {
-        if let Either::First(record) = select(
-            SD_LOG_CHANNEL.receive(),
-            Timer::at(last_flush + FLUSH_PERIOD),
-        )
-        .await
-        {
-            let log = &mut logs[record.kind()];
-            let Ok(row) = format_record(&record) else {
-                warn!("SD: {} row exceeded buffer", log.name);
-                continue;
+        let next = select6(
+            state.next_message(),
+            imu.next_message(),
+            mag.next_message(),
+            gnss.next_message(),
+            baro.next_message(),
+            dht.next_message(),
+        );
+        if let Either::First(next) = select(next, Timer::at(last_flush + FLUSH_PERIOD)).await {
+            let (kind, received) = match next {
+                Either6::First(message) => (0, received(message, Record::State)),
+                Either6::Second(message) => (1, received(message, Record::Imu)),
+                Either6::Third(message) => (2, received(message, Record::Mag)),
+                Either6::Fourth(message) => (3, received(message, Record::Gnss)),
+                Either6::Fifth(message) => (4, received(message, Record::Baro)),
+                Either6::Sixth(message) => (5, received(message, Record::Dht)),
             };
-            log.append(row.as_bytes())
-                .await
-                .map_err(|e| warn!("SD: {} write failed: {}", log.name, Debug2Format(&e)))?;
+            match received {
+                Ok(record) => {
+                    let log = &mut logs[kind];
+                    let Ok(row) = format_record(&record) else {
+                        warn!("SD: {} row exceeded buffer", log.name);
+                        continue;
+                    };
+                    log.append(row.as_bytes()).await.map_err(|e| {
+                        warn!("SD: {} write failed: {}", log.name, Debug2Format(&e))
+                    })?;
+                }
+                Err(lost) => dropped[kind] += lost,
+            }
         }
         if Instant::now() < last_flush + FLUSH_PERIOD {
             continue;
         }
 
-        let dropped: [u32; SdLogRecord::KIND_COUNT] =
-            core::array::from_fn(|kind| SD_LOG_DROPPED[kind].swap(0, Ordering::Relaxed));
         if dropped.iter().any(|&count| count > 0) {
             let mut row = Row::new();
             write!(row, "{}", Instant::now().as_micros()).unwrap();
@@ -256,14 +292,34 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
             "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, DHT={}, dropped={}",
             rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], dropped,
         );
+        dropped = [0; RECORD_KINDS];
         last_flush = Instant::now();
     }
 }
 
-fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
+/// One row for the CSV file of the same index in [`FILES`].
+enum Record {
+    State(SefLogSample),
+    Imu(ImuReading),
+    Mag(MagReading),
+    Gnss(GnssReading),
+    Baro(BaroReading),
+    Dht(DhtReading),
+}
+
+const RECORD_KINDS: usize = 6;
+
+fn received<T: Clone>(message: WaitResult<T>, record: fn(T) -> Record) -> Result<Record, u64> {
+    match message {
+        WaitResult::Message(value) => Ok(record(value)),
+        WaitResult::Lagged(lost) => Err(lost),
+    }
+}
+
+fn format_record(record: &Record) -> Result<Row, core::fmt::Error> {
     let mut row = Row::new();
     match record {
-        SdLogRecord::State(s) => {
+        Record::State(s) => {
             let [qw, qx, qy, qz] = s.orientation_body_to_ned_wxyz;
             write!(
                 row,
@@ -288,7 +344,7 @@ fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
                 qz,
             )?;
         }
-        SdLogRecord::Imu { raw, cal } => {
+        Record::Imu(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
             write!(
                 row,
@@ -307,7 +363,7 @@ fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
                 cal.gyro.z,
             )?;
         }
-        SdLogRecord::Mag { raw, cal } => {
+        Record::Mag(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
             write!(
                 row,
@@ -315,7 +371,7 @@ fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
                 raw.x, raw.y, raw.z, cal.x, cal.y, cal.z,
             )?;
         }
-        SdLogRecord::Gnss { raw, cal } => {
+        Record::Gnss(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
             let p = cal.pvt;
             write!(
@@ -335,11 +391,11 @@ fn format_record(record: &SdLogRecord) -> Result<Row, core::fmt::Error> {
                 p.pdop_centi,
             )?;
         }
-        SdLogRecord::Baro { raw, cal } => {
+        Record::Baro(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
             write!(row, ",{:.3},{:.3}\n", cal.pressure_mbar, cal.temperature_c)?;
         }
-        SdLogRecord::Dht { raw, cal } => {
+        Record::Dht(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
             write!(row, ",{:.2},{:.2}\n", cal.temperature_c, cal.humidity_rh)?;
         }

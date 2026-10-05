@@ -52,25 +52,33 @@ pub static CAL: Calibrations<ImuId, Correction, IMU_COUNT> = Calibrations::new(I
 
 pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
     let cal = CAL.applied(raw.src);
-    let accel = Acceleration::from_raw(raw.accel, ACCEL_FULL_SCALE);
-    let gyro = AngularRate::from_raw(raw.gyro, GYRO_FULL_SCALE);
-    let [ax, ay, az] = sensor_to_board([accel.x, accel.y, accel.z]);
-    let [gx, gy, gz] = sensor_to_board([gyro.x, gyro.y, gyro.z]);
+    let (accel, gyro) = board_frame(raw);
     let bias = cal.correction.gyro_bias_dps;
     ImuSample {
         src: raw.src,
         ts: cal.sample_time(raw.ts),
         accel: Acceleration {
-            x: ax,
-            y: ay,
-            z: az,
+            x: accel[0],
+            y: accel[1],
+            z: accel[2],
         },
         gyro: AngularRate {
-            x: gx - bias[0],
-            y: gy - bias[1],
-            z: gz - bias[2],
+            x: gyro[0] - bias[0],
+            y: gyro[1] - bias[1],
+            z: gyro[2] - bias[2],
         },
     }
+}
+
+/// Acceleration in g and angular rate in deg/s, board frame, before the
+/// per-unit correction.
+fn board_frame(raw: RawImuSample) -> ([f32; 3], [f32; 3]) {
+    let accel = Acceleration::from_raw(raw.accel, ACCEL_FULL_SCALE);
+    let gyro = AngularRate::from_raw(raw.gyro, GYRO_FULL_SCALE);
+    (
+        sensor_to_board([accel.x, accel.y, accel.z]),
+        sensor_to_board([gyro.x, gyro.y, gyro.z]),
+    )
 }
 
 const CALIBRATION_TIME: Duration = Duration::from_secs(5);
@@ -89,8 +97,8 @@ impl ImuCal {
             .subscriber()
             .expect("IMU calibration subscriber slot must be free");
         let deadline = Instant::now() + CALIBRATION_TIME;
-        while let Ok(sample) = with_deadline(deadline, samples.next_message_pure()).await {
-            self.windows[sample.src.index()].record(sample);
+        while let Ok(reading) = with_deadline(deadline, samples.next_message_pure()).await {
+            self.windows[reading.raw.src.index()].record(reading.raw);
         }
     }
 
@@ -113,9 +121,7 @@ impl ImuCal {
         if valid {
             for report in &mut reports {
                 let summary = report.summary.expect("validated IMU summary");
-                let old = CAL.applied(report.id).correction.gyro_bias_dps;
-                let gyro_bias_dps =
-                    core::array::from_fn(|axis| old[axis] + summary.gyro_mean_dps[axis]);
+                let gyro_bias_dps = summary.gyro_mean_dps;
                 let correction = Correction {
                     gyro_bias_dps,
                     samples: summary.samples,
@@ -150,13 +156,12 @@ struct ImuWindowSummary {
 }
 
 impl ImuWindow {
-    fn record(&mut self, sample: ImuSample) {
-        let a = sample.accel;
-        let gravity_error = libm::sqrtf(a.x * a.x + a.y * a.y + a.z * a.z) - 1.0;
+    fn record(&mut self, raw: RawImuSample) {
+        let (accel, gyro) = board_frame(raw);
+        let gravity_error = libm::sqrtf(accel.iter().map(|a| a * a).sum()) - 1.0;
         self.samples += 1;
         self.gravity_error_sum += gravity_error;
         self.gravity_error_square_sum += gravity_error * gravity_error;
-        let gyro = [sample.gyro.x, sample.gyro.y, sample.gyro.z];
         for (sum, rate) in self.gyro_sum.iter_mut().zip(gyro) {
             *sum += rate;
             self.gyro_square_sum += rate * rate;

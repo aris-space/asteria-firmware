@@ -1,13 +1,26 @@
 #![allow(dead_code)]
 
-//! Per-sensor samples and the records derived from them. A sample is a
-//! measurement with its source and timestamp. Only readouts and the SD log see
-//! raw samples; everything downstream uses calibrated ones.
+//! Per-sensor samples and the estimator's output. A sample is a measurement
+//! with its source and timestamp.
 
 use embassy_time::Instant;
 use lsm6dso32::types::{Acceleration, AccelerationRaw, AngularRate, AngularRateRaw};
 
 use crate::sensors::{BaroId, DhtId, GnssId, ImuId, MagId};
+
+/// A sample before and after calibration. Readouts publish these, so each
+/// consumer can use whichever side it needs.
+#[derive(Clone, Copy, Debug)]
+pub struct Reading<R, C> {
+    pub raw: R,
+    pub cal: C,
+}
+
+pub type ImuReading = Reading<RawImuSample, ImuSample>;
+pub type MagReading = Reading<RawMagSample, MagSample>;
+pub type GnssReading = Reading<RawGnssSample, GnssSample>;
+pub type BaroReading = Reading<RawBaroSample, BaroSample>;
+pub type DhtReading = Reading<RawDhtSample, DhtSample>;
 
 // Every sensor has a raw sample, built by its readout, and a calibrated
 // sample, built by `crate::calibration::<kind>::apply_calibration`. A raw `ts`
@@ -165,32 +178,4 @@ pub struct SefLogSample {
     pub barometer_bias_std_m: [f32; 2],
     pub consistency_score: f32,
     pub orientation_body_to_ned_wxyz: [f32; 4],
-}
-
-/// One row of the SD card CSV logs. Sensor rows keep the sample before and
-/// after calibration, so latency and calibration can be refitted offline.
-#[derive(Clone, Copy, Debug)]
-pub enum SdLogRecord {
-    State(SefLogSample),
-    Imu { raw: RawImuSample, cal: ImuSample },
-    Mag { raw: RawMagSample, cal: MagSample },
-    Gnss { raw: RawGnssSample, cal: GnssSample },
-    Baro { raw: RawBaroSample, cal: BaroSample },
-    Dht { raw: RawDhtSample, cal: DhtSample },
-}
-
-impl SdLogRecord {
-    pub const KIND_COUNT: usize = 6;
-
-    /// Selects this record's CSV file and drop counter.
-    pub const fn kind(&self) -> usize {
-        match self {
-            Self::State(_) => 0,
-            Self::Imu { .. } => 1,
-            Self::Mag { .. } => 2,
-            Self::Gnss { .. } => 3,
-            Self::Baro { .. } => 4,
-            Self::Dht { .. } => 5,
-        }
-    }
 }

@@ -11,7 +11,7 @@ use crate::calibration;
 use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{MAG_STATUS, MagId};
 use crate::signals;
-use crate::types::{RawMagSample, SdLogRecord};
+use crate::types::{RawMagSample, Reading};
 
 const MAG_ODR: MagOutputDataRate = MagOutputDataRate::Hz10;
 const SAMPLE_HZ: u32 = match MAG_ODR {
@@ -142,9 +142,7 @@ impl Active {
             z,
         };
         let cal = calibration::mag::apply_calibration(raw);
-        signals::submit_raw_mag_sample(raw);
-        signals::submit_mag_sample(cal);
-        signals::submit_sd_log(SdLogRecord::Mag { raw, cal });
+        signals::submit_mag(Reading { raw, cal });
         Ok(())
     }
 }

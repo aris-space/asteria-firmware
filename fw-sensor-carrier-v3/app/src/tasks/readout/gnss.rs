@@ -1,6 +1,6 @@
-//! u-blox GNSS readout over UART. NAV-PVT epochs are logged to SD from the
-//! first packet; only fixes reach the estimator. `Inactive` already reports
-//! the UART link as active before the first fix.
+//! u-blox GNSS readout over UART. Every NAV-PVT epoch is published, with or
+//! without a fix. `Inactive` already reports the UART link as active before
+//! the first fix.
 
 use core::sync::atomic::Ordering;
 
@@ -14,7 +14,7 @@ use super::{MAX_CONSECUTIVE_ERRORS, State, backoff};
 use crate::calibration;
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
-use crate::types::{GnssSample, Pvt, RawGnssSample, SdLogRecord};
+use crate::types::{GnssSample, Pvt, RawGnssSample, Reading};
 
 // The receivers send NAV-PVT every 50 ms; a two-second gap means the link is silent.
 const LINK_SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -133,7 +133,6 @@ impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
                                 let sample = read_pvt(self.id, &pvt);
                                 if has_fix(&sample.pvt) {
                                     errors = 0;
-                                    signals::submit_gnss_sample(sample);
                                 }
                             }
                             Ok(_) => {}
@@ -173,7 +172,7 @@ impl<'a, RX> Active<'a, RX> {
     }
 }
 
-/// Logs a NAV-PVT epoch and returns it calibrated.
+/// Publishes a NAV-PVT epoch and returns it calibrated.
 fn read_pvt(id: GnssId, pvt: &ublox::NavPvtRef<'_>) -> GnssSample {
     let read_ts = Instant::now();
     let raw = RawGnssSample {
@@ -196,7 +195,7 @@ fn read_pvt(id: GnssId, pvt: &ublox::NavPvtRef<'_>) -> GnssSample {
         },
     };
     let cal = calibration::gnss::apply_calibration(raw);
-    signals::submit_sd_log(SdLogRecord::Gnss { raw, cal });
+    signals::submit_gnss(Reading { raw, cal });
     cal
 }
 

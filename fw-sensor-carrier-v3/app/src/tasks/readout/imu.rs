@@ -32,7 +32,7 @@ use crate::calibration;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{IMU_STATUS, ImuId};
 use crate::signals;
-use crate::types::{RawImuSample, SdLogRecord};
+use crate::types::{RawImuSample, Reading};
 
 /// Accelerometer output data rate. Keep both ODRs and BDRs at 833 Hz.
 const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
@@ -243,8 +243,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 },
             };
             let cal = calibration::imu::apply_calibration(raw);
-            signals::submit_imu_sample(cal);
-            signals::submit_sd_log(SdLogRecord::Imu { raw, cal });
+            signals::submit_imu(Reading { raw, cal });
         }
         Ok(())
     }

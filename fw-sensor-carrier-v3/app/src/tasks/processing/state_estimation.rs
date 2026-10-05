@@ -20,9 +20,7 @@ use crate::calibration;
 use crate::sensors::{GNSS_COUNT, IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
-use crate::types::{
-    BaroSample, GnssSample, ImuSample, MagSample, SdLogRecord, SefLogSample, StateEstimate,
-};
+use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, SefLogSample, StateEstimate};
 
 const HOLDBACK: Duration = Duration::from_millis(35);
 // Two IMUs at 833 Hz fill about 60 slots during the holdback.
@@ -75,10 +73,10 @@ pub async fn task() -> ! {
                 processor.handle(pending.swap_remove(index));
                 continue;
             }
-            Either::Second(Either4::First(sample)) => Event::Imu(sample),
-            Either::Second(Either4::Second(sample)) => Event::Mag(sample),
-            Either::Second(Either4::Third(sample)) => Event::Gnss(sample),
-            Either::Second(Either4::Fourth(sample)) => Event::Baro(sample),
+            Either::Second(Either4::First(reading)) => Event::Imu(reading.cal),
+            Either::Second(Either4::Second(reading)) => Event::Mag(reading.cal),
+            Either::Second(Either4::Third(reading)) => Event::Gnss(reading.cal),
+            Either::Second(Either4::Fourth(reading)) => Event::Baro(reading.cal),
         };
         if pending.push(event).is_err() {
             warn!("SEF: input buffer full, dropped a sample");
@@ -274,8 +272,9 @@ impl Processor {
                         .max(GNSS_MIN_STD),
                     velocity_std_mps: sample.pvt.speed_accuracy_mps.max(GNSS_MIN_STD),
                 },
-                // SEF-light's convention: 3 is a usable 3D fix.
+                // SEF-light's convention: 3 is a usable 3D fix; it ignores tiers below.
                 fix_tier: match sample.pvt.fix_type {
+                    _ if !sample.pvt.fix_ok => 0,
                     ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
                     ublox::GpsFix::Fix2D => 2,
                     _ => 0,
@@ -327,7 +326,7 @@ impl Processor {
         for (id, imu) in ImuId::ALL.into_iter().zip(asteria_sef_light::ImuId::ALL) {
             let state = self.estimator.state(imu);
             let uncertainty = self.estimator.uncertainty(imu);
-            signals::submit_sd_log(SdLogRecord::State(SefLogSample {
+            signals::submit_state(SefLogSample {
                 ts,
                 imu: id,
                 selected: imu.index() == selected,
@@ -341,7 +340,7 @@ impl Processor {
                 barometer_bias_std_m: uncertainty.barometer_bias_variance_m2.map(libm::sqrtf),
                 consistency_score: scores[imu.index()],
                 orientation_body_to_ned_wxyz: self.estimator.orientation_body_to_ned_wxyz(imu),
-            }));
+            });
         }
         self.last_output = Some(now);
     }
