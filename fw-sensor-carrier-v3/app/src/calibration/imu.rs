@@ -3,15 +3,14 @@
 use core::fmt;
 
 use asteria_sef_light::{ImuMeasurement, STANDARD_GRAVITY_MPS2};
-use embassy_futures::select::{Either, select};
-use embassy_time::{Duration, Instant, with_timeout};
+use embassy_time::{Duration, Instant, with_deadline};
 use lsm6dso32::{Acceleration, AngularRate};
 use serde::{Deserialize, Serialize};
 
 use super::{Calibrations, Name};
 use crate::sef::imu_measurement;
 use crate::sensors::{IMU_0, IMU_1, IMU_COUNT, ImuId};
-use crate::signals::IMU_CHANNELS;
+use crate::signals::IMU_CHANNEL;
 use crate::storage::Storage;
 use crate::tasks::readout::imu::{ACCEL_FULL_SCALE, GYRO_FULL_SCALE};
 use crate::types::{ImuSample, RawImuSample};
@@ -90,30 +89,11 @@ pub struct ImuCal {
 
 impl ImuCal {
     pub async fn collect(&mut self) {
-        let mut imu_0 = IMU_CHANNELS[IMU_0.index()]
+        let mut samples = IMU_CHANNEL
             .subscriber()
-            .expect("second IMU subscriber unavailable");
-        let mut imu_1 = IMU_CHANNELS[IMU_1.index()]
-            .subscriber()
-            .expect("second IMU subscriber unavailable");
+            .expect("IMU calibration subscriber slot must be free");
         let deadline = Instant::now() + CALIBRATION_TIME;
-        while Instant::now() < deadline {
-            // Drain one sample per source before waiting, so FIFO bursts from
-            // either IMU cannot starve the other calibration window.
-            let first = imu_0.try_next_message_pure();
-            let second = imu_1.try_next_message_pure();
-            if first.is_some() || second.is_some() {
-                for sample in first.into_iter().chain(second) {
-                    self.record(sample);
-                }
-                continue;
-            }
-            let remaining = deadline - Instant::now();
-            let next = select(imu_0.next_message_pure(), imu_1.next_message_pure());
-            let sample = match with_timeout(remaining, next).await {
-                Ok(Either::First(sample)) | Ok(Either::Second(sample)) => sample,
-                Err(_) => break,
-            };
+        while let Ok(sample) = with_deadline(deadline, samples.next_message_pure()).await {
             self.record(sample);
         }
     }

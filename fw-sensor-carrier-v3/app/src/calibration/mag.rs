@@ -4,15 +4,14 @@
 use core::fmt;
 
 use defmt::{Debug2Format, info, warn};
-use embassy_futures::select::{Either, select};
-use embassy_time::{Duration, Instant, with_timeout};
+use embassy_time::{Duration, Instant, with_deadline};
 use magcal::{Solver, SolverTier};
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
 
 use super::{Calibrations, Name};
 use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MAG_COUNT, MagId};
-use crate::signals::RAW_MAG_CHANNELS;
+use crate::signals::RAW_MAG_CHANNEL;
 use crate::storage::Storage;
 use crate::types::{MagSample, RawMagSample};
 
@@ -152,25 +151,12 @@ impl Default for MagCal {
 
 impl MagCal {
     pub async fn collect_tick(&mut self) {
-        let mut sub_0 = RAW_MAG_CHANNELS[MAG_BUS_1.index()]
+        let mut samples = RAW_MAG_CHANNEL
             .subscriber()
-            .expect("too many subs on RAW_MAG_CHANNELS; increase SUBS");
-        let mut sub_1 = RAW_MAG_CHANNELS[MAG_BUS_2.index()]
-            .subscriber()
-            .expect("too many subs on RAW_MAG_CHANNELS; increase SUBS");
+            .expect("mag calibration subscriber slot must be free");
         let deadline = Instant::now() + TICK;
-        while Instant::now() < deadline {
-            let remaining = deadline - Instant::now();
-            let next = select(sub_0.next_message_pure(), sub_1.next_message_pure());
-            match with_timeout(remaining, next).await {
-                Ok(Either::First(s)) => {
-                    self.solvers[0].push_sample(sensor_to_board([s.x, s.y, s.z]))
-                }
-                Ok(Either::Second(s)) => {
-                    self.solvers[1].push_sample(sensor_to_board([s.x, s.y, s.z]))
-                }
-                Err(_) => break,
-            }
+        while let Ok(s) = with_deadline(deadline, samples.next_message_pure()).await {
+            self.solvers[s.src.index()].push_sample(sensor_to_board([s.x, s.y, s.z]));
         }
     }
 

@@ -1,7 +1,7 @@
 //! Inter-task signals.
 //!
-//! Per-sensor `PubSubChannel`s carry calibrated samples (one channel per
-//! sensor instance, indexed by the sensor's id). The global `Watch` carries
+//! One `PubSubChannel` per sensor kind carries the calibrated samples of every
+//! instance; each sample names its source in `src`. The global `Watch` carries
 //! the latest state estimate to CAN. A bounded queue carries full-rate samples
 //! to the SD task without waiting for card I/O in any producer.
 
@@ -11,38 +11,29 @@ use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 
-use crate::sensors::{BARO_COUNT, DHT_COUNT, GNSS_COUNT, IMU_COUNT, MAG_COUNT};
 use crate::types::{
     BaroSample, DhtSample, GnssSample, ImuSample, MagSample, RawMagSample, SdLogRecord,
     StateEstimate,
 };
 
-macro_rules! define_sample_channels {
-    ($channels:ident, $submit:ident: $T:ty, cap = $cap:expr, subs = $subs:expr, count = $count:expr) => {
-        pub static $channels: [PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, 1>; $count] =
-            [const { PubSubChannel::new() }; $count];
+macro_rules! define_sample_channel {
+    ($channel:ident, $submit:ident: $T:ty, cap = $cap:expr, subs = $subs:expr) => {
+        pub static $channel: PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, 1> =
+            PubSubChannel::new();
 
         pub fn $submit(sample: $T) {
-            $channels[sample.src.index()]
-                .immediate_publisher()
-                .publish_immediate(sample);
+            $channel.immediate_publisher().publish_immediate(sample);
         }
     };
 }
 
-define_sample_channels!(IMU_CHANNELS, submit_imu_sample:
-    ImuSample, cap = 256, subs = 2, count = IMU_COUNT);
-define_sample_channels!(MAG_CHANNELS, submit_mag_sample:
-    MagSample, cap = 16, subs = 1, count = MAG_COUNT);
+define_sample_channel!(IMU_CHANNEL, submit_imu_sample: ImuSample, cap = 512, subs = 2);
+define_sample_channel!(MAG_CHANNEL, submit_mag_sample: MagSample, cap = 32, subs = 1);
 // Raw magnetometer counts, for the calibration routine's fit.
-define_sample_channels!(RAW_MAG_CHANNELS, submit_raw_mag_sample:
-    RawMagSample, cap = 16, subs = 1, count = MAG_COUNT);
-define_sample_channels!(GNSS_CHANNELS, submit_gnss_sample:
-    GnssSample, cap = 8, subs = 1, count = GNSS_COUNT);
-define_sample_channels!(BARO_CHANNELS, submit_baro_sample:
-    BaroSample, cap = 16, subs = 1, count = BARO_COUNT);
-define_sample_channels!(DHT_CHANNELS, submit_dht_sample:
-    DhtSample, cap = 8, subs = 1, count = DHT_COUNT);
+define_sample_channel!(RAW_MAG_CHANNEL, submit_raw_mag_sample: RawMagSample, cap = 32, subs = 1);
+define_sample_channel!(GNSS_CHANNEL, submit_gnss_sample: GnssSample, cap = 16, subs = 1);
+define_sample_channel!(BARO_CHANNEL, submit_baro_sample: BaroSample, cap = 32, subs = 1);
+define_sample_channel!(DHT_CHANNEL, submit_dht_sample: DhtSample, cap = 16, subs = 1);
 
 pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 1> = Watch::new();
 

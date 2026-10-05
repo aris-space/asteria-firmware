@@ -6,20 +6,18 @@
 //! Each output tick publishes the selected chain to
 //! [`signals::STATE_ESTIMATE_WATCH`] and logs every chain to SD.
 
+use asteria_sef_light::{EstimatorError, PressureMeasurement};
+use defmt::{Debug2Format, warn};
+use embassy_futures::select::{Either, Either4, select, select4};
+use embassy_time::{Duration, Instant, Timer};
+use heapless::Vec;
+
+use crate::calibration;
 use crate::sef::{
     Estimator, GnssVerticalInput, barometric_pressure_altitude_m, gnss_measurement,
     imu_measurement, new_estimator,
 };
-use asteria_sef_light::{EstimatorError, PressureMeasurement};
-use defmt::{Debug2Format, warn};
-use embassy_futures::select::{Either, Either4, select, select_array, select4};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::pubsub::{DynSubscriber, PubSubChannel, WaitResult};
-use embassy_time::{Duration, Instant, Timer};
-use heapless::binary_heap::{BinaryHeap, Min};
-
-use crate::calibration;
-use crate::sensors::{BARO_COUNT, GNSS_COUNT, IMU_COUNT, ImuId, MAG_COUNT};
+use crate::sensors::{GNSS_COUNT, IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::types::{
@@ -38,79 +36,47 @@ const BARO_HEIGHT_STD_M: f32 = 1.5;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
-    let mut inputs = Inputs::subscribe();
+    let mut imu = signals::IMU_CHANNEL
+        .subscriber()
+        .expect("SEF: subscriber slot");
+    let mut mag = signals::MAG_CHANNEL
+        .subscriber()
+        .expect("SEF: subscriber slot");
+    let mut gnss = signals::GNSS_CHANNEL
+        .subscriber()
+        .expect("SEF: subscriber slot");
+    let mut baro = signals::BARO_CHANNEL
+        .subscriber()
+        .expect("SEF: subscriber slot");
     let mut processor = Processor::new().expect("SEF-light configuration must be valid");
-    let mut pending = BinaryHeap::<Event, Min, PENDING_CAPACITY>::new();
+    // Samples waiting out the holdback, in arrival order.
+    let mut pending = Vec::<Event, PENDING_CAPACITY>::new();
     loop {
-        while let Some(oldest) = pending.peek()
-            && Instant::now() >= oldest.ts() + HOLDBACK
-        {
-            let event = pending.pop().expect("peeked event");
-            processor.handle(event);
-        }
-        let due = pending
-            .peek()
-            .map_or(Instant::MAX, |oldest| oldest.ts() + HOLDBACK);
-        if let Either::First(event) = select(inputs.next(), Timer::at(due)).await
-            && pending.push(event).is_err()
-        {
-            warn!("SEF: input buffer full, dropped a sample");
-        }
-    }
-}
-
-fn subscribe<T: Clone, const CAP: usize, const SUBS: usize, const PUBS: usize>(
-    channel: &'static PubSubChannel<CriticalSectionRawMutex, T, CAP, SUBS, PUBS>,
-) -> DynSubscriber<'static, T> {
-    channel
-        .dyn_subscriber()
-        .expect("SEF: subscriber slot must be free")
-}
-
-fn to_event<T: Clone>(message: WaitResult<T>, event: fn(T) -> Event) -> WaitResult<Event> {
-    match message {
-        WaitResult::Message(sample) => WaitResult::Message(event(sample)),
-        WaitResult::Lagged(count) => WaitResult::Lagged(count),
-    }
-}
-
-/// The estimator's subscriptions to every calibrated sensor stream.
-struct Inputs {
-    imu: [DynSubscriber<'static, ImuSample>; IMU_COUNT],
-    mag: [DynSubscriber<'static, MagSample>; MAG_COUNT],
-    gnss: [DynSubscriber<'static, GnssSample>; GNSS_COUNT],
-    baro: [DynSubscriber<'static, BaroSample>; BARO_COUNT],
-}
-
-impl Inputs {
-    fn subscribe() -> Self {
-        Self {
-            imu: signals::IMU_CHANNELS.each_ref().map(subscribe),
-            mag: signals::MAG_CHANNELS.each_ref().map(subscribe),
-            gnss: signals::GNSS_CHANNELS.each_ref().map(subscribe),
-            baro: signals::BARO_CHANNELS.each_ref().map(subscribe),
-        }
-    }
-
-    /// Waits for the next sample from any stream.
-    async fn next(&mut self) -> Event {
-        loop {
-            let next = select4(
-                select_array(self.imu.each_mut().map(|s| s.next_message())),
-                select_array(self.mag.each_mut().map(|s| s.next_message())),
-                select_array(self.gnss.each_mut().map(|s| s.next_message())),
-                select_array(self.baro.each_mut().map(|s| s.next_message())),
-            );
-            let event = match next.await {
-                Either4::First((message, _)) => to_event(message, Event::Imu),
-                Either4::Second((message, _)) => to_event(message, Event::Mag),
-                Either4::Third((message, _)) => to_event(message, Event::Gnss),
-                Either4::Fourth((message, _)) => to_event(message, Event::Baro),
-            };
-            match event {
-                WaitResult::Message(event) => return event,
-                WaitResult::Lagged(count) => warn!("SEF: dropped {} samples", count),
+        let oldest = pending
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, event)| event.ts())
+            .map(|(index, event)| (index, event.ts() + HOLDBACK));
+        let due = oldest.map_or(Instant::MAX, |(_, due)| due);
+        let next = select4(
+            imu.next_message_pure(),
+            mag.next_message_pure(),
+            gnss.next_message_pure(),
+            baro.next_message_pure(),
+        );
+        let event = match select(Timer::at(due), next).await {
+            Either::First(()) => {
+                let (index, _) = oldest.expect("a sample is due");
+                processor.handle(pending.swap_remove(index));
+                continue;
             }
+            Either::Second(Either4::First(sample)) => Event::Imu(sample),
+            Either::Second(Either4::Second(sample)) => Event::Mag(sample),
+            Either::Second(Either4::Third(sample)) => Event::Gnss(sample),
+            Either::Second(Either4::Fourth(sample)) => Event::Baro(sample),
+        };
+        if pending.push(event).is_err() {
+            warn!("SEF: input buffer full, dropped a sample");
         }
     }
 }
@@ -122,27 +88,6 @@ enum Event {
     Mag(MagSample),
     Gnss(GnssSample),
 }
-
-// Pending events are ordered by timestamp only.
-impl Ord for Event {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.ts().cmp(&other.ts())
-    }
-}
-
-impl PartialOrd for Event {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for Event {
-    fn eq(&self, other: &Self) -> bool {
-        self.ts() == other.ts()
-    }
-}
-
-impl Eq for Event {}
 
 impl Event {
     fn ts(self) -> Instant {
