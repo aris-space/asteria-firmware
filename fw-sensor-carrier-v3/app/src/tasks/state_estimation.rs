@@ -101,18 +101,8 @@ impl Event {
     }
 }
 
-/// Both receivers' solutions for one GPS epoch. SEF-light selects or blends
-/// the receivers per epoch, so it must see them together.
-#[derive(Clone, Copy)]
-struct GnssEpoch {
-    itow_ms: u32,
-    ts: Instant,
-    samples: [Option<GnssSample>; GNSS_COUNT],
-}
-
 struct Processor {
     estimator: DualVerticalEstimator<HISTORY_CAPACITY>,
-    gnss_epoch: Option<GnssEpoch>,
     /// Per chain: a GNSS height update was accepted, so its height is MSL.
     msl_ready: [bool; IMU_COUNT],
     last_output: Option<Instant>,
@@ -163,7 +153,6 @@ impl Processor {
                 gnss,
                 MAX_AIDING_DELAY_US,
             )?,
-            gnss_epoch: None,
             msl_ready: [false; IMU_COUNT],
             last_output: None,
             last_warning: None,
@@ -229,50 +218,26 @@ impl Processor {
         self.publish();
     }
 
-    /// Collects each receiver's solution into its GPS epoch. An epoch is fused
-    /// once both receivers reported it, or when the next epoch starts.
+    /// Fuses one receiver's solution on its own, weighted by its reported accuracy.
     fn update_gnss(&mut self, sample: GnssSample) -> Result<(), EstimatorError> {
-        if let Some(epoch) = self.gnss_epoch
-            && epoch.itow_ms != sample.pvt.itow_ms
-        {
-            self.gnss_epoch = None;
-            self.fuse_gnss(epoch)?;
-        }
-        let epoch = self.gnss_epoch.get_or_insert(GnssEpoch {
-            itow_ms: sample.pvt.itow_ms,
-            ts: sample.ts,
-            samples: [None; GNSS_COUNT],
+        let mut samples = [None; GNSS_COUNT];
+        samples[sample.src.index()] = Some(asteria_sef_light::GnssSample {
+            measurement: VerticalGnssMeasurement {
+                height_m: sample.pvt.height_msl_m,
+                velocity_mps: -sample.pvt.velocity_down_mps,
+                height_std_m: (sample.pvt.vertical_accuracy_mm as f32 / 1_000.0).max(GNSS_MIN_STD),
+                velocity_std_mps: sample.pvt.speed_accuracy_mps.max(GNSS_MIN_STD),
+            },
+            // SEF-light's convention: 3 is a usable 3D fix; it ignores tiers below.
+            fix_tier: match sample.pvt.fix_type {
+                _ if !sample.pvt.fix_ok => 0,
+                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
+                ublox::GpsFix::Fix2D => 2,
+                _ => 0,
+            },
+            pdop_centi: sample.pvt.pdop_centi,
         });
-        epoch.samples[sample.src.index()] = Some(sample);
-        if epoch.samples.iter().all(Option::is_some) {
-            let epoch = *epoch;
-            self.gnss_epoch = None;
-            self.fuse_gnss(epoch)?;
-        }
-        Ok(())
-    }
-
-    fn fuse_gnss(&mut self, epoch: GnssEpoch) -> Result<(), EstimatorError> {
-        let samples = epoch.samples.map(|sample| {
-            sample.map(|sample| asteria_sef_light::GnssSample {
-                measurement: VerticalGnssMeasurement {
-                    height_m: sample.pvt.height_msl_m,
-                    velocity_mps: -sample.pvt.velocity_down_mps,
-                    height_std_m: (sample.pvt.vertical_accuracy_mm as f32 / 1_000.0)
-                        .max(GNSS_MIN_STD),
-                    velocity_std_mps: sample.pvt.speed_accuracy_mps.max(GNSS_MIN_STD),
-                },
-                // SEF-light's convention: 3 is a usable 3D fix; it ignores tiers below.
-                fix_tier: match sample.pvt.fix_type {
-                    _ if !sample.pvt.fix_ok => 0,
-                    ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
-                    ublox::GpsFix::Fix2D => 2,
-                    _ => 0,
-                },
-                pdop_centi: sample.pvt.pdop_centi,
-            })
-        });
-        if let Some(updates) = self.estimator.update_gnss(epoch.ts.as_micros(), samples)? {
+        if let Some(updates) = self.estimator.update_gnss(sample.ts.as_micros(), samples)? {
             for (ready, update) in self.msl_ready.iter_mut().zip(updates) {
                 *ready |= update.height.accepted;
             }
