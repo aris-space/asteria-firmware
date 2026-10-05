@@ -2,18 +2,19 @@
 
 use core::fmt;
 
+use asteria_sef_light::{ImuMeasurement, STANDARD_GRAVITY_MPS2};
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, with_timeout};
 use lsm6dso32::{Acceleration, AngularRate};
 use serde::{Deserialize, Serialize};
 
 use super::{Calibrations, Name};
+use crate::sef::imu_measurement;
 use crate::sensors::{IMU_0, IMU_1, IMU_COUNT, ImuId};
 use crate::signals::IMU_CHANNELS;
 use crate::storage::Storage;
 use crate::tasks::readout::imu::{ACCEL_FULL_SCALE, GYRO_FULL_SCALE};
 use crate::types::{ImuSample, RawImuSample};
-use fw_sensor_carrier_v3::sef::{ImuWindow, ImuWindowSummary, imu_measurement};
 
 /// Sensor-to-board axis remap for the LSM6DSO32 on this board: negate x and z.
 fn sensor_to_board([x, y, z]: [f32; 3]) -> [f32; 3] {
@@ -125,7 +126,7 @@ impl ImuCal {
     }
 
     pub fn counts(&self) -> [u32; IMU_COUNT] {
-        self.windows.each_ref().map(|window| window.samples())
+        self.windows.each_ref().map(|window| window.samples)
     }
 
     pub async fn finish(self, name: &str, storage: &Storage) -> [CalReport; IMU_COUNT] {
@@ -159,6 +160,70 @@ impl ImuCal {
             }
         }
         reports
+    }
+}
+
+/// Statistics over a stationary window. The mean angular rate is the gyro
+/// bias; the noise terms reject a window in which the board moved.
+#[derive(Clone, Copy, Default)]
+struct ImuWindow {
+    samples: u32,
+    gravity_error_sum: f32,
+    gravity_error_square_sum: f32,
+    gyro_sum: [f32; 3],
+    gyro_square_sum: f32,
+}
+
+#[derive(Clone, Copy)]
+struct ImuWindowSummary {
+    samples: u32,
+    gravity_error_noise_mps2: f32,
+    gyro_mean_rad_s: [f32; 3],
+    gyro_noise_rad_s: f32,
+}
+
+impl ImuWindow {
+    fn record(&mut self, measurement: ImuMeasurement) {
+        let acceleration = libm::sqrtf(
+            measurement
+                .acceleration_body_mps2
+                .iter()
+                .map(|value| value * value)
+                .sum(),
+        );
+        let gravity_error = acceleration - STANDARD_GRAVITY_MPS2;
+        self.samples += 1;
+        self.gravity_error_sum += gravity_error;
+        self.gravity_error_square_sum += gravity_error * gravity_error;
+        for (sum, rate) in self
+            .gyro_sum
+            .iter_mut()
+            .zip(measurement.angular_rate_body_rad_s)
+        {
+            *sum += rate;
+            self.gyro_square_sum += rate * rate;
+        }
+    }
+
+    fn summary(self) -> Option<ImuWindowSummary> {
+        if self.samples == 0 {
+            return None;
+        }
+        let count = self.samples as f32;
+        let gravity_error_mean = self.gravity_error_sum / count;
+        let gyro_mean = self.gyro_sum.map(|sum| sum / count);
+        let gyro_mean_square = gyro_mean.iter().map(|rate| rate * rate).sum::<f32>();
+        Some(ImuWindowSummary {
+            samples: self.samples,
+            gravity_error_noise_mps2: libm::sqrtf(
+                (self.gravity_error_square_sum / count - gravity_error_mean * gravity_error_mean)
+                    .max(0.0),
+            ),
+            gyro_mean_rad_s: gyro_mean,
+            gyro_noise_rad_s: libm::sqrtf(
+                (self.gyro_square_sum / count - gyro_mean_square).max(0.0),
+            ),
+        })
     }
 }
 
