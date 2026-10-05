@@ -142,5 +142,6 @@ pub async fn spawn_tasks(
     level_1_spawner.spawn(tasks::can::rx::task(can_rx).expect("Failed to spawn CAN RX task"));
     tasks::can::tx::spawn(can_tx, level_1_spawner);
 
+    thread_spawner.spawn(tasks::state_report::task().expect("Failed to spawn state report task"));
     tasks::console::spawn(board.usb, board.storage, thread_spawner);
 }
