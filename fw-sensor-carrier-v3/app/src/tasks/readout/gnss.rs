@@ -85,7 +85,6 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                 self.attempt = 0;
                 consecutive_errors = 0;
                 if let PacketRef::NavPvt(pvt) = packet {
-                    // NAV-PVT alone is enough to establish a usable link and fix.
                     let sample = read_pvt(self.id, &pvt);
                     if has_fix(&sample.pvt) {
                         fix = Some(sample.pvt.fix_type);

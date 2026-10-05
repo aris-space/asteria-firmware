@@ -32,8 +32,6 @@ const WARNING_PERIOD: Duration = Duration::from_secs(1);
 // covers barometers, GNSS, and interrupt scheduling jitter.
 const HISTORY_CAPACITY: usize = 768;
 const MAX_AIDING_DELAY_US: u64 = 400_000;
-// Both stationary barometers varied by about 0.3 m in the bench run; this
-// larger uncertainty allows for pressure changes and correlated samples.
 const BARO_HEIGHT_STD_M: f32 = 1.5;
 // Smallest GNSS standard deviation passed on, for receivers reporting zero.
 const GNSS_MIN_STD: f32 = 0.1;
@@ -123,11 +121,6 @@ struct Processor {
 
 impl Processor {
     fn new() -> Result<Self, EstimatorError> {
-        // At 833 Hz, per-sample acceleration uncertainty below a few m/s² makes the filter
-        // overconfident about velocity with the measured persistent 0.06 and 0.14 m/s² offsets.
-        // Keep enough process uncertainty for barometric and GNSS updates to correct that drift.
-        // GNSS establishes absolute MSL height; the bias states absorb local sea-level
-        // pressure and barometer offsets.
         let filter = VerticalFilterConfig::new(
             10.0,       // healthy acceleration noise, m/s² per sample
             20.0,       // degraded acceleration noise, m/s² per sample
@@ -144,9 +137,6 @@ impl Processor {
             300,  // rejected samples before acceleration recovery
         )?
         .with_magnetic_rejection(20.0)?;
-        // Healthy chains have similar stationary scores. The board log showed a
-        // 44-degree unaided heading difference at a marginal quality handover.
-        // Require a clearer, sustained advantage before changing the full state.
         let selection = SelectorConfig::new(
             0.0025,    // IMU score improvement required for a handover
             5_000_000, // required improvement duration and minimum time between handovers, µs

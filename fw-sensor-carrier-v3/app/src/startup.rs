@@ -90,13 +90,10 @@ pub async fn spawn_tasks(
         tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1).expect("Failed to spawn IMU 1 task"),
     );
 
-    // I2C sensors initialize one at a time before any read task runs; see `tasks::readout`.
     let mag1 = tasks::readout::mag::init(board.sensors.bus1, MAG_BUS_1).await;
     let baro1 = tasks::readout::baro::init(board.sensors.bus1, BARO_BUS_1).await;
     let mag2 = tasks::readout::mag::init(board.sensors.bus2, MAG_BUS_2).await;
     let baro2 = tasks::readout::baro::init(board.sensors.bus2, BARO_BUS_2).await;
-    // DHT initialization once made both barometers time out, so the DHTs go
-    // last; watch for baro timeouts when changing this.
     let dht1 = tasks::readout::dht::init(board.sensors.bus1, DHT_BUS_1).await;
     let dht2 = tasks::readout::dht::init(board.sensors.bus2, DHT_BUS_2).await;
 

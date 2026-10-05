@@ -1,8 +1,7 @@
 //! On-board W25Q01JV NOR flash on OCTOSPI1, over quad SPI. IO2 (/WP) and IO3
 //! (/HOLD) double as data lines; external pull-ups (R49/R50) keep them high during
-//! the single-line phases until Quad Enable is set. The OCTOSPI bring-up (quad
-//! init, QE, JEDEC probe) matches the validation crate; the addressed transfers
-//! use 4-byte-address opcodes because the part is 128 MiB and 24-bit addressing
+//! the single-line phases until Quad Enable is set. Addressed transfers use
+//! 4-byte-address opcodes because the part is 128 MiB and 24-bit addressing
 //! reaches only its bottom 16 MiB. Reads use Fast Read Quad Output (0x6C); program
 //! and erase stay single-line. The driver implements `embedded-storage-async` so
 //! `sequential-storage` can sit on top unchanged.

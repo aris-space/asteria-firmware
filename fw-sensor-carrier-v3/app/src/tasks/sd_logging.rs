@@ -170,7 +170,6 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
         .await
         .map_err(|e| warn!("SD: FAT mount failed: {}", Debug2Format(&e)))?;
 
-    // The first unused LOGnnnn name.
     let root = fs.root_dir();
     let mut dir_name = String::<8>::new();
     let mut found = false;
@@ -229,7 +228,6 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
     let mut dht = signals::DHT_CHANNEL
         .subscriber()
         .expect("SD: subscriber slot");
-    // Readings lost while the writer was busy with the card, per record kind.
     let mut dropped = [0u64; RECORD_KINDS];
     let mut last_flush = Instant::now();
     loop {

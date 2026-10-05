@@ -22,7 +22,6 @@ macro_rules! define_sensor_family {
         $vis struct $name(u8);
 
         impl $name {
-            /// Every id in this family, in index order.
             pub const ALL: [$name; $count_name] = [$($name($index)),+];
 
             pub const fn index(self) -> usize {

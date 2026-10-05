@@ -186,9 +186,9 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::Wait>
     Active<SPI, INT>
 {
-    /// Drains the FIFO and publishes one sample per accel+gyro pair. The
-    /// pairs are spread evenly between the previous read and this one; the
-    /// sensor's own FIFO timestamps were less accurate than this interpolation.
+    /// Drains the FIFO and publishes one sample per accel+gyro pair, spread
+    /// evenly between the previous read and this one. This is more accurate
+    /// than the sensor's own FIFO timestamps.
     async fn read_batch(
         &mut self,
         fifo_buf: &mut [FifoDataOut],
