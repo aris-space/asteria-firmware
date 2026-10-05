@@ -1,5 +1,8 @@
+//! Receive-only GNSS UARTs. Both receivers are configured ahead of time to
+//! send UBX NAV-PVT at 921600 baud, so the firmware never transmits to them.
+
 use embassy_stm32::mode::Async;
-use embassy_stm32::usart::{self, Uart};
+use embassy_stm32::usart::{self, UartRx};
 use embassy_stm32::{bind_interrupts, peripherals};
 
 use super::{Gps1Uart, Gps2Uart};
@@ -14,46 +17,23 @@ fn config() -> usart::Config {
 }
 
 impl Gps1Uart {
-    pub fn setup(self) -> Uart<'static, Async> {
-        let config = config();
+    pub fn setup(self) -> UartRx<'static, Async> {
         bind_interrupts!(struct Gps1Irqs {
             UART8 => usart::InterruptHandler<peripherals::UART8>;
             DMA1_STREAM0 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH0>;
-            DMA1_STREAM1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH1>;
         });
-
-        Uart::new(
-            self.periph,
-            self.rx,
-            self.tx,
-            self.tx_dma,
-            self.rx_dma,
-            Gps1Irqs,
-            config,
-        )
-        .expect("Failed to create GPS1 data UART")
+        UartRx::new(self.periph, self.rx, self.rx_dma, Gps1Irqs, config())
+            .expect("Failed to create GPS1 UART")
     }
 }
 
 impl Gps2Uart {
-    pub fn setup(self) -> Uart<'static, Async> {
-        let mut config = config();
-        config.baudrate = 38_400;
+    pub fn setup(self) -> UartRx<'static, Async> {
         bind_interrupts!(struct Gps2Irqs {
             UART7 => usart::InterruptHandler<peripherals::UART7>;
             DMA1_STREAM2 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH2>;
-            DMA1_STREAM3 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH3>;
         });
-
-        Uart::new(
-            self.periph,
-            self.rx,
-            self.tx,
-            self.tx_dma,
-            self.rx_dma,
-            Gps2Irqs,
-            config,
-        )
-        .expect("Failed to create GPS2 data UART")
+        UartRx::new(self.periph, self.rx, self.rx_dma, Gps2Irqs, config())
+            .expect("Failed to create GPS2 UART")
     }
 }

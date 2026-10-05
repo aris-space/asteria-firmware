@@ -4,7 +4,7 @@ use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
-use embassy_stm32::usart::{UartRx, UartTx};
+use embassy_stm32::usart::UartRx;
 
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
@@ -35,7 +35,6 @@ pub struct ServiceResources {
 pub struct SensorResources {
     pub gps1_rx: UartRx<'static, Async>,
     pub gps2_rx: UartRx<'static, Async>,
-    pub gps2_tx: UartTx<'static, Async>,
     pub imu1: (SpiDevice, ExtiInput<'static, Async>),
     pub imu2: (SpiDevice, ExtiInput<'static, Async>),
     pub bus1: SharedI2cBus,
@@ -47,11 +46,8 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let storage = storage::Storage::init(flash);
     calibration::load(storage).await;
 
-    let gps1_data = resources.gps1_uart.setup();
-    let (_gps1_tx, gps1_rx) = gps1_data.split();
-
-    let gps2_data = resources.gps2_uart.setup();
-    let (gps2_tx, gps2_rx) = gps2_data.split();
+    let gps1_rx = resources.gps1_uart.setup();
+    let gps2_rx = resources.gps2_uart.setup();
 
     let imu1 = resources.imu1.setup();
     let imu2 = resources.imu2.setup();
@@ -80,7 +76,6 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
         sensors: SensorResources {
             gps1_rx,
             gps2_rx,
-            gps2_tx,
             imu1,
             imu2,
             bus1,
@@ -141,11 +136,11 @@ pub async fn spawn_tasks(
             .expect("Failed to spawn barometer 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::gnss::task(board.sensors.gps1_rx, None, GNSS_0)
+        tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0)
             .expect("Failed to spawn GNSS 0 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::gnss::task(board.sensors.gps2_rx, Some(board.sensors.gps2_tx), GNSS_1)
+        tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1)
             .expect("Failed to spawn GNSS 1 task"),
     );
 
