@@ -4,11 +4,11 @@ The board moves along the GNSS track at the estimated height, turned by the
 estimated attitude, with height, vertical velocity and the log's marks shown
 alongside. The file carries its data, so it can be sent on as it is.
 
-    uv run viewer.py /Volumes/SD [--replay] [--out replay.html]
+    uv run viewer.py /Volumes/SD [--replay] [--cal cal.txt] [--out replay.html]
 
-With `--replay`, height and velocity come from `replay.py` (the current
-estimator settings) instead of the estimate logged on the board; the attitude
-always comes from the board.
+With `--replay`, the estimate comes from `replay.py` (the current estimator
+settings) instead of the one logged on the board. `--cal` replays as if the
+board had had the `cal set` lines in that file (see recalibrate.py).
 """
 
 import argparse
@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import recalibrate
 import sdlog
 
 TEMPLATE = Path(__file__).with_name("viewer.html")
@@ -44,28 +45,26 @@ def track_en_m(log: sdlog.Log, t: np.ndarray) -> np.ndarray:
 
 
 def estimate(log: sdlog.Log, use_replay: bool) -> pd.DataFrame:
-    """The selected chain's estimate, with height and velocity replaced by a
-    replay's if asked."""
-    state = log.state[log.state.selected == 1].reset_index(drop=True)
-    if state.empty:
-        raise SystemExit(f"{log.dir / 'STATE.CSV'} has no rows")
+    """The selected chain's estimate, logged on the board or replayed."""
     if use_replay:
         import replay
 
-        replayed = replay.replay(log)
-        replayed = replayed[replayed.selected]
-        for column in ["height_msl_m", "height_std_m", "velocity_mps", "velocity_std_mps"]:
-            state[column] = np.interp(state.t, replayed.t, replayed[column])
+        states = replay.replay(log)
+        state = states[states.selected & states.ready].reset_index(drop=True)
+    else:
+        state = log.state[log.state.selected == 1].reset_index(drop=True)
+    if state.empty:
+        raise SystemExit(f"{log.dir}: no estimate")
     return state
 
 
-def data(log: sdlog.Log, use_replay: bool) -> dict:
+def data(log: sdlog.Log, use_replay: bool, title: str) -> dict:
     state = estimate(log, use_replay)
     t = state.t.to_numpy()
     en = track_en_m(log, t)
     rounded = lambda values, digits: np.round(np.asarray(values, dtype=float), digits).tolist()
     return dict(
-        title=log.dir.name + (" (replayed)" if use_replay else ""),
+        title=title,
         t=rounded(t, 3),
         position_enu_m=rounded(np.c_[en, state.height_msl_m], 3),
         orientation_body_to_ned_wxyz=rounded(state[["qw", "qx", "qy", "qz"]], 5),
@@ -85,13 +84,17 @@ def data(log: sdlog.Log, use_replay: bool) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("log", help="a LOGnnnn directory, or the SD card root to use its newest session")
-    parser.add_argument("--replay", action="store_true", help="height and velocity from replay.py")
+    parser.add_argument("--replay", action="store_true", help="the estimate of replay.py instead of the logged one")
+    parser.add_argument("--cal", type=Path, help="a file of `cal set` lines to apply; implies --replay")
     parser.add_argument("--out", type=Path, help="where to write the HTML (default: viewer.html in the log)")
     args = parser.parse_args()
 
     log = sdlog.read(args.log)
+    if args.cal:
+        log = recalibrate.apply(log, args.cal.read_text())
     out = args.out or log.dir / "viewer.html"
-    payload = "const DATA = " + json.dumps(data(log, args.replay), separators=(",", ":")) + ";"
+    title = log.dir.name + (f" replayed with {args.cal.name}" if args.cal else " replayed" if args.replay else "")
+    payload = "const DATA = " + json.dumps(data(log, args.replay or bool(args.cal), title), separators=(",", ":")) + ";"
     out.write_text(TEMPLATE.read_text().replace("/* DATA */", payload))
     print(f"wrote {out}")
     webbrowser.open(out.resolve().as_uri())

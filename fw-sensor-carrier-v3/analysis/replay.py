@@ -9,17 +9,23 @@ settings unless overridden. From Python:
 
 or from the shell, with plots of the replayed and the on-board estimate:
 
-    uv run replay.py /Volumes/SD [--set acceleration_noise_std_mps2=5.0 ...]
+    uv run replay.py /Volumes/SD [--set acceleration_noise_std_mps2=5.0 ...] [--cal cal.txt]
+
+`--cal` replays as if the board had had the `cal set` lines in that file (see
+recalibrate.py).
 """
 
 import argparse
 from collections import Counter
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sef_light import Estimator
 
+import calibrate
+import recalibrate
 import sdlog
 
 # The settings of fw-sensor-carrier-v3's tasks/state_estimation.rs.
@@ -52,7 +58,8 @@ FIRMWARE = dict(
 )
 # Smallest GNSS standard deviation passed on, for receivers reporting zero.
 GNSS_MIN_STD = 0.1
-# Plausible Earth-field magnitude; other magnetometer samples are not fused.
+# Plausible Earth-field magnitude; other magnetometer samples are not fused,
+# and neither are uncalibrated magnetometers.
 MIN_FIELD_NT = 22_000.0
 MAX_FIELD_NT = 67_000.0
 OUTPUT_PERIOD_US = 50_000
@@ -65,6 +72,14 @@ def fix_tier(fix_ok: bool, fix_type: int) -> int:
     return {3: 3, 4: 3, 2: 2}.get(fix_type, 0)
 
 
+def mag_calibrated(log: sdlog.Log, index: int) -> bool:
+    """Whether magnetometer `index` was logged with a calibration other than
+    the identity, which the firmware does not fuse."""
+    mag = log.sensor("mag", index)
+    identity_nt = calibrate.mag_board_counts(mag) * calibrate.MAG_NT_PER_LSB
+    return len(mag) > 0 and not np.allclose(mag[["x_nt", "y_nt", "z_nt"]].to_numpy(), identity_nt)
+
+
 def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
     """Both chains' state every 50 ms of log time, one row per chain."""
     settings = FIRMWARE | overrides
@@ -74,6 +89,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
     estimator = Estimator(**settings)
 
     imu, mag, baro, gnss = log.imu, log.mag, log.baro, log.gnss
+    mag = mag[mag.mag.isin([i for i in range(2) if mag_calibrated(log, i)])]
     field_nt = np.linalg.norm(mag[["x_nt", "y_nt", "z_nt"]].to_numpy(), axis=1) if len(mag) else np.array([])
     mag = mag[(field_nt >= MIN_FIELD_NT) & (field_nt <= MAX_FIELD_NT)]
     events = [
@@ -128,6 +144,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
         for chain in range(2):
             height, velocity, bias = estimator.state(chain)
             height_var, velocity_var, _ = estimator.uncertainty(chain)
+            qw, qx, qy, qz = estimator.orientation_body_to_ned_wxyz(chain)
             rows.append(
                 dict(
                     cal_us=time_us,
@@ -142,6 +159,10 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
                     height_std_m=np.sqrt(height_var),
                     velocity_std_mps=np.sqrt(velocity_var),
                     score=estimator.consistency_scores()[chain],
+                    qw=qw,
+                    qx=qx,
+                    qy=qy,
+                    qz=qz,
                 )
             )
     for (kind, error), count in errors.items():
@@ -178,6 +199,7 @@ def main() -> None:
     parser.add_argument(
         "--set", action="append", default=[], metavar="KEY=VALUE", help="override one setting, e.g. ahrs_gain=0.5"
     )
+    parser.add_argument("--cal", type=Path, help="a file of `cal set` lines to apply before replaying")
     args = parser.parse_args()
     overrides = {}
     for item in args.set:
@@ -188,6 +210,8 @@ def main() -> None:
         overrides[key] = [float(v) for v in value.split(",")] if isinstance(default, list) else type(default)(value)
 
     log = sdlog.read(args.log)
+    if args.cal:
+        log = recalibrate.apply(log, args.cal.read_text())
     states = replay(log, **overrides)
     selected = states[states.selected & states.ready]
     print(f"{log.dir}: replayed {log.imu.t.max():.0f} s, {len(selected)} outputs")
