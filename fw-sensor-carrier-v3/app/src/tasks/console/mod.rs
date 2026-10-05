@@ -2,10 +2,24 @@
 //! to a command: storing and showing calibration, marking the SD log, and
 //! managing the flash. One task runs the USB device, one runs the console.
 
-#[macro_use]
-mod io;
+/// Wrap a string literal in an ANSI SGR colour, resetting after. The result is
+/// itself a literal, so it works anywhere a `&str` is expected (e.g. a `say`
+/// argument).
+macro_rules! paint {
+    (red, $s:literal) => {
+        concat!("\x1b[31m", $s, "\x1b[0m")
+    };
+    (green, $s:literal) => {
+        concat!("\x1b[32m", $s, "\x1b[0m")
+    };
+    (yellow, $s:literal) => {
+        concat!("\x1b[33m", $s, "\x1b[0m")
+    };
+}
+
 mod cal;
 mod flash;
+mod io;
 
 use core::str::SplitAsciiWhitespace;
 

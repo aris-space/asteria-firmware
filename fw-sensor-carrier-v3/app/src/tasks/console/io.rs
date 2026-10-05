@@ -8,21 +8,6 @@ use heapless::String;
 
 use super::Class;
 
-/// Wrap a string literal in an ANSI SGR colour, resetting after. The result is
-/// itself a literal, so it works anywhere a `&str` is expected (e.g. a `say`
-/// argument).
-macro_rules! paint {
-    (red, $s:literal) => {
-        concat!("\x1b[31m", $s, "\x1b[0m")
-    };
-    (green, $s:literal) => {
-        concat!("\x1b[32m", $s, "\x1b[0m")
-    };
-    (yellow, $s:literal) => {
-        concat!("\x1b[33m", $s, "\x1b[0m")
-    };
-}
-
 /// `embedded-io-async` adapter over the CDC class so noline can read and write.
 /// CDC reads come a USB packet at a time, so a one-packet buffer hands bytes out
 /// in whatever chunk sizes the caller asks for; writes go out a packet at a time.
