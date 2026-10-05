@@ -216,26 +216,23 @@ async fn cmd_cal_imu(
     args: &mut SplitAsciiWhitespace<'_>,
     storage: &Storage,
 ) {
-    let Some(name) = cal_name_or_report(class, args, paint!(red, "usage: cal imu <name>\n")).await
-    else {
+    let Some(name) = cal_name(class, args, paint!(red, "usage: cal imu <name>\n")).await else {
         return;
     };
     say(class, "gyro cal: keep the board still for 5 seconds\n").await;
     let mut cal = imu::ImuCal::default();
     cal.collect().await;
-    let counts = cal.counts();
-    let mut s: String<80> = String::new();
-    let _ = writeln!(s, "collected {} / {} IMU samples", counts[0], counts[1]);
-    say(class, &s).await;
+    let n = cal.counts();
+    sayf(
+        class,
+        format_args!("collected {} / {} IMU samples\n", n[0], n[1]),
+    )
+    .await;
     let reports = cal.finish(name, storage).await;
-    let mut stored = true;
     for report in &reports {
-        let mut s: String<192> = String::new();
-        let _ = writeln!(s, "{report}");
-        say(class, &s).await;
-        stored &= report.stored();
+        sayf(class, format_args!("{report}\n")).await;
     }
-    report_outcome(class, stored).await;
+    report_outcome(class, reports.iter().any(imu::CalReport::stored)).await;
 }
 
 async fn cmd_cal_mag(
@@ -243,8 +240,7 @@ async fn cmd_cal_mag(
     args: &mut SplitAsciiWhitespace<'_>,
     storage: &Storage,
 ) {
-    let Some(name) = cal_name_or_report(class, args, paint!(red, "usage: cal mag <name>\n")).await
-    else {
+    let Some(name) = cal_name(class, args, paint!(red, "usage: cal mag <name>\n")).await else {
         return;
     };
     say(
@@ -256,20 +252,17 @@ async fn cmd_cal_mag(
     for _ in 0..mag::PROGRESS_TICKS {
         cal.collect_tick().await;
         let n = cal.counts();
-        let mut s: String<48> = String::new();
-        let _ = writeln!(s, "  collecting... mag0={} mag1={}", n[0], n[1]);
-        say(class, &s).await;
+        sayf(
+            class,
+            format_args!("collected {} / {} mag samples\n", n[0], n[1]),
+        )
+        .await;
     }
-    say(class, "results:\n").await;
     let reports = cal.finish(name, storage).await;
-    let mut stored = false;
-    for r in &reports {
-        let mut s: String<384> = String::new();
-        let _ = writeln!(s, "{r}\n");
-        say(class, &s).await;
-        stored |= r.stored();
+    for report in &reports {
+        sayf(class, format_args!("{report}\n")).await;
     }
-    report_outcome(class, stored).await;
+    report_outcome(class, reports.iter().any(mag::CalReport::stored)).await;
 }
 
 async fn cmd_cal_latency(
@@ -317,21 +310,22 @@ async fn show_cal_slot(
     applied: impl fmt::Display,
     pending: Option<Name>,
 ) {
-    let mut s: String<384> = String::new();
-    let _ = writeln!(s, "{label} {} {}", paint!(green, "(applied)"), applied);
+    sayf(
+        class,
+        format_args!("{label} {} {applied}\n", paint!(green, "(applied)")),
+    )
+    .await;
     if let Some(name) = pending {
-        write_pending_cal(&mut s, name);
+        sayf(
+            class,
+            format_args!(
+                paint!(yellow, "  flash has \"{}\" pending; reset to apply\n"),
+                name
+            ),
+        )
+        .await;
     }
-    say(class, &s).await;
     say(class, "\n").await;
-}
-
-fn write_pending_cal(out: &mut impl fmt::Write, name: Name) {
-    let _ = writeln!(
-        out,
-        paint!(yellow, "  flash has \"{}\" pending; reset to apply"),
-        name
-    );
 }
 
 async fn report_outcome(class: &mut ConsoleIo<'_>, stored: bool) {
@@ -342,38 +336,25 @@ async fn report_outcome(class: &mut ConsoleIo<'_>, stored: bool) {
     }
 }
 
-#[derive(Clone, Copy)]
-enum NameError {
-    Missing,
-    TooLong,
-}
-
-fn parse_cal_name<'a>(args: &mut SplitAsciiWhitespace<'a>) -> Result<&'a str, NameError> {
-    let name = args.next().ok_or(NameError::Missing)?;
-    if name.len() > Name::CAP {
-        return Err(NameError::TooLong);
-    }
-    Ok(name)
-}
-
-async fn cal_name_or_report<'a>(
+/// The calibration name argument, or `None` after telling the user why not.
+async fn cal_name<'a>(
     class: &mut ConsoleIo<'_>,
     args: &mut SplitAsciiWhitespace<'a>,
     usage: &'static str,
 ) -> Option<&'a str> {
-    match parse_cal_name(args) {
-        Ok(name) => Some(name),
-        Err(NameError::Missing) => {
-            say(class, usage).await;
-            None
-        }
-        Err(NameError::TooLong) => {
-            let mut s: String<48> = String::new();
-            let _ = writeln!(s, paint!(red, "name too long (max {} chars)"), Name::CAP);
-            say(class, &s).await;
-            None
-        }
+    let Some(name) = args.next() else {
+        say(class, usage).await;
+        return None;
+    };
+    if name.len() > Name::CAP {
+        sayf(
+            class,
+            format_args!(paint!(red, "name too long (max {} chars)\n"), Name::CAP),
+        )
+        .await;
+        return None;
     }
+    Some(name)
 }
 
 async fn cmd_flash(
@@ -422,12 +403,6 @@ async fn cmd_flash(
 async fn flash_info(class: &mut ConsoleIo<'_>, storage: &Storage) {
     let id = storage.read_jedec_id().await;
     let status = storage.status().await;
-    let mut s: String<192> = String::new();
-    write_flash_identity(&mut s, &id, status);
-    say(class, &s).await;
-}
-
-fn write_flash_identity(out: &mut impl fmt::Write, id: &flash::JedecId, status: u8) {
     let detected = if id.manufacturer == flash::WINBOND_MANUFACTURER_ID
         && id.memory_type == flash::W25Q_IM_MEMORY_TYPE
         && id.capacity == flash::W25Q01JV_CAPACITY
@@ -438,18 +413,20 @@ fn write_flash_identity(out: &mut impl fmt::Write, id: &flash::JedecId, status: 
     } else {
         "UNKNOWN (check wiring/power)"
     };
-    let _ = writeln!(
-        out,
-        "jedec id:   {:02x} {:02x} {:02x}",
-        id.manufacturer, id.memory_type, id.capacity
-    );
-    let _ = writeln!(out, "detected:   {detected}");
-    let _ = writeln!(out, "status reg: {:#04x} (wip={})", status, status & 1);
-    let _ = write!(out, "capacity:   ");
-    let _ = write_bytes(out, flash::CAPACITY);
-    let _ = write!(out, ", config region ");
-    let _ = write_bytes(out, storage::CONFIG_LEN);
-    let _ = writeln!(out);
+    sayf(
+        class,
+        format_args!(
+            "jedec id:   {:02x} {:02x} {:02x}\ndetected:   {detected}\nstatus reg: {:#04x} (wip={})\ncapacity:   {} MiB, config region {} KiB\n",
+            id.manufacturer,
+            id.memory_type,
+            id.capacity,
+            status,
+            status & 1,
+            flash::CAPACITY / (1024 * 1024),
+            storage::CONFIG_LEN / 1024,
+        ),
+    )
+    .await;
 }
 
 async fn flash_list(class: &mut ConsoleIo<'_>) {
@@ -467,30 +444,30 @@ async fn list_keys<Id: SensorId, C: Correction, const N: usize>(
     for id in cals.ids() {
         let key = calibration::key(id);
         let len = key.iter().position(|&b| b == 0).unwrap_or(key.len());
-        let mut s: String<24> = String::new();
-        let _ = writeln!(s, "{}", core::str::from_utf8(&key[..len]).unwrap_or("?"));
-        say(class, &s).await;
+        let name = core::str::from_utf8(&key[..len]).unwrap_or("?");
+        sayf(class, format_args!("{name}\n")).await;
     }
 }
 
 async fn flash_clear(class: &mut ConsoleIo<'_>, storage: &Storage, name: &str) {
     if name.len() > storage::KEY_LEN {
-        let mut s: String<48> = String::new();
-        let _ = writeln!(
-            s,
-            paint!(red, "key name too long (max {})"),
-            storage::KEY_LEN
-        );
-        say(class, &s).await;
-        return;
-    }
-    let mut s: String<48> = String::new();
-    if storage.remove(&storage::key(name)).await {
-        let _ = writeln!(s, paint!(green, "cleared {}; reset to apply."), name);
+        sayf(
+            class,
+            format_args!(
+                paint!(red, "key name too long (max {})\n"),
+                storage::KEY_LEN
+            ),
+        )
+        .await;
+    } else if storage.remove(&storage::key(name)).await {
+        sayf(
+            class,
+            format_args!(paint!(green, "cleared {}; reset to apply.\n"), name),
+        )
+        .await;
     } else {
-        let _ = write!(s, paint!(red, "flash error"));
+        say(class, paint!(red, "flash error\n")).await;
     }
-    say(class, &s).await;
 }
 
 async fn flash_erase(class: &mut ConsoleIo<'_>, storage: &Storage) {
@@ -500,18 +477,6 @@ async fn flash_erase(class: &mut ConsoleIo<'_>, storage: &Storage) {
         paint!(red, "flash error\n")
     };
     say(class, msg).await;
-}
-
-fn write_bytes(out: &mut impl fmt::Write, bytes: u32) -> fmt::Result {
-    const KIB: u32 = 1024;
-    const MIB: u32 = 1024 * KIB;
-    if bytes.is_multiple_of(MIB) {
-        write!(out, "{} MiB", bytes / MIB)
-    } else if bytes.is_multiple_of(KIB) {
-        write!(out, "{} KiB", bytes / KIB)
-    } else {
-        write!(out, "{} B", bytes)
-    }
 }
 
 /// Write `msg` to the host, translating each `\n` to CRLF so a serial terminal
@@ -526,4 +491,11 @@ async fn say(class: &mut ConsoleIo<'_>, msg: &str) {
             return;
         }
     }
+}
+
+/// [`say`] for a formatted message.
+async fn sayf(class: &mut ConsoleIo<'_>, args: fmt::Arguments<'_>) {
+    let mut msg: String<512> = String::new();
+    let _ = msg.write_fmt(args);
+    say(class, &msg).await;
 }
