@@ -17,7 +17,6 @@ const SAMPLE_HZ: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 type BusDevice = I2cDevice<'static, CriticalSectionRawMutex, SharedI2c>;
-/// A fully-initialized humidity/temperature sensor, ready to read.
 pub type Sensor = Sht4xAsync<BusDevice, Delay>;
 
 async fn configure(bus: SharedI2cBus, id: DhtId) -> Result<Sensor, ()> {

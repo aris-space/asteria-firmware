@@ -55,7 +55,6 @@ pub async fn task() -> ! {
         .subscriber()
         .expect("SEF: subscriber slot");
     let mut processor = Processor::new().expect("SEF-light configuration must be valid");
-    // Samples waiting out the holdback, in arrival order.
     let mut pending = Vec::<Event, PENDING_CAPACITY>::new();
     loop {
         let oldest = pending

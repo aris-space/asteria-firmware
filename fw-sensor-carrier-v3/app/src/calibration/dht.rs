@@ -8,7 +8,6 @@ use super::Calibrations;
 use crate::sensors::{DHT_COUNT, DhtId};
 use crate::types::{DhtSample, RawDhtSample};
 
-/// No per-unit correction yet; only the latency is calibrated.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Correction;
 

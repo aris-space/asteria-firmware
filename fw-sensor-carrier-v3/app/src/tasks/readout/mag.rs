@@ -23,7 +23,6 @@ const SAMPLE_HZ: u32 = match MAG_ODR {
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 type BusDevice = I2cDevice<'static, CriticalSectionRawMutex, SharedI2c>;
-/// A fully-initialized magnetometer, ready to read.
 pub type Sensor =
     Lsm303agr<lsm303agr::interface::I2cInterface<BusDevice>, lsm303agr::mode::MagContinuous>;
 

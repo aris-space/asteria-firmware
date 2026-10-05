@@ -96,7 +96,6 @@ pub async fn spawn_tasks(
         tasks::sd_logging::task(sd, detect, power).expect("Failed to spawn SD logging task"),
     );
 
-    // --- Readouts -----------------------------------------------------------
     let (imu1_spi, imu1_int1) = board.sensors.imu1;
     let (imu2_spi, imu2_int1) = board.sensors.imu2;
     level_0_spawner.spawn(
@@ -106,7 +105,7 @@ pub async fn spawn_tasks(
         tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1).expect("Failed to spawn IMU 1 task"),
     );
 
-    // Do not replace this unless you know why it was there in the first place.
+    // I2C sensors initialize one at a time before any read task runs; see `tasks::readout`.
     let mag1 = tasks::readout::mag::init(board.sensors.bus1, MAG_BUS_1).await;
     let baro1 = tasks::readout::baro::init(board.sensors.bus1, BARO_BUS_1).await;
     let mag2 = tasks::readout::mag::init(board.sensors.bus2, MAG_BUS_2).await;
@@ -149,16 +148,13 @@ pub async fn spawn_tasks(
             .expect("Failed to spawn GNSS 1 task"),
     );
 
-    // --- Processing ---------------------------------------------------------
     thread_spawner.spawn(
         tasks::processing::state_estimation::task().expect("Failed to spawn state estimation task"),
     );
 
-    // --- CAN ----------------------------------------------------------------
     let (can_tx, can_rx, _options) = board.can.split();
     thread_spawner.spawn(tasks::can::rx::task(can_rx).expect("Failed to spawn CAN RX task"));
     tasks::can::tx::spawn(can_tx, thread_spawner);
 
-    // --- USB console --------------------------------------------------------
     tasks::console::spawn(board.usb, board.storage, thread_spawner);
 }

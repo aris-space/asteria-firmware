@@ -36,7 +36,6 @@ pub const MAX_INIT_ATTEMPTS: u8 = 3;
 const BASE_BACKOFF_MS: u64 = 100;
 const MAX_BACKOFF_MS: u64 = 5000;
 
-/// Exponential backoff between initialization attempts.
 pub fn backoff(attempt: u8) -> Duration {
     let ms = (BASE_BACKOFF_MS << attempt.min(6)).min(MAX_BACKOFF_MS);
     Duration::from_millis(ms)

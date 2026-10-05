@@ -78,8 +78,6 @@ const MIN_SAMPLES: u32 = 1_000;
 const MAX_GYRO_NOISE_DPS: f32 = 0.57;
 const MAX_ACCEL_NOISE_G: f32 = 0.03;
 
-/// Stationary gyro calibration: [`collect`](Self::collect) records both IMUs
-/// for [`CALIBRATION_TIME`], then [`finish`](Self::finish) stores the result.
 #[derive(Default)]
 pub struct ImuCal {
     windows: [ImuWindow; IMU_COUNT],

@@ -64,7 +64,6 @@ pub struct RawGnssSample {
     pub pvt: Pvt,
 }
 
-/// Calibrated GNSS navigation data.
 #[derive(Clone, Copy, Debug)]
 pub struct GnssSample {
     pub src: GnssId,
@@ -83,7 +82,6 @@ pub struct RawBaroSample {
     pub temperature_c: f32,
 }
 
-/// Calibrated barometer sample.
 #[derive(Clone, Copy, Debug)]
 pub struct BaroSample {
     pub src: BaroId,
@@ -110,7 +108,6 @@ pub struct RawDhtSample {
     pub humidity_rh: f32,
 }
 
-/// Calibrated humidity and temperature sample.
 #[derive(Clone, Copy, Debug)]
 pub struct DhtSample {
     pub src: DhtId,

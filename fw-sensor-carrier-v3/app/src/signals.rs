@@ -31,7 +31,6 @@ macro_rules! define_sample_channel {
 
 define_sample_channel!(IMU_CHANNEL, submit_imu_sample: ImuSample, cap = 512, subs = 2);
 define_sample_channel!(MAG_CHANNEL, submit_mag_sample: MagSample, cap = 32, subs = 1);
-// Raw magnetometer counts, for the calibration routine's fit.
 define_sample_channel!(RAW_MAG_CHANNEL, submit_raw_mag_sample: RawMagSample, cap = 32, subs = 1);
 define_sample_channel!(GNSS_CHANNEL, submit_gnss_sample: GnssSample, cap = 16, subs = 1);
 define_sample_channel!(BARO_CHANNEL, submit_baro_sample: BaroSample, cap = 32, subs = 1);

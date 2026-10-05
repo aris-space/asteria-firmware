@@ -72,7 +72,6 @@ pub trait Correction:
     }
 }
 
-/// What's persisted per sensor.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StoredCal<C> {
     pub name: Name,

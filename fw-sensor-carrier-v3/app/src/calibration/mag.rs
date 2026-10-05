@@ -61,12 +61,10 @@ impl Correction {
         }
     }
 
-    /// An identity fallback has no measured hard- or soft-iron correction.
     pub fn is_calibrated(&self) -> bool {
         *self != <Self as super::Correction>::DEFAULT
     }
 
-    /// Accept only calibrated samples with a plausible Earth-field magnitude.
     pub fn accepts_field(&self, field_nt: f32) -> bool {
         self.is_calibrated() && (MIN_VALID_NT..=MAX_VALID_NT).contains(&field_nt)
     }
@@ -135,8 +133,6 @@ const _: () = assert!(
     "MagCal is written for exactly two magnetometers"
 );
 
-/// Magnetometer calibration: the caller runs the collection loop (`collect_tick`
-/// per window, then `finish`). One `magcal` solver per sensor.
 pub struct MagCal {
     solvers: [Solver; MAG_COUNT],
 }
@@ -250,11 +246,7 @@ pub struct CalReport {
 enum CalOutcome {
     Stored(Fit),
     StoreFailed(Fit),
-    /// Field strength outside the plausible band.
-    ImplausibleField {
-        tier: SolverTier,
-        field_nt: f32,
-    },
+    ImplausibleField { tier: SolverTier, field_nt: f32 },
     TooFewSamples,
 }
 

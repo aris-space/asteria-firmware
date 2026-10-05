@@ -42,9 +42,7 @@ const GYRO_ODR: GyroscopeOdr = GyroscopeOdr::Hz833;
 const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
 /// Gyroscope batch data rate. Should match [`GYRO_ODR`]
 const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
-/// Accelerometer full-scale range
 pub const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G8;
-/// Gyroscope full-scale range
 pub const GYRO_FULL_SCALE: GyroscopeFullScale = GyroscopeFullScale::Dps2000;
 pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
     GyroscopeFullScale::Dps250 => 250.0,

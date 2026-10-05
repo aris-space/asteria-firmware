@@ -8,7 +8,6 @@ use super::Calibrations;
 use crate::sensors::{BARO_COUNT, BaroId};
 use crate::types::{BaroSample, RawBaroSample};
 
-/// No per-unit correction yet; only the latency is calibrated.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Correction;
 
