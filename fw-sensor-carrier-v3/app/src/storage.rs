@@ -3,7 +3,7 @@
 //! are postcard-encoded. The config region backs the map; the rest stays free
 //! for future data logging.
 
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use sequential_storage::cache::NoCache;
 use sequential_storage::map::{MapConfig, MapStorage};
@@ -38,7 +38,8 @@ pub const fn key(name: &str) -> Key {
 type Map = MapStorage<Key, BoardFlash, NoCache>;
 
 pub struct Storage {
-    map: Mutex<CriticalSectionRawMutex, Map>,
+    // Only startup and the console, both thread mode, touch storage.
+    map: Mutex<ThreadModeRawMutex, Map>,
 }
 
 static STORAGE: StaticCell<Storage> = StaticCell::new();

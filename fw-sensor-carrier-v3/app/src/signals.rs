@@ -6,7 +6,7 @@
 //! to the SD task without waiting for card I/O in any producer.
 
 use core::sync::atomic::{AtomicU32, Ordering};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
@@ -16,6 +16,8 @@ use crate::types::{
     StateEstimate,
 };
 
+// Readouts publish from the interrupt executor, so the sample channels and
+// the SD queue need a critical-section mutex.
 macro_rules! define_sample_channel {
     ($channel:ident, $submit:ident: $T:ty, cap = $cap:expr, subs = $subs:expr) => {
         pub static $channel: PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, 1> =
@@ -35,7 +37,8 @@ define_sample_channel!(GNSS_CHANNEL, submit_gnss_sample: GnssSample, cap = 16, s
 define_sample_channel!(BARO_CHANNEL, submit_baro_sample: BaroSample, cap = 32, subs = 1);
 define_sample_channel!(DHT_CHANNEL, submit_dht_sample: DhtSample, cap = 16, subs = 1);
 
-pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 1> = Watch::new();
+// Estimator and CAN both run on the thread-mode executor.
+pub static STATE_ESTIMATE_WATCH: Watch<ThreadModeRawMutex, StateEstimate, 1> = Watch::new();
 
 // Readout and estimation never wait for SD writes. The writer reports any
 // overflow so incomplete logs are visible during a bench run.
