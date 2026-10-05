@@ -1,11 +1,32 @@
 //! The three fits. A sample stamped `t` by a sensor with latency `τ` measures
 //! the signal at `t − τ`; all latencies are relative to IMU_0's timestamps.
 
-use crate::fit::{Model, Row};
+use crate::fit::{FitReport, Model, Row, fit};
 use crate::log::{
     Baro, Gnss, Imu, Log, Mag, STANDARD_GRAVITY, decimate, noise_sigma, pressure_altitude_m,
 };
 use crate::spline::{Basis, Spline};
+
+/// Runs every fit the log has data for, titled by what is compared.
+pub fn fit_all(log: &Log) -> Vec<(&'static str, Option<FitReport>)> {
+    let models: [(&'static str, Option<Box<dyn Model>>); 4] = [
+        ("IMU_1 vs IMU_0 rotation", ImuTwin::new(log).map(boxed)),
+        ("MAG_BUS_1 vs gyro", MagRotation::new(log, 0).map(boxed)),
+        ("MAG_BUS_2 vs gyro", MagRotation::new(log, 1).map(boxed)),
+        (
+            "Baro and GNSS vs vertical acceleration",
+            Vertical::new(log).map(boxed),
+        ),
+    ];
+    models
+        .into_iter()
+        .map(|(title, model)| (title, model.map(|model| fit(model.as_ref()))))
+        .collect()
+}
+
+fn boxed<M: Model + 'static>(model: M) -> Box<dyn Model> {
+    Box::new(model)
+}
 
 // Latency-shifted times must stay inside the spline.
 const MARGIN_S: f64 = 0.5;

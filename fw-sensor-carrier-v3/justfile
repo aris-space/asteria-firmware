@@ -3,3 +3,11 @@ bin     := "fw-sensor-carrier-v3"
 use_probe_rs := "false"
 
 import '../just/firmware.just'
+
+# Fit sensor latencies from an SD card root or one of its LOGnnnn directories.
+latency path *args:
+    cargo run --release --manifest-path ../tools/Cargo.toml -p sensor-carrier-latency -- fit {{path}} {{args}}
+
+# Fit latencies on simulated logs of every scenario and compare with the truth.
+latency-study *args:
+    cargo run --release --manifest-path ../tools/Cargo.toml -p sensor-carrier-latency -- study {{args}}

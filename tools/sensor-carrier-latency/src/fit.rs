@@ -33,10 +33,13 @@ pub struct Estimate {
     pub sigma_s: Option<f64>,
 }
 
-// The curvature at the optimum only describes a local minimum. A latency is
-// determined by the data only if moving it this far away makes the fit
-// clearly worse (likelihood ratio, about five standard deviations).
+// The covariance describes the fit only near its minimum. Without real
+// motion that minimum is a ripple in the noise, and moving the latency changes
+// the fit far less than the covariance predicts. A latency counts as determined
+// only if the fit at these shifts worsens by at least a quarter of the
+// predicted amount, and clearly (five standard deviations).
 const TEST_SHIFTS_S: [f64; 4] = [-0.1, -0.05, 0.05, 0.1];
+const MIN_PREDICTED_FRACTION: f64 = 0.25;
 const MIN_CHI2_INCREASE: f64 = 25.0;
 
 pub struct FitReport {
@@ -69,23 +72,28 @@ pub fn fit(model: &dyn Model) -> FitReport {
         .into_iter()
         .enumerate()
         .map(|(i, name)| {
-            let determined = TEST_SHIFTS_S.iter().all(|&shift| {
-                let mut latencies = best.clone();
-                latencies[i] += shift;
-                let mut shifted = Projection {
-                    latencies,
-                    ..problem.empty()
-                };
-                shifted.update();
-                (shifted.residuals.norm_squared() - chi2) / scale > MIN_CHI2_INCREASE
+            let sigma = covariance
+                .as_ref()
+                .map(|c| c[(i, i)].sqrt())
+                .filter(|sigma| sigma.is_finite());
+            let determined = sigma.is_some_and(|sigma| {
+                TEST_SHIFTS_S.iter().all(|&shift| {
+                    let mut latencies = best.clone();
+                    latencies[i] += shift;
+                    let mut shifted = Projection {
+                        latencies,
+                        ..problem.empty()
+                    };
+                    shifted.update();
+                    let increase = (shifted.residuals.norm_squared() - chi2) / scale;
+                    let predicted = (shift / sigma).powi(2);
+                    increase > MIN_CHI2_INCREASE.max(MIN_PREDICTED_FRACTION * predicted)
+                })
             });
             Estimate {
                 name,
                 latency_s: best[i],
-                sigma_s: covariance
-                    .as_ref()
-                    .map(|c| c[(i, i)].sqrt())
-                    .filter(|sigma| determined && sigma.is_finite()),
+                sigma_s: sigma.filter(|_| determined),
             }
         })
         .collect();

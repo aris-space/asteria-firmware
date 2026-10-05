@@ -11,3 +11,5 @@ levenberg-marquardt = "0.15"
 nalgebra = "0.34"
 nalgebra-sparse = "0.11"
 serde = { version = "1", features = ["derive"] }
+rand = "0.9"
+rand_distr = "0.5"
