@@ -250,7 +250,7 @@ def print_lines(name: str, gyros, accels, mags, estimates) -> None:
                 f"# {fit.sensor}: field {fit.field_strength * MAG_NT_PER_LSB / 1000:.1f} uT, error {fit.error_percent:.2f} %, {fit.used.sum()} samples"
             )
             print(
-                f"cal set {fit.sensor} name={name} latency_us={us} hard_nt={floats(fit.hard_iron * MAG_NT_PER_LSB, 1)} soft={floats(fit.soft_iron, 5)}"
+                f"cal set {fit.sensor} name={name} latency_us={us} hard_nt={floats(fit.hard_iron * MAG_NT_PER_LSB, 1)} soft={floats(fit.soft_iron, 5)} field_nt={fit.field_strength * MAG_NT_PER_LSB:.0f}"
             )
     for sensor in ["BARO_BUS_1", "BARO_BUS_2", "GNSS_0", "GNSS_1"]:
         if sensor in latency_us:

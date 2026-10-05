@@ -58,10 +58,11 @@ FIRMWARE = dict(
 )
 # Smallest GNSS standard deviation passed on, for receivers reporting zero.
 GNSS_MIN_STD = 0.1
-# Plausible Earth-field magnitude; other magnetometer samples are not fused,
-# and neither are uncalibrated magnetometers.
-MIN_FIELD_NT = 22_000.0
-MAX_FIELD_NT = 67_000.0
+# As on the board, magnetometer samples whose field strength differs from the
+# calibrated one by more than this fraction are not fused, and neither are
+# uncalibrated magnetometers. The log does not hold the calibrated field
+# strength, so the median of the logged one stands in for it.
+MAX_FIELD_ERROR = 0.1
 OUTPUT_PERIOD_US = 50_000
 
 
@@ -90,8 +91,9 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
 
     imu, mag, baro, gnss = log.imu, log.mag, log.baro, log.gnss
     mag = mag[mag.mag.isin([i for i in range(2) if mag_calibrated(log, i)])]
-    field_nt = np.linalg.norm(mag[["x_nt", "y_nt", "z_nt"]].to_numpy(), axis=1) if len(mag) else np.array([])
-    mag = mag[(field_nt >= MIN_FIELD_NT) & (field_nt <= MAX_FIELD_NT)]
+    field_nt = pd.Series(np.linalg.norm(mag[["x_nt", "y_nt", "z_nt"]].to_numpy(), axis=1), index=mag.index)
+    expected_nt = field_nt.groupby(mag.mag).transform("median")
+    mag = mag[(field_nt - expected_nt).abs() <= MAX_FIELD_ERROR * expected_nt]
     events = [
         *zip(imu.cal_us, ["imu"] * len(imu), imu.itertuples()),
         *zip(mag.cal_us, ["mag"] * len(mag), mag.itertuples()),
