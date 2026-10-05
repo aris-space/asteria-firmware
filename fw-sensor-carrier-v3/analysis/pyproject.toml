@@ -1,5 +1,5 @@
 [project]
-name = "sensor-carrier-analysis"
+name = "fw-sensor-carrier-v3-analysis"
 version = "0.1.0"
 description = "Calibration and estimator replay from fw-sensor-carrier-v3 SD logs"
 requires-python = ">=3.12"
