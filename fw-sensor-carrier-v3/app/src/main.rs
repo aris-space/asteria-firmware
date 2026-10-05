@@ -8,7 +8,6 @@ use core::future::pending;
 
 use embassy_executor::Spawner;
 
-mod build_info;
 mod built;
 mod calibration;
 mod macros;

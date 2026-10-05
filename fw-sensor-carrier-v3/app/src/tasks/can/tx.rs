@@ -137,22 +137,9 @@ async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>)
 
 #[embassy_executor::task]
 async fn build_information_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
-    use hermes_can::messages::debug_info::{BuildInformationCommon, SensorCarrierBuildInfo};
-    let info = crate::build_info::BUILD_INFO.get();
+    use hermes_can::messages::debug_info::SensorCarrierBuildInfo;
     let msg = SensorCarrierBuildInfo {
-        data: BuildInformationCommon {
-            unix_timestamp: info.unix_timestamp,
-            author_initials: info.author_initials,
-            is_release: info.is_release,
-            debug_defmt_rtt: info.debug_defmt_rtt,
-            commit_hash: info.commit_hash,
-            is_git_dirty: info.is_git_dirty,
-            can_semver: [
-                hermes_can::VERSION_MAJOR,
-                hermes_can::VERSION_MINOR,
-                hermes_can::VERSION_PATCH,
-            ],
-        },
+        data: crate::built::can_build_information(),
     };
     let mut ticker = Ticker::every(BUILD_INFO_PERIOD);
     loop {
