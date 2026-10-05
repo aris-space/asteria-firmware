@@ -45,19 +45,22 @@ pub async fn load(storage: &Storage) {
 /// Stores the latency of the sensor named `sensor`, keeping its correction.
 /// Returns `None` if no sensor has that name.
 pub async fn store_latency(storage: &Storage, sensor: &str, latency_us: i32) -> Option<bool> {
-    Some(if let Some(id) = ImuId::from_name(sensor) {
-        imu::CAL.store_latency(storage, id, latency_us).await
-    } else if let Some(id) = MagId::from_name(sensor) {
-        mag::CAL.store_latency(storage, id, latency_us).await
-    } else if let Some(id) = GnssId::from_name(sensor) {
-        gnss::CAL.store_latency(storage, id, latency_us).await
-    } else if let Some(id) = BaroId::from_name(sensor) {
-        baro::CAL.store_latency(storage, id, latency_us).await
-    } else if let Some(id) = DhtId::from_name(sensor) {
-        dht::CAL.store_latency(storage, id, latency_us).await
-    } else {
-        return None;
-    })
+    if let Some(id) = ImuId::from_name(sensor) {
+        return Some(imu::CAL.store_latency(storage, id, latency_us).await);
+    }
+    if let Some(id) = MagId::from_name(sensor) {
+        return Some(mag::CAL.store_latency(storage, id, latency_us).await);
+    }
+    if let Some(id) = GnssId::from_name(sensor) {
+        return Some(gnss::CAL.store_latency(storage, id, latency_us).await);
+    }
+    if let Some(id) = BaroId::from_name(sensor) {
+        return Some(baro::CAL.store_latency(storage, id, latency_us).await);
+    }
+    if let Some(id) = DhtId::from_name(sensor) {
+        return Some(dht::CAL.store_latency(storage, id, latency_us).await);
+    }
+    None
 }
 
 /// A sensor kind's per-unit correction, stored inside [`StoredCal`].

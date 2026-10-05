@@ -26,13 +26,10 @@ mod clocks {
     ));
 }
 
-#[allow(unused_imports)]
 use defmt_rtt as _;
 #[cfg(feature = "debug")]
-#[allow(unused_imports)]
 use panic_probe as _;
 #[cfg(not(feature = "debug"))]
-#[allow(unused_imports)]
 use panic_reset as _;
 
 #[embassy_executor::main]

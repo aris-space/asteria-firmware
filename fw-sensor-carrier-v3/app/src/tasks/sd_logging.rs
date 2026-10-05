@@ -321,9 +321,9 @@ fn format_record(record: &Record) -> Result<Row, core::fmt::Error> {
     match record {
         Record::State(s) => {
             let [qw, qx, qy, qz] = s.orientation_body_to_ned_wxyz;
-            write!(
+            writeln!(
                 row,
-                "{},{},{},{},{},{:.3},{:.4},{:.3},{:.3},{:.3},{:.4},{:.3},{:.3},{:.3},{:.6},{:.6},{:.6},{:.6}\n",
+                "{},{},{},{},{},{:.3},{:.4},{:.3},{:.3},{:.3},{:.4},{:.3},{:.3},{:.3},{:.6},{:.6},{:.6},{:.6}",
                 s.ts.as_micros(),
                 s.imu.index(),
                 u8::from(s.selected),
@@ -346,9 +346,9 @@ fn format_record(record: &Record) -> Result<Row, core::fmt::Error> {
         }
         Record::Imu(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
-            write!(
+            writeln!(
                 row,
-                ",{},{},{},{},{},{},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4}\n",
+                ",{},{},{},{},{},{},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4}",
                 raw.accel.x,
                 raw.accel.y,
                 raw.accel.z,
@@ -365,18 +365,18 @@ fn format_record(record: &Record) -> Result<Row, core::fmt::Error> {
         }
         Record::Mag(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
-            write!(
+            writeln!(
                 row,
-                ",{},{},{},{:.2},{:.2},{:.2}\n",
+                ",{},{},{},{:.2},{:.2},{:.2}",
                 raw.x, raw.y, raw.z, cal.x, cal.y, cal.z,
             )?;
         }
         Record::Gnss(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
             let p = cal.pvt;
-            write!(
+            writeln!(
                 row,
-                ",{},{},{},{},{:.8},{:.8},{:.3},{:.4},{},{},{:.4},{}\n",
+                ",{},{},{},{},{:.8},{:.8},{:.3},{:.4},{},{},{:.4},{}",
                 p.itow_ms,
                 p.num_satellites,
                 p.fix_type as u8,
@@ -393,11 +393,11 @@ fn format_record(record: &Record) -> Result<Row, core::fmt::Error> {
         }
         Record::Baro(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
-            write!(row, ",{:.3},{:.3}\n", cal.pressure_mbar, cal.temperature_c)?;
+            writeln!(row, ",{:.3},{:.3}", cal.pressure_mbar, cal.temperature_c)?;
         }
         Record::Dht(Reading { raw, cal }) => {
             write_times(&mut row, raw.read_ts, raw.ts, cal.ts, raw.src.index())?;
-            write!(row, ",{:.2},{:.2}\n", cal.temperature_c, cal.humidity_rh)?;
+            writeln!(row, ",{:.2},{:.2}", cal.temperature_c, cal.humidity_rh)?;
         }
     }
     Ok(row)

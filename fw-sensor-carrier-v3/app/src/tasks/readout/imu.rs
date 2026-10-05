@@ -214,7 +214,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 
         let pair_dt_us =
             read_ts.duration_since(batch_start).as_micros() / (fifo_entries / 2) as u64;
-        for (i, pair) in fifo.chunks_exact(2).enumerate() {
+        for (i, pair) in fifo.as_chunks::<2>().0.iter().enumerate() {
             let (acc, gyr) = match (pair[0].tag_sensor(), pair[1].tag_sensor()) {
                 (TagSensor::AccelerometerNC, TagSensor::GyroscopeNC) => (pair[0], pair[1]),
                 (TagSensor::GyroscopeNC, TagSensor::AccelerometerNC) => (pair[1], pair[0]),

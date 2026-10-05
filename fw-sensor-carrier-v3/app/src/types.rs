@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Per-sensor samples and the estimator's output. A sample is a measurement
 //! with its source and timestamp.
 
@@ -123,6 +121,7 @@ pub struct RawDhtSample {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DhtSample {
+    #[expect(dead_code, reason = "no consumer reads calibrated DHT samples yet")]
     pub src: DhtId,
     pub ts: Instant,
     pub temperature_c: f32,
@@ -150,7 +149,6 @@ pub struct Pvt {
 /// Selected SEF-light state, including MSL height and body-to-NED attitude.
 #[derive(Clone, Copy, Debug)]
 pub struct StateEstimate {
-    pub ts: Instant,
     /// Height and vertical velocity may be sent as MSL telemetry once true.
     pub msl_ready: bool,
     pub height_msl_m: f32,

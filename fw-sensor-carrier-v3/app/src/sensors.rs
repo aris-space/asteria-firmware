@@ -23,7 +23,6 @@ macro_rules! define_sensor_family {
 
         impl $name {
             /// Every id in this family, in index order.
-            #[allow(dead_code)]
             pub const ALL: [$name; $count_name] = [$($name($index)),+];
 
             pub const fn index(self) -> usize {

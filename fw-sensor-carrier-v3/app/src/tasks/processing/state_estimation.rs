@@ -311,7 +311,6 @@ impl Processor {
         let state = self.estimator.selected_state();
         let uncertainty = self.estimator.selected_uncertainty();
         signals::STATE_ESTIMATE_WATCH.sender().send(StateEstimate {
-            ts,
             msl_ready: self.msl_ready[selected],
             height_msl_m: state.height_m,
             velocity_mps: state.velocity_mps,

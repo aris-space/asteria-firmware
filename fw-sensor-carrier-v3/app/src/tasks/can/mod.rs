@@ -4,7 +4,6 @@
 use embassy_stm32::can::enums::BusError;
 use embassy_stm32::can::frame::{self, FdFrame, Header};
 use embassy_stm32::can::{Can, CanRx, CanTx};
-use embassy_time::TimeoutError;
 use embedded_can::Id;
 use hermes_can::messages::Message;
 use hermes_can::{CanDecodeError, CanEncodeError, CanMessage, next_valid_length};
@@ -15,14 +14,10 @@ pub mod tx;
 pub const THIS_BOARD_ID: hermes_can::messages::BoardId =
     hermes_can::messages::BoardId::SensorCarrier;
 
-#[allow(dead_code)]
 #[derive(Debug, thiserror::Error, defmt::Format)]
 pub enum CanError {
     #[error("CAN bus error")]
     Bus(BusError),
-
-    #[error("CAN timeout")]
-    Timeout(TimeoutError),
 
     #[error("Encoding CAN message failed")]
     Encode(#[from] CanEncodeError),
