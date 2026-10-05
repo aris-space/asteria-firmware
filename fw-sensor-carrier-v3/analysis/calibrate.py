@@ -28,6 +28,9 @@ IMU_HZ = 833.0
 # A one-second window counts as still if no axis varies more than this.
 STILL_WINDOW_S = 1.0
 STILL_MAX_SPREAD_DPS = 0.5
+# A board resting in a hand wobbles by about 1 dps, which spoils a gyro bias
+# but leaves the measured gravity unchanged.
+ACCEL_STILL_MAX_SPREAD_DPS = 2.0
 MIN_STILL_S = 5.0
 # Plausible accelerometer correction per axis, as in the firmware; anything
 # beyond means a bad fit.
@@ -36,6 +39,8 @@ ACCEL_SCALE_RANGE = (0.9, 1.1)
 # Plausible Earth-field magnitude, as in the firmware.
 MIN_FIELD_NT = 22_000.0
 MAX_FIELD_NT = 67_000.0
+# A clean tumble fits to under 1 %; more means disturbances or poor coverage.
+MAX_MAG_FIT_ERROR_PERCENT = 3.0
 # Both IMUs are the same chip with the same settings and timestamping, so
 # they should agree to within one 833 Hz sample.
 MAX_IMU_LATENCY_US = 1_000
@@ -110,13 +115,13 @@ def within(t: np.ndarray, ranges) -> np.ndarray:
     return np.any([(t >= start) & (t < end) for start, end in ranges], axis=0) if ranges else np.zeros(len(t), bool)
 
 
-def auto_still(t: np.ndarray, rate: np.ndarray) -> np.ndarray:
+def auto_still(t: np.ndarray, rate: np.ndarray, max_spread_dps: float = STILL_MAX_SPREAD_DPS) -> np.ndarray:
     """Samples in one-second windows where the board did not rotate."""
     window = np.floor(t / STILL_WINDOW_S)
     still = np.zeros(len(t), bool)
     for w in np.unique(window):
         inside = window == w
-        still[inside] = np.all(rate[inside].std(axis=0) < STILL_MAX_SPREAD_DPS)
+        still[inside] = np.all(rate[inside].std(axis=0) < max_spread_dps)
     return still
 
 
@@ -132,7 +137,7 @@ def fit_gyro(log, imu: int) -> GyroFit:
 def fit_accel(log, imu: int) -> AccelFit:
     samples = log.sensor("imu", imu)
     t, accel = samples.t.to_numpy(), imu_board_g(samples)
-    still = auto_still(t, imu_board_dps(samples))
+    still = auto_still(t, imu_board_dps(samples), ACCEL_STILL_MAX_SPREAD_DPS)
     window = np.floor(t / STILL_WINDOW_S)
     rest = np.array([accel[still & (window == w)].mean(axis=0) for w in np.unique(window[still])]).reshape(-1, 3)
     fit = AccelFit(f"IMU_{imu}", rest)
@@ -193,7 +198,7 @@ def fit_mag(log, mag: int) -> MagFit:
     fit.field_strength = field
     magnitudes = np.linalg.norm(fit.corrected()[used], axis=1)
     fit.error_percent = float(np.sqrt(np.mean((magnitudes / field - 1) ** 2)) * 100)
-    if not MIN_FIELD_NT <= field * MAG_NT_PER_LSB <= MAX_FIELD_NT:
+    if not MIN_FIELD_NT <= field * MAG_NT_PER_LSB <= MAX_FIELD_NT or fit.error_percent > MAX_MAG_FIT_ERROR_PERCENT:
         fit.hard_iron = None
     return fit
 
@@ -234,7 +239,8 @@ def print_lines(name: str, gyros, accels, mags, estimates) -> None:
         us = latency_us.get(fit.sensor)
         if fit.hard_iron is None:
             print(
-                f"# {fit.sensor}: no plausible fit from {fit.used.sum()} samples (tumble through all orientations); no line"
+                f"# {fit.sensor}: no good fit from {fit.used.sum()} samples (error {fit.error_percent:.1f} %; "
+                "tumble slowly through all orientations, away from metal); no line"
             )
         elif us is None:
             print(f"# {fit.sensor}: latency not observable; no line")
