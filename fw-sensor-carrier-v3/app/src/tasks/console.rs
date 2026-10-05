@@ -6,6 +6,7 @@ use core::fmt::{self, Write as _};
 use core::str::SplitAsciiWhitespace;
 
 use embassy_executor::Spawner;
+use embassy_time::Instant;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::{Builder, UsbDevice};
 use embedded_io_async_06::{ErrorType, Read, Write};
@@ -13,11 +14,13 @@ use heapless::String;
 use noline::builder::EditorBuilder;
 use static_cell::StaticCell;
 
-use crate::calibration::{self, Calibrations, Correction, Name, baro, dht, gnss, imu, mag};
+use crate::calibration::{self, Calibrations, Correction, baro, dht, gnss, imu, mag};
 use crate::resources::flash;
 use crate::resources::usb::UsbDriver;
 use crate::sensors::SensorId;
+use crate::signals;
 use crate::storage::{self, Storage};
+use crate::types::Mark;
 
 type Class = CdcAcmClass<'static, UsbDriver>;
 
@@ -102,16 +105,15 @@ impl Write for ConsoleIo<'_> {
 
 const PROMPT: &str = "asteria> ";
 const HELP: &str = r"commands:
-  cal mag <name>         run magnetometer calibration (label required)
-  cal imu <name>         measure gyro offsets while the board is still
-  cal latency <id> <us>  set a sensor's latency, e.g. 'cal latency GNSS_0 25000'
-  cal show               show stored calibrations
-  flash info         show chip id and status register
-  flash list         list the keys you can clear
-  flash clear <key>  clear a key (needs --yes)
-  flash erase        wipe all stored config (needs --yes)
-  reset              reboot the board
-  help               show this
+  cal set <id> <key>=<value>...  store a line printed by the calibration tool
+  cal show                       print the applied calibration as cal set lines
+  mark <label>                   label this moment in the SD log, e.g. 'mark still'
+  flash info                     show chip id and status register
+  flash list                     list the keys you can clear
+  flash clear <key>              clear a key (needs --yes)
+  flash erase                    wipe all stored config (needs --yes)
+  reset                          reboot the board
+  help                           show this
 ";
 
 /// Build the USB device + CDC class from static buffers and spawn the device
@@ -150,7 +152,8 @@ async fn usb_device_task(mut device: UsbDevice<'static, UsbDriver>) -> ! {
 
 #[embassy_executor::task]
 async fn console_task(mut class: Class, storage: &'static Storage) -> ! {
-    let mut line_buf = [0u8; 128];
+    // Fits the longest `cal set` line, the magnetometer's.
+    let mut line_buf = [0u8; 256];
     let mut history = [0u8; 256];
     loop {
         class.wait_connection().await;
@@ -179,6 +182,7 @@ async fn handle_line(class: &mut ConsoleIo<'_>, line: &str, storage: &Storage) {
         None => {}
         Some("help") => say(class, HELP).await,
         Some("cal") => cmd_cal(class, &mut args, storage).await,
+        Some("mark") => cmd_mark(class, &mut args).await,
         Some("flash") => cmd_flash(class, &mut args, storage).await,
         Some("reset") => {
             say(class, "resetting...\n").await;
@@ -193,101 +197,42 @@ async fn cmd_cal(
     args: &mut SplitAsciiWhitespace<'_>,
     storage: &Storage,
 ) {
-    match args.next() {
-        Some("mag") => cmd_cal_mag(class, args, storage).await,
-        Some("imu") => cmd_cal_imu(class, args, storage).await,
-        Some("latency") => cmd_cal_latency(class, args, storage).await,
-        Some("show") => cal_show(class, storage).await,
+    match (args.next(), args.next()) {
+        (Some("set"), Some(sensor)) => match calibration::set(storage, sensor, args).await {
+            Ok(()) => {
+                sayf(
+                    class,
+                    format_args!(paint!(green, "stored {}; reset to apply\n"), sensor),
+                )
+                .await
+            }
+            Err(reason) => {
+                sayf(
+                    class,
+                    format_args!(paint!(red, "{} not stored: {}\n"), sensor, reason),
+                )
+                .await
+            }
+        },
+        (Some("show"), None) => {
+            show_cals(class, storage, &imu::CAL).await;
+            show_cals(class, storage, &mag::CAL).await;
+            show_cals(class, storage, &gnss::CAL).await;
+            show_cals(class, storage, &baro::CAL).await;
+            show_cals(class, storage, &dht::CAL).await;
+        }
         _ => {
             say(
                 class,
-                paint!(
-                    red,
-                    "usage: cal <mag <name>|imu <name>|latency <id> <us>|show>\n"
-                ),
+                paint!(red, "usage: cal <set <id> <key>=<value>...|show>\n"),
             )
             .await
         }
     }
 }
 
-async fn cmd_cal_imu(
-    class: &mut ConsoleIo<'_>,
-    args: &mut SplitAsciiWhitespace<'_>,
-    storage: &Storage,
-) {
-    let Some(name) = cal_name(class, args, paint!(red, "usage: cal imu <name>\n")).await else {
-        return;
-    };
-    say(class, "gyro cal: keep the board still for 5 seconds\n").await;
-    let mut cal = imu::ImuCal::default();
-    cal.collect().await;
-    let n = cal.counts();
-    sayf(
-        class,
-        format_args!("collected {} / {} IMU samples\n", n[0], n[1]),
-    )
-    .await;
-    let reports = cal.finish(name, storage).await;
-    for report in &reports {
-        sayf(class, format_args!("{report}\n")).await;
-    }
-    report_outcome(class, reports.iter().any(imu::CalReport::stored)).await;
-}
-
-async fn cmd_cal_mag(
-    class: &mut ConsoleIo<'_>,
-    args: &mut SplitAsciiWhitespace<'_>,
-    storage: &Storage,
-) {
-    let Some(name) = cal_name(class, args, paint!(red, "usage: cal mag <name>\n")).await else {
-        return;
-    };
-    say(
-        class,
-        "mag cal: tumble the board slowly through all orientations (~30s)\n",
-    )
-    .await;
-    let mut cal = mag::MagCal::default();
-    for _ in 0..mag::PROGRESS_TICKS {
-        cal.collect_tick().await;
-        let n = cal.counts();
-        sayf(
-            class,
-            format_args!("collected {} / {} mag samples\n", n[0], n[1]),
-        )
-        .await;
-    }
-    let reports = cal.finish(name, storage).await;
-    for report in &reports {
-        sayf(class, format_args!("{report}\n")).await;
-    }
-    report_outcome(class, reports.iter().any(mag::CalReport::stored)).await;
-}
-
-async fn cmd_cal_latency(
-    class: &mut ConsoleIo<'_>,
-    args: &mut SplitAsciiWhitespace<'_>,
-    storage: &Storage,
-) {
-    let (Some(sensor), Some(Ok(latency_us))) = (args.next(), args.next().map(str::parse)) else {
-        say(class, paint!(red, "usage: cal latency <id> <us>\n")).await;
-        return;
-    };
-    match calibration::store_latency(storage, sensor, latency_us).await {
-        Some(stored) => report_outcome(class, stored).await,
-        None => say(class, paint!(red, "unknown sensor (see 'flash list')\n")).await,
-    }
-}
-
-async fn cal_show(class: &mut ConsoleIo<'_>, storage: &Storage) {
-    show_cals(class, storage, &imu::CAL).await;
-    show_cals(class, storage, &mag::CAL).await;
-    show_cals(class, storage, &gnss::CAL).await;
-    show_cals(class, storage, &baro::CAL).await;
-    show_cals(class, storage, &dht::CAL).await;
-}
-
+/// Prints each applied calibration as the `cal set` line that stores it, and
+/// any different one waiting in flash for a reset.
 async fn show_cals<Id: SensorId, C: Correction, const N: usize>(
     class: &mut ConsoleIo<'_>,
     storage: &Storage,
@@ -295,66 +240,45 @@ async fn show_cals<Id: SensorId, C: Correction, const N: usize>(
 ) {
     for id in cals.ids() {
         let applied = cals.applied(id);
-        let pending = cals
-            .stored(storage, id)
-            .await
-            .filter(|stored| *stored != applied)
-            .map(|stored| stored.name);
-        show_cal_slot(class, id.name(), applied, pending).await;
+        sayf(class, format_args!("cal set {} {}\n", id.name(), applied)).await;
+        if let Some(stored) = cals.stored(storage, id).await.filter(|s| *s != applied) {
+            sayf(
+                class,
+                format_args!(
+                    paint!(yellow, "  in flash, applies after reset: cal set {} {}\n"),
+                    id.name(),
+                    stored
+                ),
+            )
+            .await;
+        }
     }
 }
 
-async fn show_cal_slot(
-    class: &mut ConsoleIo<'_>,
-    label: &str,
-    applied: impl fmt::Display,
-    pending: Option<Name>,
-) {
-    sayf(
-        class,
-        format_args!("{label} {} {applied}\n", paint!(green, "(applied)")),
-    )
-    .await;
-    if let Some(name) = pending {
-        sayf(
-            class,
-            format_args!(
-                paint!(yellow, "  flash has \"{}\" pending; reset to apply\n"),
-                name
-            ),
-        )
-        .await;
-    }
-    say(class, "\n").await;
-}
-
-async fn report_outcome(class: &mut ConsoleIo<'_>, stored: bool) {
-    if stored {
-        say(class, paint!(green, "written to flash; reset to apply.\n")).await;
-    } else {
-        say(class, paint!(red, "NOT stored (see results above).\n")).await;
-    }
-}
-
-/// The calibration name argument, or `None` after telling the user why not.
-async fn cal_name<'a>(
-    class: &mut ConsoleIo<'_>,
-    args: &mut SplitAsciiWhitespace<'a>,
-    usage: &'static str,
-) -> Option<&'a str> {
-    let Some(name) = args.next() else {
-        say(class, usage).await;
-        return None;
+async fn cmd_mark(class: &mut ConsoleIo<'_>, args: &mut SplitAsciiWhitespace<'_>) {
+    let label = match (args.next(), args.next()) {
+        (Some(label), None) if !label.contains(',') => String::try_from(label).ok(),
+        _ => None,
     };
-    if name.len() > Name::CAP {
-        sayf(
-            class,
-            format_args!(paint!(red, "name too long (max {} chars)\n"), Name::CAP),
-        )
-        .await;
-        return None;
+    match label {
+        Some(label) => {
+            sayf(class, format_args!("marked {}\n", label)).await;
+            signals::submit_mark(Mark {
+                ts: Instant::now(),
+                label,
+            });
+        }
+        None => {
+            say(
+                class,
+                paint!(
+                    red,
+                    "usage: mark <label> (one word, up to 16 characters, no commas)\n"
+                ),
+            )
+            .await
+        }
     }
-    Some(name)
 }
 
 async fn cmd_flash(

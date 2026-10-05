@@ -61,7 +61,6 @@ lsm303agr = { version = "1.1.0", features = ["async"] }
 sht4x = { version = "0.2.0", features = ["embedded-hal-async", "defmt"] }
 ublox = { version = "0.4.5", default-features = false }
 
-magcal = { git = "https://github.com/Rechenmaschine/magcal-rs.git" }
 
 embedded-can = "0.4.1"
 embedded-hal = "1.0.0"

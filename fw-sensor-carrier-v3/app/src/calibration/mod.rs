@@ -7,13 +7,14 @@
 //! 4. correction: apply the stored per-unit correction.
 //!
 //! Units and axes are fixed by the chip and the PCB, so they are code. Latency
-//! and the correction are measured per board and stored in flash as one
-//! [`StoredCal`] per sensor. [`load`] reads them once at boot; a value written
-//! from the console applies after a reset.
+//! and the correction are fitted offline from SD logs and stored in flash as
+//! one [`StoredCal`] per sensor, written with the console's `cal set` line in
+//! the same `key=value` form `cal show` prints. [`load`] reads them once at
+//! boot, so a new value applies after a reset.
 //!
 //! Each `calibration/<kind>.rs` has the same layout: hardware constants and
 //! `sensor_to_board` (where the sensor has axes), its `Correction`, the `CAL`
-//! table, `apply_calibration`, then the calibration routine if it has one.
+//! table, then `apply_calibration`.
 
 use core::fmt;
 
@@ -42,25 +43,29 @@ pub async fn load(storage: &Storage) {
     dht::CAL.load(storage).await;
 }
 
-/// Stores the latency of the sensor named `sensor`, keeping its correction.
-/// Returns `None` if no sensor has that name.
-pub async fn store_latency(storage: &Storage, sensor: &str, latency_us: i32) -> Option<bool> {
+/// Parses and stores the calibration of the sensor named `sensor` from
+/// `name=… latency_us=… <correction fields>`.
+pub async fn set<'a>(
+    storage: &Storage,
+    sensor: &str,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Result<(), &'static str> {
     if let Some(id) = ImuId::from_name(sensor) {
-        return Some(imu::CAL.store_latency(storage, id, latency_us).await);
+        return imu::CAL.store(storage, id, fields).await;
     }
     if let Some(id) = MagId::from_name(sensor) {
-        return Some(mag::CAL.store_latency(storage, id, latency_us).await);
+        return mag::CAL.store(storage, id, fields).await;
     }
     if let Some(id) = GnssId::from_name(sensor) {
-        return Some(gnss::CAL.store_latency(storage, id, latency_us).await);
+        return gnss::CAL.store(storage, id, fields).await;
     }
     if let Some(id) = BaroId::from_name(sensor) {
-        return Some(baro::CAL.store_latency(storage, id, latency_us).await);
+        return baro::CAL.store(storage, id, fields).await;
     }
     if let Some(id) = DhtId::from_name(sensor) {
-        return Some(dht::CAL.store_latency(storage, id, latency_us).await);
+        return dht::CAL.store(storage, id, fields).await;
     }
-    None
+    Err("unknown sensor")
 }
 
 /// A sensor kind's per-unit correction, stored inside [`StoredCal`].
@@ -68,6 +73,11 @@ pub trait Correction:
     Copy + PartialEq + Serialize + DeserializeOwned + fmt::Display + 'static
 {
     const DEFAULT: Self;
+    /// The `key`s of [`set`](Self::set); a `cal set` line must give all of them.
+    const FIELDS: &'static [&'static str];
+
+    /// Sets one field from its console text; `false` if the value does not parse.
+    fn set(&mut self, key: &str, value: &str) -> bool;
 
     /// Rejects a stored record that decodes but cannot be applied.
     fn is_valid(&self) -> bool {
@@ -90,6 +100,45 @@ impl<C: Correction> StoredCal<C> {
         correction: C::DEFAULT,
     };
 
+    /// Parses `name=… latency_us=…` and every correction field. A missing,
+    /// unknown, or unparsable field rejects the whole line.
+    pub fn parse<'a>(fields: impl IntoIterator<Item = &'a str>) -> Result<Self, &'static str> {
+        let mut cal = Self::DEFAULT;
+        let mut seen = 0u32;
+        for field in fields {
+            let (key, value) = field.split_once('=').ok_or("expected key=value")?;
+            let bit = match key {
+                "name" if value.len() <= Name::CAP => {
+                    cal.name = Name::new(value);
+                    0
+                }
+                "name" => return Err("name too long"),
+                "latency_us" => {
+                    cal.latency_us = value.parse().map_err(|_| "latency_us is not an integer")?;
+                    1
+                }
+                _ => {
+                    let index = C::FIELDS
+                        .iter()
+                        .position(|&known| known == key)
+                        .ok_or("unknown field")?;
+                    if !cal.correction.set(key, value) {
+                        return Err("malformed value");
+                    }
+                    2 + index
+                }
+            };
+            seen |= 1 << bit;
+        }
+        if seen != (1 << (2 + C::FIELDS.len())) - 1 {
+            return Err("missing fields");
+        }
+        if !cal.correction.is_valid() {
+            return Err("values out of range");
+        }
+        Ok(cal)
+    }
+
     /// The physical measurement time of a sample the readout stamped `ts`.
     pub fn sample_time(&self, ts: Instant) -> Instant {
         let latency = Duration::from_micros(self.latency_us.unsigned_abs().into());
@@ -101,18 +150,12 @@ impl<C: Correction> StoredCal<C> {
     }
 }
 
+/// The `cal set` fields, so `cal show` output can be pasted back.
 impl<C: Correction> fmt::Display for StoredCal<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if *self == Self::DEFAULT {
-            return write!(
-                f,
-                "\"{}\" \x1b[31m(built-in default, not calibrated)\x1b[0m",
-                self.name
-            );
-        }
         write!(
             f,
-            "\"{}\"  latency {} us{}",
+            "name={} latency_us={}{}",
             self.name, self.latency_us, self.correction
         )
     }
@@ -166,35 +209,18 @@ impl<Id: SensorId, C: Correction, const N: usize> Calibrations<Id, C, N> {
             .filter(|cal| cal.correction.is_valid())
     }
 
-    /// Stores a new correction, keeping the sensor's latency.
-    pub async fn store_correction(
+    /// Stores the calibration parsed from a `cal set` line.
+    pub async fn store<'a>(
         &self,
         storage: &Storage,
         id: Id,
-        name: Name,
-        correction: C,
-    ) -> bool {
-        let cal = StoredCal {
-            name,
-            correction,
-            ..self.latest(storage, id).await
-        };
-        storage.store(&key(id), &cal).await
-    }
-
-    /// Stores a new latency, keeping the sensor's correction.
-    pub async fn store_latency(&self, storage: &Storage, id: Id, latency_us: i32) -> bool {
-        let cal = StoredCal {
-            latency_us,
-            ..self.latest(storage, id).await
-        };
-        storage.store(&key(id), &cal).await
-    }
-
-    async fn latest(&self, storage: &Storage, id: Id) -> StoredCal<C> {
-        match self.stored(storage, id).await {
-            Some(cal) => cal,
-            None => self.applied(id),
+        fields: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), &'static str> {
+        let cal = StoredCal::<C>::parse(fields)?;
+        if storage.store(&key(id), &cal).await {
+            Ok(())
+        } else {
+            Err("flash write failed")
         }
     }
 }
@@ -245,4 +271,29 @@ impl defmt::Format for Name {
     fn format(&self, fmt: defmt::Formatter) {
         defmt::write!(fmt, "{}", self.as_str());
     }
+}
+
+/// Comma-separated floats, as `cal set` takes them.
+pub struct Floats<'a>(pub &'a [f32]);
+
+impl fmt::Display for Floats<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, value) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(",")?;
+            }
+            write!(f, "{value}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Exactly `N` comma-separated floats.
+pub fn parse_floats<const N: usize>(text: &str) -> Option<[f32; N]> {
+    let mut values = [0.0; N];
+    let mut parts = text.split(',');
+    for value in &mut values {
+        *value = parts.next()?.parse().ok()?;
+    }
+    parts.next().is_none().then_some(values)
 }
