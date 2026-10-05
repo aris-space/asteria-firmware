@@ -227,9 +227,9 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
 
     /// Processes one timestamped IMU sample and advances only that IMU's filter.
     ///
-    /// The first sample for each IMU establishes its time origin and returns `false`. Every later
-    /// sample derives its time step from that IMU's preceding sample, advances the chain, and
-    /// returns `true`.
+    /// The first sample for each IMU establishes its time origin and its initial attitude from
+    /// the measured gravity, and returns `false`. Every later sample derives its time step from
+    /// that IMU's preceding sample, advances the chain, and returns `true`.
     ///
     /// # Errors
     ///
@@ -249,6 +249,7 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
             return Err(EstimatorError::MeasurementTooOld);
         }
         let Some(previous_time_us) = self.last_imu_sample_time_us[index] else {
+            self.imu_verticalizers[index].align_to_gravity(measurement);
             self.last_imu_sample_time_us[index] = Some(sample_time_us);
             return Ok(false);
         };

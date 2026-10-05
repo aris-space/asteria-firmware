@@ -1,5 +1,5 @@
 use fusion_ahrs::{Ahrs, AhrsSettings, Convention};
-use nalgebra::Vector3;
+use nalgebra::{UnitQuaternion, Vector3};
 
 use crate::error::{EstimatorError, validate_finite, validate_positive};
 
@@ -152,6 +152,24 @@ impl ImuVerticalizer {
                 recovery_trigger_period: config.recovery_trigger_period,
             }),
         }
+    }
+
+    /// Sets the attitude from the gravity in one stationary sample, with zero heading. Without
+    /// this the attitude starts level, and until it converges gravity leaks into the vertical
+    /// acceleration of any board that is not level. A sample without measurable gravity leaves
+    /// the attitude unchanged.
+    pub fn align_to_gravity(&mut self, measurement: ImuMeasurement) {
+        // At rest the accelerometer measures the reaction to gravity, so down is its negation.
+        let Some(down) =
+            (-Vector3::from(measurement.acceleration_body_mps2)).try_normalize(f32::EPSILON)
+        else {
+            return;
+        };
+        let orientation =
+            UnitQuaternion::rotation_between(&down, &Vector3::z()).unwrap_or_else(|| {
+                UnitQuaternion::from_axis_angle(&Vector3::x_axis(), core::f32::consts::PI)
+            });
+        self.ahrs.set_quaternion(orientation);
     }
 
     /// Updates attitude and returns up-positive, gravity-compensated acceleration in m/s².

@@ -14,6 +14,10 @@ mod idx {
 
 type Vector4 = SVector<f32, { idx::SIZE }>;
 type Matrix4 = SMatrix<f32, { idx::SIZE }, { idx::SIZE }>;
+// Without GNSS, height and barometer bias are nearly perfectly correlated with
+// variances near 10^6 m², which f32 cannot difference without the covariance
+// losing positive definiteness. The state and models stay f32.
+type Covariance = SMatrix<f64, { idx::SIZE }, { idx::SIZE }>;
 
 /// One calibrated barometric-height observation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -169,7 +173,7 @@ impl VerticalFilterConfig {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VerticalFilter {
     state: Vector4,
-    covariance: Matrix4,
+    covariance: Covariance,
     nominal_acceleration_noise_variance_mps4: f32,
     degraded_acceleration_noise_variance_mps4: f32,
     barometer_bias_walk_variance_m2_per_s: [f32; BAROMETER_COUNT],
@@ -180,11 +184,13 @@ impl VerticalFilter {
     /// Creates a filter at zero height and zero vertical velocity.
     #[must_use]
     pub fn new(config: VerticalFilterConfig) -> Self {
-        let mut covariance = Matrix4::zeros();
-        covariance[(idx::ALT, idx::ALT)] = square(config.initial_height_std_m);
-        covariance[(idx::VEL, idx::VEL)] = square(config.initial_velocity_std_mps);
-        covariance[(idx::BIAS_0, idx::BIAS_0)] = square(config.initial_barometer_bias_std_m[0]);
-        covariance[(idx::BIAS_1, idx::BIAS_1)] = square(config.initial_barometer_bias_std_m[1]);
+        let mut covariance = Covariance::zeros();
+        covariance[(idx::ALT, idx::ALT)] = f64::from(square(config.initial_height_std_m));
+        covariance[(idx::VEL, idx::VEL)] = f64::from(square(config.initial_velocity_std_mps));
+        covariance[(idx::BIAS_0, idx::BIAS_0)] =
+            f64::from(square(config.initial_barometer_bias_std_m[0]));
+        covariance[(idx::BIAS_1, idx::BIAS_1)] =
+            f64::from(square(config.initial_barometer_bias_std_m[1]));
 
         Self {
             state: Vector4::zeros(),
@@ -209,15 +215,19 @@ impl VerticalFilter {
 
     /// Returns the externally relevant vertical uncertainty terms.
     #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "variances are reported in f32 like the state"
+    )]
     pub fn uncertainty(&self) -> VerticalUncertainty {
         VerticalUncertainty {
-            height_variance_m2: self.covariance[(idx::ALT, idx::ALT)],
-            velocity_variance_m2_per_s2: self.covariance[(idx::VEL, idx::VEL)],
+            height_variance_m2: self.covariance[(idx::ALT, idx::ALT)] as f32,
+            velocity_variance_m2_per_s2: self.covariance[(idx::VEL, idx::VEL)] as f32,
             barometer_bias_variance_m2: [
-                self.covariance[(idx::BIAS_0, idx::BIAS_0)],
-                self.covariance[(idx::BIAS_1, idx::BIAS_1)],
+                self.covariance[(idx::BIAS_0, idx::BIAS_0)] as f32,
+                self.covariance[(idx::BIAS_1, idx::BIAS_1)] as f32,
             ],
-            height_velocity_covariance_m2_per_s: self.covariance[(idx::ALT, idx::VEL)],
+            height_velocity_covariance_m2_per_s: self.covariance[(idx::ALT, idx::VEL)] as f32,
         }
     }
 
@@ -288,13 +298,15 @@ impl VerticalFilter {
             Some(&mut transition),
             Some(&mut acceleration_jacobian),
         );
+        let transition = transition.cast::<f64>();
+        let acceleration_jacobian = acceleration_jacobian.cast::<f64>();
         let mut process_noise = acceleration_jacobian
             * acceleration_jacobian.transpose()
-            * acceleration_noise_variance_mps4;
+            * f64::from(acceleration_noise_variance_mps4);
         process_noise[(idx::BIAS_0, idx::BIAS_0)] =
-            self.barometer_bias_walk_variance_m2_per_s[0] * dt_s;
+            f64::from(self.barometer_bias_walk_variance_m2_per_s[0] * dt_s);
         process_noise[(idx::BIAS_1, idx::BIAS_1)] =
-            self.barometer_bias_walk_variance_m2_per_s[1] * dt_s;
+            f64::from(self.barometer_bias_walk_variance_m2_per_s[1] * dt_s);
 
         self.covariance = transition * self.covariance * transition.transpose() + process_noise;
         symmetrize(&mut self.covariance);
@@ -362,22 +374,28 @@ impl VerticalFilter {
         Ok(VerticalGnssUpdate { height, velocity })
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the normalized innovation is reported in f32 like the state"
+    )]
     fn update_scalar(
         &mut self,
         innovation: f32,
         measurement_jacobian: &Vector4,
         measurement_noise_variance: f32,
     ) -> MeasurementUpdate {
+        let measurement_jacobian = measurement_jacobian.cast::<f64>();
+        let measurement_noise_variance = f64::from(measurement_noise_variance);
         let covariance_times_jacobian = self.covariance * measurement_jacobian;
         let innovation_variance =
             measurement_jacobian.dot(&covariance_times_jacobian) + measurement_noise_variance;
-        let normalized_innovation_squared = square(innovation) / innovation_variance;
-        let accepted = normalized_innovation_squared <= self.measurement_gate_squared;
+        let normalized_innovation_squared = f64::from(square(innovation)) / innovation_variance;
+        let accepted = normalized_innovation_squared <= f64::from(self.measurement_gate_squared);
         if accepted {
             let kalman_gain = covariance_times_jacobian / innovation_variance;
-            self.state += kalman_gain * innovation;
+            self.state += (kalman_gain * f64::from(innovation)).cast::<f32>();
             let joseph_correction =
-                Matrix4::identity() - kalman_gain * measurement_jacobian.transpose();
+                Covariance::identity() - kalman_gain * measurement_jacobian.transpose();
             self.covariance = joseph_correction * self.covariance * joseph_correction.transpose()
                 + (kalman_gain * kalman_gain.transpose()) * measurement_noise_variance;
             symmetrize(&mut self.covariance);
@@ -385,7 +403,7 @@ impl VerticalFilter {
         MeasurementUpdate {
             accepted,
             innovation,
-            normalized_innovation_squared,
+            normalized_innovation_squared: normalized_innovation_squared as f32,
         }
     }
 }
@@ -394,10 +412,10 @@ const fn square(value: f32) -> f32 {
     value * value
 }
 
-fn symmetrize(matrix: &mut Matrix4) {
+fn symmetrize(matrix: &mut Covariance) {
     for row in 0..idx::SIZE {
         for column in 0..row {
-            let value = f32::midpoint(matrix[(row, column)], matrix[(column, row)]);
+            let value = f64::midpoint(matrix[(row, column)], matrix[(column, row)]);
             matrix[(row, column)] = value;
             matrix[(column, row)] = value;
         }
