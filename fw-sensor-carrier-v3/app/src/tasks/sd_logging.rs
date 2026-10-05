@@ -132,109 +132,80 @@ pub async fn task(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>
     // Allow the switched SD supply to settle after setup.
     Timer::after(Duration::from_millis(250)).await;
     loop {
-        run_session(&mut sdmmc).await;
+        let _ = run_session(&mut sdmmc).await;
         Timer::after(Duration::from_secs(5)).await;
     }
 }
 
-async fn run_session(sdmmc: &mut Sd) {
+/// Mounts the card and logs to a new directory until a card error ends the
+/// session. Every error has been reported by the time this returns.
+async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
     let mut cmd_block = CmdBlock::new();
-    let card = match with_timeout(
+    let card = with_timeout(
         Duration::from_secs(2),
         StorageDevice::new_sd_card(sdmmc, &mut cmd_block, mhz(25)),
     )
     .await
-    {
-        Ok(Ok(card)) => card,
-        Ok(Err(e)) => {
-            warn!("SD: card init failed: {}", Debug2Format(&e));
-            return;
-        }
-        Err(_) => {
-            warn!("SD: card init timed out");
-            return;
-        }
-    };
+    .map_err(|_| warn!("SD: card init timed out"))?
+    .map_err(|e| warn!("SD: card init failed: {}", Debug2Format(&e)))?;
     info!(
         "SD: initialized ({} MiB)",
         card.card().size() / (1024 * 1024)
     );
 
-    let mbr = match Mbr::new(BufStream::<_, 512>::new(card)).await {
-        Ok(mbr) => mbr,
-        Err(e) => {
-            warn!("SD: MBR read failed: {}", Debug2Format(&e));
-            return;
-        }
-    };
-    let Some(partition) = mbr
+    let mbr = Mbr::new(BufStream::<_, 512>::new(card))
+        .await
+        .map_err(|e| warn!("SD: MBR read failed: {}", Debug2Format(&e)))?;
+    let (partition, _) = mbr
         .iter_used()
         .find(|(_, part)| part.is_fat())
-        .map(|(i, _)| i)
-    else {
-        warn!("SD: no FAT partition found");
-        return;
-    };
-    let slice = match mbr.into_partition(partition).await {
-        Ok(slice) => slice,
-        Err(e) => {
-            warn!("SD: partition open failed: {}", Debug2Format(&e));
-            return;
-        }
-    };
-    let fs = match FileSystem::new(slice, FsOptions::new()).await {
-        Ok(fs) => fs,
-        Err(e) => {
-            warn!("SD: FAT mount failed: {}", Debug2Format(&e));
-            return;
-        }
-    };
+        .ok_or_else(|| warn!("SD: no FAT partition found"))?;
+    let slice = mbr
+        .into_partition(partition)
+        .await
+        .map_err(|e| warn!("SD: partition open failed: {}", Debug2Format(&e)))?;
+    let fs = FileSystem::new(slice, FsOptions::new())
+        .await
+        .map_err(|e| warn!("SD: FAT mount failed: {}", Debug2Format(&e)))?;
 
+    // The first unused LOGnnnn name.
     let root = fs.root_dir();
     let mut dir_name = String::<8>::new();
-    let mut dir = None;
+    let mut found = false;
     for number in 1..=9999 {
         dir_name.clear();
         write!(dir_name, "LOG{:04}", number).unwrap();
         match root.open_dir(&dir_name).await {
             Ok(_) => continue,
-            Err(FatError::NotFound) => {}
-            Err(e) => {
-                warn!("SD: log directory lookup failed: {}", Debug2Format(&e));
-                return;
-            }
-        }
-        match root.create_dir(&dir_name).await {
-            Ok(created) => {
-                dir = Some(created);
+            Err(FatError::NotFound) => {
+                found = true;
                 break;
             }
             Err(e) => {
-                warn!(
-                    "SD: {} create failed: {}",
-                    dir_name.as_str(),
-                    Debug2Format(&e)
-                );
-                return;
+                warn!("SD: log directory lookup failed: {}", Debug2Format(&e));
+                return Err(());
             }
         }
     }
-    let Some(dir) = dir else {
+    if !found {
         warn!("SD: all log directory names are occupied");
-        return;
-    };
+        return Err(());
+    }
+    let dir = root.create_dir(&dir_name).await.map_err(|e| {
+        warn!(
+            "SD: {} create failed: {}",
+            dir_name.as_str(),
+            Debug2Format(&e)
+        )
+    })?;
 
     let mut logs = Vec::<_, FILE_COUNT>::new();
     for spec in &FILES {
-        match dir.create_file(spec.name).await {
-            Ok(file) => {
-                let _ = logs.push(CsvLog::new(spec, file));
-            }
-            Err(e) => {
-                warn!("SD: {} create failed: {}", spec.name, Debug2Format(&e));
-                return;
-            }
-        }
+        let file = dir
+            .create_file(spec.name)
+            .await
+            .map_err(|e| warn!("SD: {} create failed: {}", spec.name, Debug2Format(&e)))?;
+        let _ = logs.push(CsvLog::new(spec, file));
     }
     info!("SD: logging to {}", dir_name.as_str());
 
@@ -251,10 +222,9 @@ async fn run_session(sdmmc: &mut Sd) {
                 warn!("SD: {} row exceeded buffer", log.name);
                 continue;
             };
-            if let Err(e) = log.append(row.as_bytes()).await {
-                warn!("SD: {} write failed: {}", log.name, Debug2Format(&e));
-                return;
-            }
+            log.append(row.as_bytes())
+                .await
+                .map_err(|e| warn!("SD: {} write failed: {}", log.name, Debug2Format(&e)))?;
         }
         if Instant::now() < last_flush + FLUSH_PERIOD {
             continue;
@@ -270,21 +240,17 @@ async fn run_session(sdmmc: &mut Sd) {
             }
             row.push('\n').unwrap();
             let log = &mut logs[DROP_FILE];
-            if let Err(e) = log.append(row.as_bytes()).await {
-                warn!("SD: {} write failed: {}", log.name, Debug2Format(&e));
-                return;
-            }
+            log.append(row.as_bytes())
+                .await
+                .map_err(|e| warn!("SD: {} write failed: {}", log.name, Debug2Format(&e)))?;
         }
 
         let mut rows = [0u32; FILE_COUNT];
         for (log, rows) in logs.iter_mut().zip(&mut rows) {
-            match log.flush().await {
-                Ok(count) => *rows = count,
-                Err(e) => {
-                    warn!("SD: {} flush failed: {}", log.name, Debug2Format(&e));
-                    return;
-                }
-            }
+            *rows = log
+                .flush()
+                .await
+                .map_err(|e| warn!("SD: {} flush failed: {}", log.name, Debug2Format(&e)))?;
         }
         info!(
             "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, DHT={}, dropped={}",
