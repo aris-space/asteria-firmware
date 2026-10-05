@@ -45,7 +45,7 @@ const DROP_FILE: usize = SdLogRecord::KIND_COUNT;
 const FILES: [CsvFile; FILE_COUNT] = [
     CsvFile {
         name: "STATE.CSV",
-        header: "sample_us,imu,selected,msl_ready,redundancy_ready,height_msl_m,velocity_mps,bias0_m,bias1_m,height_std_m,velocity_std_mps,bias0_std_m,bias1_std_m,score,qw,qx,qy,qz\n",
+        header: "cal_us,imu,selected,msl_ready,redundancy_ready,height_msl_m,velocity_mps,bias0_m,bias1_m,height_std_m,velocity_std_mps,bias0_std_m,bias1_std_m,score,qw,qx,qy,qz\n",
     },
     CsvFile {
         name: "IMU.CSV",
