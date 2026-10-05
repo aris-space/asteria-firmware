@@ -9,6 +9,8 @@
 //! acceleration. They are relative to IMU_0. `mark still` and `mark tumble`
 //! in the console narrow which stretches are used.
 //!
+//! `--plots` writes SVG plots to check the gyro and magnetometer fits by eye.
+//!
 //! `simulate` writes logs with known latencies in the same format, and
 //! `study` runs the fits on many simulated scenarios.
 
@@ -16,6 +18,7 @@ mod calibrate;
 mod fit;
 mod log;
 mod models;
+mod plot;
 mod sim;
 mod spline;
 mod study;
@@ -25,6 +28,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use crate::calibrate::Calibration;
 use crate::fit::FitReport;
 use crate::log::{Log, STANDARD_GRAVITY, pressure_altitude_m};
 
@@ -51,6 +55,9 @@ enum Command {
         /// Ignore samples after this many seconds into the session.
         #[arg(long, default_value_t = f64::INFINITY)]
         to: f64,
+        /// Write SVG plots of the gyro and magnetometer fits into this directory.
+        #[arg(long)]
+        plots: Option<PathBuf>,
     },
     /// Write a simulated session with known latencies.
     Simulate {
@@ -77,12 +84,22 @@ enum Command {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     match Args::parse().command {
-        Command::Calibrate { log, from, to } => {
+        Command::Calibrate {
+            log,
+            from,
+            to,
+            plots,
+        } => {
             let mut log = Log::read(&log)?;
             print_overview(&log);
             log.crop(from, to);
             let latencies = fit_latencies(&log);
-            calibrate::print(&log, &latencies);
+            let calibration = Calibration::fit(&log);
+            calibration.print(&log, &latencies);
+            if let Some(dir) = plots {
+                plot::write(&dir, &log, &calibration)?;
+                println!("\nwrote plots to {}", dir.display());
+            }
         }
         Command::Simulate {
             scenario,

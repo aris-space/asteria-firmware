@@ -4,12 +4,12 @@
 
 use std::collections::BTreeMap;
 
-use magcal::Solver;
+use magcal::{MagCal, Solver};
 
-use crate::log::{Imu, Log};
+use crate::log::{Imu, Log, Mag};
 
 const GYRO_DPS_PER_LSB: f64 = 0.07;
-const MAG_NT_PER_LSB: f64 = 150.0;
+pub const MAG_NT_PER_LSB: f64 = 150.0;
 const IMU_HZ: f64 = 833.0;
 // A one-second window counts as still if no axis varies more than this.
 const STILL_WINDOW_S: f64 = 1.0;
@@ -19,100 +19,150 @@ const MIN_STILL_S: f64 = 5.0;
 const FIELD_RANGE_NT: std::ops::RangeInclusive<f64> = 22_000.0..=67_000.0;
 
 /// LSM6DSO32 sensor-to-board remap: negate x and z.
-fn imu_board_dps(raw: [f64; 3]) -> [f64; 3] {
+pub fn imu_board_dps(raw: [f64; 3]) -> [f64; 3] {
     [-raw[0], raw[1], -raw[2]].map(|counts| counts * GYRO_DPS_PER_LSB)
 }
 
 /// LSM303AGR sensor-to-board remap: negate all axes.
-fn mag_board_counts(raw: [i16; 3]) -> [i16; 3] {
+pub fn mag_board_counts(raw: [i16; 3]) -> [i16; 3] {
     raw.map(i16::saturating_neg)
 }
 
-/// Prints one `cal set` line per sensor whose calibration the log determines,
-/// and a comment for every sensor it does not.
-pub fn print(log: &Log, latencies: &BTreeMap<String, f64>) {
-    let name = log
-        .dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("offline");
-    let latency = |sensor: &str| latencies.get(sensor).map(|s| (s * 1e6).round() as i64);
-    let still = intervals(log, "still");
-    let tumble = intervals(log, "tumble");
+pub struct GyroFit<'a> {
+    pub sensor: String,
+    /// Samples taken while the board was still.
+    pub still: Vec<&'a Imu>,
+    /// `None` if the board was still for less than `MIN_STILL_S`.
+    pub bias_dps: Option<[f64; 3]>,
+}
 
-    println!("Paste into the console, then `reset` and `cal show`:");
-    for imu in 0..2 {
-        let sensor = format!("IMU_{imu}");
-        let still_samples = if still.is_empty() {
-            auto_still(&log.imu[imu])
-        } else {
-            within(&log.imu[imu], &still, |s| s.t)
-        };
-        let still_s = still_samples.len() as f64 / IMU_HZ;
-        match (gyro_bias(&still_samples), latency(&sensor)) {
-            (Some(bias), Some(latency_us)) => println!(
-                "cal set {sensor} name={name} latency_us={latency_us} gyro_bias_dps={:.4},{:.4},{:.4}",
-                bias[0], bias[1], bias[2]
-            ),
-            (None, _) => {
-                println!("# {sensor}: only {still_s:.1} s still, need {MIN_STILL_S:.0} s; no line")
+pub struct MagFit<'a> {
+    pub sensor: String,
+    /// Samples the fit used.
+    pub samples: Vec<&'a Mag>,
+    /// `None` if no fit with a plausible field strength was found.
+    pub fit: Option<MagCal>,
+}
+
+pub struct Calibration<'a> {
+    pub gyro: [GyroFit<'a>; 2],
+    pub mag: [MagFit<'a>; 2],
+}
+
+impl<'a> Calibration<'a> {
+    pub fn fit(log: &'a Log) -> Self {
+        let still = intervals(log, "still");
+        let tumble = intervals(log, "tumble");
+        let gyro = std::array::from_fn(|imu| {
+            let still = if still.is_empty() {
+                auto_still(&log.imu[imu])
+            } else {
+                within(&log.imu[imu], &still, |s| s.t)
+            };
+            GyroFit {
+                sensor: format!("IMU_{imu}"),
+                bias_dps: gyro_bias(&still),
+                still,
             }
-            (_, None) => println!("# {sensor}: latency not observable; no line"),
-        }
+        });
+        let mag = std::array::from_fn(|mag| {
+            let samples = if tumble.is_empty() {
+                log.mag[mag].iter().collect()
+            } else {
+                within(&log.mag[mag], &tumble, |s| s.t)
+            };
+            let mut solver = Solver::new();
+            for sample in &samples {
+                solver.push_sample(mag_board_counts(sample.field_raw));
+            }
+            let fit = solver.solve().ok().filter(|fit| {
+                FIELD_RANGE_NT.contains(&(fit.field_strength as f64 * MAG_NT_PER_LSB))
+            });
+            MagFit {
+                sensor: format!("MAG_BUS_{}", mag + 1),
+                samples,
+                fit,
+            }
+        });
+        Self { gyro, mag }
     }
-    for mag in 0..2 {
-        let sensor = format!("MAG_BUS_{}", mag + 1);
-        let samples = if tumble.is_empty() {
-            log.mag[mag].iter().collect()
-        } else {
-            within(&log.mag[mag], &tumble, |s| s.t)
-        };
-        let mut solver = Solver::new();
-        for sample in &samples {
-            solver.push_sample(mag_board_counts(sample.field_raw));
+
+    /// Prints one `cal set` line per sensor whose calibration the log
+    /// determines, and a comment for every sensor it does not.
+    pub fn print(&self, log: &Log, latencies: &BTreeMap<String, f64>) {
+        let name = log
+            .dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("offline");
+        let latency = |sensor: &str| latencies.get(sensor).map(|s| (s * 1e6).round() as i64);
+
+        println!("Paste into the console, then `reset` and `cal show`:");
+        for GyroFit {
+            sensor,
+            still,
+            bias_dps,
+        } in &self.gyro
+        {
+            match (bias_dps, latency(sensor)) {
+                (Some(bias), Some(latency_us)) => println!(
+                    "cal set {sensor} name={name} latency_us={latency_us} gyro_bias_dps={:.4},{:.4},{:.4}",
+                    bias[0], bias[1], bias[2]
+                ),
+                (None, _) => println!(
+                    "# {sensor}: only {:.1} s still, need {MIN_STILL_S:.0} s; no line",
+                    still.len() as f64 / IMU_HZ
+                ),
+                (_, None) => println!("# {sensor}: latency not observable; no line"),
+            }
         }
-        let fit = solver
-            .solve()
-            .ok()
-            .filter(|fit| FIELD_RANGE_NT.contains(&(fit.field_strength as f64 * MAG_NT_PER_LSB)));
-        match (fit, latency(&sensor)) {
-            (Some(fit), Some(latency_us)) => {
-                let h = fit.hard_iron.map(|counts| counts as f64 * MAG_NT_PER_LSB);
-                let s = fit.soft_iron;
-                println!(
-                    "# {sensor}: {:?} fit, field {:.1} uT, error {:.2} %, {} samples",
-                    fit.tier,
-                    fit.field_strength as f64 * MAG_NT_PER_LSB / 1000.0,
-                    fit.fit_error_percent,
+        for MagFit {
+            sensor,
+            samples,
+            fit,
+        } in &self.mag
+        {
+            match (fit, latency(sensor)) {
+                (Some(fit), Some(latency_us)) => {
+                    let h = fit.hard_iron.map(|counts| counts as f64 * MAG_NT_PER_LSB);
+                    let s = fit.soft_iron;
+                    println!(
+                        "# {sensor}: {:?} fit, field {:.1} uT, error {:.2} %, {} samples",
+                        fit.tier,
+                        fit.field_strength as f64 * MAG_NT_PER_LSB / 1000.0,
+                        fit.fit_error_percent,
+                        samples.len()
+                    );
+                    println!(
+                        "cal set {sensor} name={name} latency_us={latency_us} hard_nt={:.1},{:.1},{:.1} soft={:.5},{:.5},{:.5},{:.5},{:.5},{:.5},{:.5},{:.5},{:.5}",
+                        h[0],
+                        h[1],
+                        h[2],
+                        s[0][0],
+                        s[0][1],
+                        s[0][2],
+                        s[1][0],
+                        s[1][1],
+                        s[1][2],
+                        s[2][0],
+                        s[2][1],
+                        s[2][2],
+                    );
+                }
+                (None, _) => println!(
+                    "# {sensor}: no plausible fit from {} samples (tumble through all orientations); no line",
                     samples.len()
-                );
-                println!(
-                    "cal set {sensor} name={name} latency_us={latency_us} hard_nt={:.1},{:.1},{:.1} soft={:.5},{:.5},{:.5},{:.5},{:.5},{:.5},{:.5},{:.5},{:.5}",
-                    h[0],
-                    h[1],
-                    h[2],
-                    s[0][0],
-                    s[0][1],
-                    s[0][2],
-                    s[1][0],
-                    s[1][1],
-                    s[1][2],
-                    s[2][0],
-                    s[2][1],
-                    s[2][2],
-                );
+                ),
+                (_, None) => println!("# {sensor}: latency not observable; no line"),
             }
-            (None, _) => println!(
-                "# {sensor}: no plausible fit from {} samples (tumble through all orientations); no line",
-                samples.len()
-            ),
-            (_, None) => println!("# {sensor}: latency not observable; no line"),
         }
-    }
-    for sensor in ["BARO_BUS_1", "BARO_BUS_2", "GNSS_0", "GNSS_1"] {
-        match latency(sensor) {
-            Some(latency_us) => println!("cal set {sensor} name={name} latency_us={latency_us}"),
-            None => println!("# {sensor}: latency not observable; no line"),
+        for sensor in ["BARO_BUS_1", "BARO_BUS_2", "GNSS_0", "GNSS_1"] {
+            match latency(sensor) {
+                Some(latency_us) => {
+                    println!("cal set {sensor} name={name} latency_us={latency_us}")
+                }
+                None => println!("# {sensor}: latency not observable; no line"),
+            }
         }
     }
 }
