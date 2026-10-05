@@ -47,6 +47,9 @@ const GNSS_MIN_STD: f32 = 0.1;
 // GNSS height errors persist for a minute or more, so 20 Hz epochs are not
 // independent: at rest the height spread 9 m while the receiver reported 3 m.
 const GNSS_HEIGHT_STD_SCALE: f32 = 10.0;
+// Walking with the board, the receiver reported up to 0.75 m/s of vertical
+// speed the barometers did not see, which bent the height by up to 1 m.
+const GNSS_SPEED_STD_SCALE: f32 = 10.0;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
@@ -322,7 +325,8 @@ impl Processor {
                 height_std_m: (sample.pvt.vertical_accuracy_mm as f32 / 1_000.0
                     * GNSS_HEIGHT_STD_SCALE)
                     .max(GNSS_MIN_STD),
-                velocity_std_mps: sample.pvt.speed_accuracy_mps.max(GNSS_MIN_STD),
+                velocity_std_mps: (sample.pvt.speed_accuracy_mps * GNSS_SPEED_STD_SCALE)
+                    .max(GNSS_MIN_STD),
             },
             // SEF-light's convention: 3 is a usable 3D fix; it ignores tiers below.
             fix_tier: match sample.pvt.fix_type {

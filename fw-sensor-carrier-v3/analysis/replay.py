@@ -48,6 +48,7 @@ FIRMWARE = dict(
     maximum_aiding_delay_us=400_000,
     baro_height_std_m=1.5,
     gnss_height_std_scale=10.0,
+    gnss_speed_std_scale=10.0,
 )
 # Smallest GNSS standard deviation passed on, for receivers reporting zero.
 GNSS_MIN_STD = 0.1
@@ -69,6 +70,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
     settings = FIRMWARE | overrides
     baro_std = settings.pop("baro_height_std_m")
     gnss_height_scale = settings.pop("gnss_height_std_scale")
+    gnss_speed_scale = settings.pop("gnss_speed_std_scale")
     estimator = Estimator(**settings)
 
     imu, mag, baro, gnss = log.imu, log.mag, log.baro, log.gnss
@@ -110,7 +112,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
                     s.height_msl_m,
                     -s.velocity_down_mps,
                     max(s.vertical_accuracy_mm / 1000 * gnss_height_scale, GNSS_MIN_STD),
-                    max(s.speed_accuracy_mps, GNSS_MIN_STD),
+                    max(s.speed_accuracy_mps * gnss_speed_scale, GNSS_MIN_STD),
                     fix_tier(bool(s.fix_ok), int(s.fix_type)),
                     int(s.pdop_centi),
                 )
