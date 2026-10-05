@@ -117,13 +117,11 @@ impl Storage {
         }
     }
 
-    /// Read the flash chip's 3-byte JEDEC id (for diagnostics).
     pub async fn read_jedec_id(&self) -> JedecId {
         let mut map = self.map.lock().await;
         map.flash().read_jedec_id()
     }
 
-    /// Read flash status register 1 (for diagnostics).
     pub async fn status(&self) -> u8 {
         let mut map = self.map.lock().await;
         map.flash().status()

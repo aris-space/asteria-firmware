@@ -32,7 +32,7 @@ use crate::calibration;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{IMU_STATUS, ImuId};
 use crate::signals;
-use crate::types::{RawImuSample, SdLogRecord};
+use crate::types::{RawImuSample, Reading};
 
 /// Accelerometer output data rate. Keep both ODRs and BDRs at 833 Hz.
 const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
@@ -42,9 +42,7 @@ const GYRO_ODR: GyroscopeOdr = GyroscopeOdr::Hz833;
 const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
 /// Gyroscope batch data rate. Should match [`GYRO_ODR`]
 const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
-/// Accelerometer full-scale range
 pub const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G8;
-/// Gyroscope full-scale range
 pub const GYRO_FULL_SCALE: GyroscopeFullScale = GyroscopeFullScale::Dps2000;
 pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
     GyroscopeFullScale::Dps250 => 250.0,
@@ -188,9 +186,9 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::Wait>
     Active<SPI, INT>
 {
-    /// Drains the FIFO and publishes one sample per accel+gyro pair. The
-    /// pairs are spread evenly between the previous read and this one; the
-    /// sensor's own FIFO timestamps were less accurate than this interpolation.
+    /// Drains the FIFO and publishes one sample per accel+gyro pair, spread
+    /// evenly between the previous read and this one. This is more accurate
+    /// than the sensor's own FIFO timestamps.
     async fn read_batch(
         &mut self,
         fifo_buf: &mut [FifoDataOut],
@@ -216,7 +214,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 
         let pair_dt_us =
             read_ts.duration_since(batch_start).as_micros() / (fifo_entries / 2) as u64;
-        for (i, pair) in fifo.chunks_exact(2).enumerate() {
+        for (i, pair) in fifo.as_chunks::<2>().0.iter().enumerate() {
             let (acc, gyr) = match (pair[0].tag_sensor(), pair[1].tag_sensor()) {
                 (TagSensor::AccelerometerNC, TagSensor::GyroscopeNC) => (pair[0], pair[1]),
                 (TagSensor::GyroscopeNC, TagSensor::AccelerometerNC) => (pair[1], pair[0]),
@@ -245,8 +243,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 },
             };
             let cal = calibration::imu::apply_calibration(raw);
-            signals::submit_imu_sample(cal);
-            signals::submit_sd_log(SdLogRecord::Imu { raw, cal });
+            signals::submit_imu(Reading { raw, cal });
         }
         Ok(())
     }

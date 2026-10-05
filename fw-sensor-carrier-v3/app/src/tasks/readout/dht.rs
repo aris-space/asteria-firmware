@@ -11,13 +11,12 @@ use crate::calibration;
 use crate::resources::buses::{self, SharedI2c, SharedI2cBus};
 use crate::sensors::{DHT_STATUS, DhtId};
 use crate::signals;
-use crate::types::{RawDhtSample, SdLogRecord};
+use crate::types::{RawDhtSample, Reading};
 
 const SAMPLE_HZ: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 type BusDevice = I2cDevice<'static, CriticalSectionRawMutex, SharedI2c>;
-/// A fully-initialized humidity/temperature sensor, ready to read.
 pub type Sensor = Sht4xAsync<BusDevice, Delay>;
 
 async fn configure(bus: SharedI2cBus, id: DhtId) -> Result<Sensor, ()> {
@@ -118,8 +117,7 @@ impl Active {
             humidity_rh: m.humidity_percent().to_num(),
         };
         let cal = calibration::dht::apply_calibration(raw);
-        signals::submit_dht_sample(cal);
-        signals::submit_sd_log(SdLogRecord::Dht { raw, cal });
+        signals::submit_dht(Reading { raw, cal });
         Ok(())
     }
 }

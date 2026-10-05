@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Calibrations, Name};
 use crate::sensors::{MAG_BUS_1, MAG_BUS_2, MAG_COUNT, MagId};
-use crate::signals::RAW_MAG_CHANNEL;
+use crate::signals::MAG_CHANNEL;
 use crate::storage::Storage;
 use crate::types::{MagSample, RawMagSample};
 
@@ -61,12 +61,10 @@ impl Correction {
         }
     }
 
-    /// An identity fallback has no measured hard- or soft-iron correction.
     pub fn is_calibrated(&self) -> bool {
         *self != <Self as super::Correction>::DEFAULT
     }
 
-    /// Accept only calibrated samples with a plausible Earth-field magnitude.
     pub fn accepts_field(&self, field_nt: f32) -> bool {
         self.is_calibrated() && (MIN_VALID_NT..=MAX_VALID_NT).contains(&field_nt)
     }
@@ -135,8 +133,6 @@ const _: () = assert!(
     "MagCal is written for exactly two magnetometers"
 );
 
-/// Magnetometer calibration: the caller runs the collection loop (`collect_tick`
-/// per window, then `finish`). One `magcal` solver per sensor.
 pub struct MagCal {
     solvers: [Solver; MAG_COUNT],
 }
@@ -151,12 +147,13 @@ impl Default for MagCal {
 
 impl MagCal {
     pub async fn collect_tick(&mut self) {
-        let mut samples = RAW_MAG_CHANNEL
+        let mut samples = MAG_CHANNEL
             .subscriber()
             .expect("mag calibration subscriber slot must be free");
         let deadline = Instant::now() + TICK;
-        while let Ok(s) = with_deadline(deadline, samples.next_message_pure()).await {
-            self.solvers[s.src.index()].push_sample(sensor_to_board([s.x, s.y, s.z]));
+        while let Ok(reading) = with_deadline(deadline, samples.next_message_pure()).await {
+            let raw = reading.raw;
+            self.solvers[raw.src.index()].push_sample(sensor_to_board([raw.x, raw.y, raw.z]));
         }
     }
 
@@ -250,11 +247,7 @@ pub struct CalReport {
 enum CalOutcome {
     Stored(Fit),
     StoreFailed(Fit),
-    /// Field strength outside the plausible band.
-    ImplausibleField {
-        tier: SolverTier,
-        field_nt: f32,
-    },
+    ImplausibleField { tier: SolverTier, field_nt: f32 },
     TooFewSamples,
 }
 

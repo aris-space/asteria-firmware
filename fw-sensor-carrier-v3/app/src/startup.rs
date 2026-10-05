@@ -13,21 +13,13 @@ use crate::sensors::{
 
 use crate::{calibration, resources, storage, tasks};
 
-#[allow(dead_code)]
 pub struct PreparedBoard {
-    pub services: ServiceResources,
+    pub yellow_led: Output<'static>,
     pub sensors: SensorResources,
     pub can: embassy_stm32::can::Can<'static>,
     pub storage: &'static storage::Storage,
     pub usb: resources::usb::UsbDriver,
     pub sd_card: resources::SdCard,
-}
-
-#[allow(dead_code)]
-pub struct ServiceResources {
-    pub green_led: Output<'static>,
-    pub yellow_led: Output<'static>,
-    pub red_led: Output<'static>,
 }
 
 pub struct SensorResources {
@@ -50,9 +42,7 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let imu1 = resources.imu1.setup();
     let imu2 = resources.imu2.setup();
 
-    let green_led = resources.green_led.setup();
     let yellow_led = resources.yellow_led.setup();
-    let red_led = resources.red_led.setup();
 
     let bus1 = resources.bus1.setup();
     let bus2 = resources.bus2.setup();
@@ -66,11 +56,7 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
         storage,
         usb,
         sd_card: resources.sd_card,
-        services: ServiceResources {
-            green_led,
-            yellow_led,
-            red_led,
-        },
+        yellow_led,
         sensors: SensorResources {
             gps1_rx,
             gps2_rx,
@@ -87,16 +73,14 @@ pub async fn spawn_tasks(
     thread_spawner: Spawner,
     level_0_spawner: SendSpawner,
 ) {
-    level_0_spawner.spawn(
-        tasks::blinky::task(board.services.yellow_led).expect("Failed to spawn blinky task"),
-    );
+    level_0_spawner
+        .spawn(tasks::blinky::task(board.yellow_led).expect("Failed to spawn blinky task"));
 
     let (sd, detect, power) = board.sd_card.setup();
     thread_spawner.spawn(
         tasks::sd_logging::task(sd, detect, power).expect("Failed to spawn SD logging task"),
     );
 
-    // --- Readouts -----------------------------------------------------------
     let (imu1_spi, imu1_int1) = board.sensors.imu1;
     let (imu2_spi, imu2_int1) = board.sensors.imu2;
     level_0_spawner.spawn(
@@ -106,13 +90,10 @@ pub async fn spawn_tasks(
         tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1).expect("Failed to spawn IMU 1 task"),
     );
 
-    // Do not replace this unless you know why it was there in the first place.
     let mag1 = tasks::readout::mag::init(board.sensors.bus1, MAG_BUS_1).await;
     let baro1 = tasks::readout::baro::init(board.sensors.bus1, BARO_BUS_1).await;
     let mag2 = tasks::readout::mag::init(board.sensors.bus2, MAG_BUS_2).await;
     let baro2 = tasks::readout::baro::init(board.sensors.bus2, BARO_BUS_2).await;
-    // DHT initialization once made both barometers time out, so the DHTs go
-    // last; watch for baro timeouts when changing this.
     let dht1 = tasks::readout::dht::init(board.sensors.bus1, DHT_BUS_1).await;
     let dht2 = tasks::readout::dht::init(board.sensors.bus2, DHT_BUS_2).await;
 
@@ -149,16 +130,12 @@ pub async fn spawn_tasks(
             .expect("Failed to spawn GNSS 1 task"),
     );
 
-    // --- Processing ---------------------------------------------------------
-    thread_spawner.spawn(
-        tasks::processing::state_estimation::task().expect("Failed to spawn state estimation task"),
-    );
+    thread_spawner
+        .spawn(tasks::state_estimation::task().expect("Failed to spawn state estimation task"));
 
-    // --- CAN ----------------------------------------------------------------
     let (can_tx, can_rx, _options) = board.can.split();
     thread_spawner.spawn(tasks::can::rx::task(can_rx).expect("Failed to spawn CAN RX task"));
     tasks::can::tx::spawn(can_tx, thread_spawner);
 
-    // --- USB console --------------------------------------------------------
     tasks::console::spawn(board.usb, board.storage, thread_spawner);
 }

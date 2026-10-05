@@ -8,7 +8,6 @@ use super::Calibrations;
 use crate::sensors::{GNSS_COUNT, GnssId};
 use crate::types::{GnssSample, RawGnssSample};
 
-/// No per-unit correction yet; only the latency is calibrated.
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Correction;
 

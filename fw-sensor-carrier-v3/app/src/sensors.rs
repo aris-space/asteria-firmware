@@ -22,8 +22,6 @@ macro_rules! define_sensor_family {
         $vis struct $name(u8);
 
         impl $name {
-            /// Every id in this family, in index order.
-            #[allow(dead_code)]
             pub const ALL: [$name; $count_name] = [$($name($index)),+];
 
             pub const fn index(self) -> usize {
@@ -101,8 +99,6 @@ define_sensor_family! {
     count: DHT_COUNT;
     ids: [DHT_BUS_1 = 0, DHT_BUS_2 = 1];
 }
-
-// --- Health tracking (CAN status frame) -------------------------------------
 
 #[atomic_enum::atomic_enum]
 pub enum SensorStatus {
