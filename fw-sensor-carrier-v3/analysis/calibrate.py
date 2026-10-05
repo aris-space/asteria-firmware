@@ -12,6 +12,7 @@ sample.
 """
 
 import argparse
+import re
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
@@ -333,7 +334,9 @@ def main() -> None:
     gyros = [fit_gyro(log, i) for i in range(2)]
     accels = [fit_accel(log, i) for i in range(2)]
     mags = [fit_mag(log, i) for i in range(2)]
-    print_lines(log.dir.name, gyros, accels, mags, estimates)
+    # The session name on the card, without any prefix added when archiving.
+    session = re.search(r"LOG\d+", log.dir.name)
+    print_lines(session[0] if session else log.dir.name, gyros, accels, mags, estimates)
     if args.plot:
         plot(gyros, accels, mags, estimates)
 
