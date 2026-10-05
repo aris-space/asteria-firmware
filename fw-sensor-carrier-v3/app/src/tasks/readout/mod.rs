@@ -69,23 +69,23 @@ async fn init_at_startup<S>(
     mut configure: impl AsyncFnMut() -> Result<S, ()>,
 ) -> Option<S> {
     for attempt in 1..=MAX_INIT_ATTEMPTS {
-        debug!("{} initializing (attempt {})", id, attempt);
+        debug!("{}: initializing (attempt {})", id, attempt);
         if let Ok(sensor) = configure().await {
-            info!("{} initialized", id);
+            info!("{}: initialized", id);
             return Some(sensor);
         }
         if attempt < MAX_INIT_ATTEMPTS {
             Timer::after(backoff(attempt)).await;
         }
     }
-    warn!("{} not detected; retrying in the background", id);
+    warn!("{}: not detected; retrying in the background", id);
     None
 }
 
 /// Waits for the next sample of a fixed-rate readout.
 async fn wait_for_sample(next_sample: Instant, id: impl Format) {
     if Instant::now() > next_sample {
-        warn!("{} can't keep up with sample interval", id);
+        warn!("{}: can't keep up with sample interval", id);
     } else {
         Timer::at(next_sample).await;
     }

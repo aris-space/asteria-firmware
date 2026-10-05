@@ -50,17 +50,21 @@ fn raw_sample(id: GnssId, pvt: &ublox::NavPvtRef<'_>) -> RawGnssSample {
 
 fn log_configuration_packet(id: GnssId, packet: &PacketRef<'_>) {
     match packet {
-        PacketRef::AckAck(ack) => info!("{} UBX ACK class={} id={}", id, ack.class(), ack.msg_id()),
-        PacketRef::AckNak(nak) => warn!("{} UBX NAK class={} id={}", id, nak.class(), nak.msg_id()),
+        PacketRef::AckAck(ack) => {
+            info!("{}: UBX ACK class={} id={}", id, ack.class(), ack.msg_id())
+        }
+        PacketRef::AckNak(nak) => {
+            warn!("{}: UBX NAK class={} id={}", id, nak.class(), nak.msg_id())
+        }
         PacketRef::MonVer(version) => {
             info!(
-                "{} receiver software={} hardware={}",
+                "{}: receiver software={} hardware={}",
                 id,
                 version.software_version(),
                 version.hardware_version()
             );
             for extension in version.extension() {
-                info!("{} receiver extension={}", id, extension);
+                info!("{}: receiver extension={}", id, extension);
             }
         }
         PacketRef::Unknown(raw)
@@ -71,7 +75,7 @@ fn log_configuration_packet(id: GnssId, packet: &PacketRef<'_>) {
             let measure_rate_ms = u16::from_le_bytes([raw.payload[0], raw.payload[1]]);
             let nav_rate = u16::from_le_bytes([raw.payload[2], raw.payload[3]]);
             info!(
-                "{} CFG-RATE readback: measure={} ms, nav_rate={}",
+                "{}: CFG-RATE readback: measure={} ms, nav_rate={}",
                 id, measure_rate_ms, nav_rate
             );
         }
@@ -92,7 +96,7 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
     type Next = Active<'a, RX>;
 
     async fn run(mut self) -> Active<'a, RX> {
-        debug!("{} initializing", self.id);
+        debug!("{}: initializing", self.id);
 
         let mut consecutive_errors: u8 = 0;
         let mut recv_buf = [0u8; 64];
@@ -104,7 +108,7 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                 consecutive_errors = 0;
                 link_active = false;
                 GNSS_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
-                debug!("{} re-initializing", self.id);
+                debug!("{}: re-initializing", self.id);
                 embassy_time::Timer::after(backoff(self.attempt)).await;
             }
 
@@ -112,13 +116,13 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                 Ok(Ok(0)) => continue,
                 Ok(Ok(n)) => n,
                 Ok(Err(e)) => {
-                    warn!("{} read error: {:?}", self.id, Debug2Format(&e));
+                    warn!("{}: read error: {:?}", self.id, Debug2Format(&e));
                     consecutive_errors = consecutive_errors.saturating_add(1);
                     continue;
                 }
                 Err(_) => {
                     if link_active {
-                        warn!("{} UBX link silent", self.id);
+                        warn!("{}: UBX link silent", self.id);
                         GNSS_STATUS[self.id.index()]
                             .store(SensorStatus::Inactive, Ordering::Relaxed);
                         link_active = false;
@@ -134,7 +138,7 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                 let packet = match msg {
                     Ok(packet) => packet,
                     Err(e) => {
-                        warn!("{} parse error: {:?}", self.id, Debug2Format(&e));
+                        warn!("{}: parse error: {:?}", self.id, Debug2Format(&e));
                         consecutive_errors = consecutive_errors.saturating_add(1);
                         continue;
                     }
@@ -142,7 +146,7 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                 log_configuration_packet(self.id, &packet);
                 if !link_active {
                     GNSS_STATUS[self.id.index()].store(SensorStatus::Active, Ordering::Relaxed);
-                    info!("{} UBX link active", self.id);
+                    info!("{}: UBX link active", self.id);
                     link_active = true;
                 }
                 self.attempt = 0;
@@ -161,7 +165,7 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
 
             if let Some(fix_type) = fix {
                 info!(
-                    "{} active (fix type: {:?})",
+                    "{}: active (fix type: {:?})",
                     self.id,
                     Debug2Format(&fix_type)
                 );
@@ -212,24 +216,24 @@ impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
                             }
                             Ok(packet) => log_configuration_packet(self.id, &packet),
                             Err(e) => {
-                                warn!("{} parse error: {:?}", self.id, Debug2Format(&e));
+                                warn!("{}: parse error: {:?}", self.id, Debug2Format(&e));
                                 errors = errors.saturating_add(1);
                             }
                         }
                     }
                 }
                 Ok(Err(e)) => {
-                    warn!("{} read error: {:?}", self.id, Debug2Format(&e));
+                    warn!("{}: read error: {:?}", self.id, Debug2Format(&e));
                     errors = errors.saturating_add(1);
                 }
                 Err(_) => {
-                    warn!("{} UBX link silent", self.id);
+                    warn!("{}: UBX link silent", self.id);
                     return self.into_inactive();
                 }
             }
 
             if errors >= MAX_CONSECUTIVE_ERRORS {
-                error!("{} offline (too many consecutive errors)", self.id);
+                error!("{}: offline (too many consecutive errors)", self.id);
                 return self.into_inactive();
             }
         }
@@ -271,11 +275,11 @@ async fn configure_gnss_1_port(
     }
     .into_packet_bytes();
     if let Err(e) = tx.write(&port).await {
-        warn!("GNSS_1 port configuration failed: {:?}", Debug2Format(&e));
+        warn!("GNSS_1: port configuration failed: {:?}", Debug2Format(&e));
     }
     embassy_time::Timer::after_millis(100).await;
     if let Err(e) = rx.set_baudrate(921_600) {
-        warn!("GNSS_1 baud change failed: {:?}", Debug2Format(&e));
+        warn!("GNSS_1: baud change failed: {:?}", Debug2Format(&e));
         return false;
     }
     true
@@ -309,14 +313,14 @@ async fn configure_gnss_1_messages(tx: &mut UartTx<'static, Async>) {
     for packet in [&constellation[..], &rate[..], &status[..], &pvt[..]] {
         if let Err(e) = tx.write(packet).await {
             warn!(
-                "GNSS_1 message configuration failed: {:?}",
+                "GNSS_1: message configuration failed: {:?}",
                 Debug2Format(&e)
             );
             return;
         }
         embassy_time::Timer::after_millis(20).await;
     }
-    info!("GNSS_1 UBX configuration sent at 921600 baud");
+    info!("GNSS_1: UBX configuration sent at 921600 baud");
 }
 
 async fn poll_gnss_1_configuration(tx: &mut UartTx<'static, Async>) {
@@ -324,7 +328,7 @@ async fn poll_gnss_1_configuration(tx: &mut UartTx<'static, Async>) {
     let poll_version = UbxPacketRequest::request_for::<MonVer>().into_packet_bytes();
     for packet in [&poll_rate[..], &poll_version[..]] {
         if let Err(e) = tx.write(packet).await {
-            warn!("GNSS_1 configuration poll failed: {:?}", Debug2Format(&e));
+            warn!("GNSS_1: configuration poll failed: {:?}", Debug2Format(&e));
         }
         embassy_time::Timer::after_millis(20).await;
     }

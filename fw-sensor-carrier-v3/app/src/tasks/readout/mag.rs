@@ -32,27 +32,27 @@ async fn configure(bus: SharedI2cBus, id: MagId) -> Result<Sensor, ()> {
     sensor
         .init()
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e)))?;
     let mut sensor = sensor
         .into_mag_continuous()
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e.error)))?;
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e.error)))?;
     sensor
         .set_mag_mode_and_odr(&mut Delay, MagMode::HighResolution, MAG_ODR)
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e)))?;
     sensor
         .enable_mag_offset_cancellation()
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e)))?;
     sensor
         .mag_enable_low_pass_filter()
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e)))?;
     sensor
         .set_accel_mode_and_odr(&mut Delay, AccelMode::Normal, AccelOutputDataRate::Hz50)
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e)))?;
     Ok(sensor)
 }
 
@@ -77,12 +77,12 @@ impl State for Inactive {
             let sensor = match self.sensor.take() {
                 Some(sensor) => Ok(sensor),
                 None => {
-                    debug!("{} initializing", self.id);
+                    debug!("{}: initializing", self.id);
                     configure(self.bus, self.id).await
                 }
             };
             if let Ok(sensor) = sensor {
-                info!("{} active", self.id);
+                info!("{}: active", self.id);
                 return Active {
                     sensor,
                     bus: self.bus,
@@ -115,7 +115,7 @@ impl State for Active {
             }
             wait_for_sample(next_sample, self.id).await;
         }
-        error!("{} offline (too many consecutive errors)", self.id);
+        error!("{}: offline (too many consecutive errors)", self.id);
         Inactive {
             sensor: None,
             bus: self.bus,
@@ -131,7 +131,7 @@ impl Active {
             .sensor
             .magnetic_field()
             .await
-            .map_err(|e| warn!("{} read error: {:?}", self.id, Debug2Format(&e)))?;
+            .map_err(|e| warn!("{}: read error: {:?}", self.id, Debug2Format(&e)))?;
         let (x, y, z) = field.xyz_unscaled();
         let read_ts = Instant::now();
         let raw = RawMagSample {

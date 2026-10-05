@@ -13,7 +13,6 @@ mod built;
 mod calibration;
 mod macros;
 mod resources;
-mod sef;
 mod sensors;
 mod signals;
 mod startup;

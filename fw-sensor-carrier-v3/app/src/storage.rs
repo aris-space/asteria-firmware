@@ -62,7 +62,7 @@ impl Storage {
         let bytes: &[u8] = match map.fetch_item(&mut scratch, key).await {
             Ok(found) => found?,
             Err(e) => {
-                defmt::warn!("storage load failed: {:?}", defmt::Debug2Format(&e));
+                defmt::warn!("storage: load failed: {:?}", defmt::Debug2Format(&e));
                 return None;
             }
         };
@@ -83,7 +83,7 @@ impl Storage {
         match map.store_item(&mut scratch, key, &value_bytes).await {
             Ok(()) => true,
             Err(e) => {
-                defmt::warn!("storage store failed: {:?}", defmt::Debug2Format(&e));
+                defmt::warn!("storage: store failed: {:?}", defmt::Debug2Format(&e));
                 false
             }
         }
@@ -97,7 +97,7 @@ impl Storage {
         match map.remove_item(&mut scratch, key).await {
             Ok(()) => true,
             Err(e) => {
-                defmt::warn!("storage remove failed: {:?}", defmt::Debug2Format(&e));
+                defmt::warn!("storage: remove failed: {:?}", defmt::Debug2Format(&e));
                 false
             }
         }
@@ -110,7 +110,7 @@ impl Storage {
         match map.erase_all().await {
             Ok(()) => true,
             Err(e) => {
-                defmt::warn!("storage erase failed: {:?}", defmt::Debug2Format(&e));
+                defmt::warn!("storage: erase failed: {:?}", defmt::Debug2Format(&e));
                 false
             }
         }

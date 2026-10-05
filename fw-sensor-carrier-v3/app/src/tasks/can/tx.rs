@@ -21,18 +21,12 @@ const NEW_DATA_TIMEOUT: Duration = Duration::from_secs(10);
 const STATUS_PERIOD: Duration = Duration::from_secs(1);
 const BUILD_INFO_PERIOD: Duration = Duration::from_secs(5);
 
-/// Cadence cap per derived signal. `min_period(hz)` is slightly under the
-/// natural source rate so a steady producer slips through.
-const fn min_period(target_hz: f32) -> Duration {
-    const ALPHA: f32 = 0.2;
-    Duration::from_millis((1000.0 / (target_hz * (1.0 + ALPHA))) as u64)
-}
-
-const VERTICAL_MIN_PERIOD: Duration = min_period(20.0);
+// Just under 20 Hz, so the 20 Hz estimate is never throttled by jitter.
+const STATE_MIN_PERIOD: Duration = Duration::from_millis(41);
 
 static CAN_TX: OnceLock<Mutex<ThreadModeRawMutex, CanTx<'static>>> = OnceLock::new();
 
-pub fn spawn_tx_tasks(can_tx: CanTx<'static>, spawner: Spawner) {
+pub fn spawn(can_tx: CanTx<'static>, spawner: Spawner) {
     CAN_TX
         .init(Mutex::new(can_tx))
         .ok()
@@ -50,71 +44,56 @@ async fn send<M: CanMessage + Clone + defmt::Format>(
 ) {
     let mut tx = can_tx.lock().await;
     match with_timeout(TX_TIMEOUT, tx.transmit(msg.clone())).await {
-        Ok(Ok(())) => trace!("CAN sent: {:?}", msg),
-        Ok(Err(err)) => error!("CAN TX error: {:?}", err),
-        Err(_) => error!("CAN TX timed out after {} ms", TX_TIMEOUT.as_millis()),
+        Ok(Ok(())) => trace!("CAN: sent {:?}", msg),
+        Ok(Err(err)) => error!("CAN: TX error: {:?}", err),
+        Err(_) => error!("CAN: TX timed out after {} ms", TX_TIMEOUT.as_millis()),
     }
-}
-
-/// Drive a per-signal TX task: wait for the watch to change, drop the value if
-/// the rate cap hasn't elapsed, otherwise send.
-macro_rules! watch_loop {
-    ($watch:expr, $min_period:expr, |$val:ident| $body:block) => {
-        let mut last_sent = Instant::now();
-        let mut rx = $watch
-            .receiver()
-            .expect("CAN: failed to create watch receiver");
-        loop {
-            let $val = loop {
-                match with_timeout(NEW_DATA_TIMEOUT, rx.changed()).await {
-                    Ok(v) => break v,
-                    Err(_) => error!("Timeout waiting for CAN watch data"),
-                }
-            };
-            let now = Instant::now();
-            if now - last_sent >= $min_period {
-                $body
-                last_sent = now;
-            }
-        }
-    };
 }
 
 #[embassy_executor::task]
 async fn state_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>) {
     use hermes_can::messages::sensor_data::{OrientationData, VerticalStateData};
-    watch_loop!(
-        signals::STATE_ESTIMATE_WATCH,
-        VERTICAL_MIN_PERIOD,
-        |estimate| {
-            let [w, x, y, z] = estimate.orientation_body_to_ned_wxyz;
-            // The CAN contract uses the inverse (NED-to-body) quaternion.
+    let mut rx = signals::STATE_ESTIMATE_WATCH
+        .receiver()
+        .expect("CAN: state estimate receiver available");
+    let mut last_sent = Instant::now();
+    loop {
+        let Ok(estimate) = with_timeout(NEW_DATA_TIMEOUT, rx.changed()).await else {
+            error!("CAN: no state estimate for 10 s");
+            continue;
+        };
+        let now = Instant::now();
+        if now - last_sent < STATE_MIN_PERIOD {
+            continue;
+        }
+        last_sent = now;
+        let [w, x, y, z] = estimate.orientation_body_to_ned_wxyz;
+        // The CAN contract uses the inverse (NED-to-body) quaternion.
+        send(
+            can_tx,
+            OrientationData {
+                orientation_w: w,
+                orientation_x: -x,
+                orientation_y: -y,
+                orientation_z: -z,
+            },
+        )
+        .await;
+        if estimate.msl_ready {
             send(
                 can_tx,
-                OrientationData {
-                    orientation_w: w,
-                    orientation_x: -x,
-                    orientation_y: -y,
-                    orientation_z: -z,
+                VerticalStateData {
+                    height_m: estimate.height_msl_m,
+                    velocity_mps: estimate.velocity_mps,
+                    height_std_m: estimate.height_std_m,
+                    velocity_std_mps: estimate.velocity_std_mps,
+                    selected_imu: estimate.selected_imu.index() as u8,
+                    redundancy_ready: estimate.redundancy_ready,
                 },
             )
             .await;
-            if estimate.msl_ready {
-                send(
-                    can_tx,
-                    VerticalStateData {
-                        height_m: estimate.height_msl_m,
-                        velocity_mps: estimate.velocity_mps,
-                        height_std_m: estimate.height_std_m,
-                        velocity_std_mps: estimate.velocity_std_mps,
-                        selected_imu: estimate.selected_imu.index() as u8,
-                        redundancy_ready: estimate.redundancy_ready,
-                    },
-                )
-                .await;
-            }
         }
-    );
+    }
 }
 
 #[embassy_executor::task]

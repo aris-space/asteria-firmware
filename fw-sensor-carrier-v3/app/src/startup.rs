@@ -156,9 +156,9 @@ pub async fn spawn_tasks(
 
     // --- CAN ----------------------------------------------------------------
     let (can_tx, can_rx, _options) = board.can.split();
-    thread_spawner.spawn(tasks::can::rx_task(can_rx).expect("Failed to spawn CAN RX task"));
-    tasks::can::spawn_tx_tasks(can_tx, thread_spawner);
+    thread_spawner.spawn(tasks::can::rx::task(can_rx).expect("Failed to spawn CAN RX task"));
+    tasks::can::tx::spawn(can_tx, thread_spawner);
 
     // --- USB console --------------------------------------------------------
-    tasks::console::start(board.usb, board.storage, thread_spawner);
+    tasks::console::spawn(board.usb, board.storage, thread_spawner);
 }
