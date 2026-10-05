@@ -70,8 +70,8 @@ def session_dir(path: Path) -> Path:
 
 def read_csv(path: Path) -> pd.DataFrame:
     """The rows of a CSV file; rows that do not parse, e.g. one cut off by
-    power loss, are skipped and counted. A missing file has no rows."""
-    if not path.exists():
+    power loss, are skipped and counted. A missing or empty file has no rows."""
+    if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
     table = pd.read_csv(path, on_bad_lines="skip", dtype=str)
     numeric = [c for c in table.columns if c != "label"]
