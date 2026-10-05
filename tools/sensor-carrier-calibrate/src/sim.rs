@@ -18,7 +18,7 @@ use rand_distr::{Distribution, Normal};
 use crate::log::STANDARD_GRAVITY;
 
 pub const TRUE_LATENCY_S: [(&str, f64); 7] = [
-    ("IMU_1", 1.5e-3),
+    ("IMU_1", 0.0),
     ("MAG_BUS_1", 40e-3),
     ("MAG_BUS_2", 55e-3),
     ("BARO_BUS_1", 6e-3),

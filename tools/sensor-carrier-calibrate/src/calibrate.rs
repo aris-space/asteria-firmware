@@ -15,6 +15,9 @@ const IMU_HZ: f64 = 833.0;
 const STILL_WINDOW_S: f64 = 1.0;
 const STILL_MAX_SPREAD_DPS: f64 = 0.5;
 const MIN_STILL_S: f64 = 5.0;
+// Both IMUs are the same chip with the same settings and timestamping, so
+// they should agree to within one 833 Hz sample.
+const MAX_IMU_LATENCY_US: i64 = 1_000;
 // Plausible Earth-field magnitude, as in the firmware.
 const FIELD_RANGE_NT: std::ops::RangeInclusive<f64> = 22_000.0..=67_000.0;
 
@@ -105,10 +108,18 @@ impl<'a> Calibration<'a> {
         } in &self.gyro
         {
             match (bias_dps, latency(sensor)) {
-                (Some(bias), Some(latency_us)) => println!(
-                    "cal set {sensor} name={name} latency_us={latency_us} gyro_bias_dps={:.4},{:.4},{:.4}",
-                    bias[0], bias[1], bias[2]
-                ),
+                (Some(bias), Some(latency_us)) => {
+                    if latency_us.abs() > MAX_IMU_LATENCY_US {
+                        println!(
+                            "# {sensor}: WARNING IMU timestamps disagree by {:.1} ms; check the readout before using this",
+                            latency_us as f64 / 1000.0
+                        );
+                    }
+                    println!(
+                        "cal set {sensor} name={name} latency_us={latency_us} gyro_bias_dps={:.4},{:.4},{:.4}",
+                        bias[0], bias[1], bias[2]
+                    );
+                }
                 (None, _) => println!(
                     "# {sensor}: only {:.1} s still, need {MIN_STILL_S:.0} s; no line",
                     still.len() as f64 / IMU_HZ
