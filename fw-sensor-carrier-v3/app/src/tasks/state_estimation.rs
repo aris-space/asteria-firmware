@@ -4,8 +4,9 @@
 //! in timestamp order. SEF-light accepts late samples, but each one replays its
 //! history, and IMU samples arrive in FIFO batches that are already up to ~15 ms
 //! old.
-//! Each output tick publishes the selected chain to
-//! [`signals::STATE_ESTIMATE_WATCH`] and logs every chain to SD.
+//! Every processed sample publishes the selected chain to
+//! [`signals::STATE_ESTIMATE_WATCH`]; every [`LOG_PERIOD`] each chain is also
+//! logged to SD.
 
 use core::cmp::Ordering;
 
@@ -32,7 +33,8 @@ use crate::types::{
 const HOLDBACK: Duration = Duration::from_millis(35);
 // Two IMUs at 833 Hz fill about 60 slots during the holdback.
 const PENDING_CAPACITY: usize = 128;
-const OUTPUT_PERIOD: Duration = Duration::from_millis(50);
+// Rows per second of the per-chain state in the SD log.
+const LOG_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const WARNING_PERIOD: Duration = Duration::from_secs(1);
 // Two 833 Hz IMUs produce about 667 events in 400 ms. The remaining capacity
@@ -194,7 +196,7 @@ struct Processor {
     estimator: DualVerticalEstimator<HISTORY_CAPACITY>,
     /// Per chain: a GNSS height update was accepted, so its height is MSL.
     msl_ready: [bool; IMU_COUNT],
-    last_output: Option<Instant>,
+    last_log: Option<Instant>,
     last_warning: Option<Instant>,
 }
 
@@ -243,7 +245,7 @@ impl Processor {
                 MAX_AIDING_DELAY_US,
             )?,
             msl_ready: [false; IMU_COUNT],
-            last_output: None,
+            last_log: None,
             last_warning: None,
         })
     }
@@ -336,12 +338,6 @@ impl Processor {
 
     fn publish(&mut self) {
         let now = Instant::now();
-        if self
-            .last_output
-            .is_some_and(|last| now.saturating_duration_since(last) < OUTPUT_PERIOD)
-        {
-            return;
-        }
         let imu = self.estimator.selected_imu();
         let Some(sample_time_us) = self.estimator.last_imu_sample_time_us(imu) else {
             return;
@@ -365,6 +361,12 @@ impl Processor {
             redundancy_ready: self.estimator.redundancy_ready(),
         });
 
+        if self
+            .last_log
+            .is_some_and(|last| now.saturating_duration_since(last) < LOG_PERIOD)
+        {
+            return;
+        }
         let scores = self.estimator.consistency_scores();
         for (id, imu) in ImuId::ALL.into_iter().zip(asteria_sef_light::ImuId::ALL) {
             let state = self.estimator.state(imu);
@@ -385,6 +387,6 @@ impl Processor {
                 orientation_body_to_ned_wxyz: self.estimator.orientation_body_to_ned_wxyz(imu),
             });
         }
-        self.last_output = Some(now);
+        self.last_log = Some(now);
     }
 }
