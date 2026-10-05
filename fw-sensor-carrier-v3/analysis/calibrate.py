@@ -12,8 +12,8 @@ sample.
 """
 
 import argparse
-import re
 from dataclasses import dataclass
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -334,9 +334,8 @@ def main() -> None:
     gyros = [fit_gyro(log, i) for i in range(2)]
     accels = [fit_accel(log, i) for i in range(2)]
     mags = [fit_mag(log, i) for i in range(2)]
-    # The session name on the card, without any prefix added when archiving.
-    session = re.search(r"LOG\d+", log.dir.name)
-    print_lines(session[0] if session else log.dir.name, gyros, accels, mags, estimates)
+    # When the fit was made; exactly the firmware's 16-character name limit.
+    print_lines(datetime.now().strftime("%Y-%m-%dT%H:%M"), gyros, accels, mags, estimates)
     if args.plot:
         plot(gyros, accels, mags, estimates)
 
