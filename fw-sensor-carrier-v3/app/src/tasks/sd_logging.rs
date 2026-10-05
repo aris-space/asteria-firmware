@@ -78,16 +78,26 @@ const FILES: [CsvFile; FILE_COUNT] = [
         header: "uptime_us,state,imu,mag,gnss,baro,dht,mark\n",
     },
 ];
-const BUFFER_SIZE: usize = 4096;
+// The card block size. A write of whole blocks from a 4-byte-aligned buffer
+// at a block boundary reaches the card as one multi-block transfer; any other
+// write is split into single blocks, each read from the card before it is
+// written.
+const BLOCK_SIZE: usize = 512;
+const BUFFER_SIZE: usize = 8 * BLOCK_SIZE;
 const FLUSH_PERIOD: Duration = Duration::from_secs(1);
 
 type Row = String<256>;
 
-/// A CSV file with a RAM buffer, so the card sees few large writes.
+#[repr(align(4))]
+struct Buffer([u8; BUFFER_SIZE]);
+
+/// A CSV file with a RAM buffer that reaches the card only in whole blocks, so
+/// every file write is one multi-block transfer. Less than one block per file
+/// stays in RAM between flushes.
 struct CsvLog<F> {
     name: &'static str,
     file: F,
-    buffer: [u8; BUFFER_SIZE],
+    buffer: Buffer,
     used: usize,
     rows: u32,
 }
@@ -97,33 +107,37 @@ impl<F: Write> CsvLog<F> {
         let mut log = Self {
             name: spec.name,
             file,
-            buffer: [0; BUFFER_SIZE],
+            buffer: Buffer([0; BUFFER_SIZE]),
             used: spec.header.len(),
             rows: 0,
         };
-        log.buffer[..log.used].copy_from_slice(spec.header.as_bytes());
+        log.buffer.0[..log.used].copy_from_slice(spec.header.as_bytes());
         log
     }
 
     async fn append(&mut self, row: &[u8]) -> Result<(), F::Error> {
         if self.used + row.len() > BUFFER_SIZE {
-            self.write_buffer().await?;
+            self.write_blocks().await?;
         }
-        self.buffer[self.used..][..row.len()].copy_from_slice(row);
+        self.buffer.0[self.used..][..row.len()].copy_from_slice(row);
         self.used += row.len();
         self.rows += 1;
         Ok(())
     }
 
-    async fn write_buffer(&mut self) -> Result<(), F::Error> {
-        self.file.write_all(&self.buffer[..self.used]).await?;
-        self.used = 0;
+    /// Writes the whole blocks in the buffer and keeps the rest for later.
+    async fn write_blocks(&mut self) -> Result<(), F::Error> {
+        let whole = self.used / BLOCK_SIZE * BLOCK_SIZE;
+        self.file.write_all(&self.buffer.0[..whole]).await?;
+        self.buffer.0.copy_within(whole..self.used, 0);
+        self.used -= whole;
         Ok(())
     }
 
-    /// Commits buffered rows to the card and returns how many rows that was.
+    /// Commits the buffered whole blocks to the card and returns how many rows
+    /// were appended since the last flush.
     async fn flush(&mut self) -> Result<u32, F::Error> {
-        self.write_buffer().await?;
+        self.write_blocks().await?;
         self.file.flush().await?;
         Ok(core::mem::take(&mut self.rows))
     }
