@@ -13,6 +13,7 @@ use asteria_sef_light::{
 };
 use defmt::{Debug2Format, warn};
 use embassy_futures::select::{Either, Either4, select, select4};
+use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
@@ -60,10 +61,10 @@ pub async fn task() -> ! {
             .map(|(index, event)| (index, event.ts() + HOLDBACK));
         let due = oldest.map_or(Instant::MAX, |(_, due)| due);
         let next = select4(
-            imu.next_message_pure(),
-            mag.next_message_pure(),
-            gnss.next_message_pure(),
-            baro.next_message_pure(),
+            imu.next_message(),
+            mag.next_message(),
+            gnss.next_message(),
+            baro.next_message(),
         );
         let event = match select(Timer::at(due), next).await {
             Either::First(()) => {
@@ -71,13 +72,27 @@ pub async fn task() -> ! {
                 processor.handle(pending.swap_remove(index));
                 continue;
             }
-            Either::Second(Either4::First(reading)) => Event::Imu(reading.cal),
-            Either::Second(Either4::Second(reading)) => Event::Mag(reading.cal),
-            Either::Second(Either4::Third(reading)) => Event::Gnss(reading.cal),
-            Either::Second(Either4::Fourth(reading)) => Event::Baro(reading.cal),
+            Either::Second(Either4::First(m)) => received(m, "IMU", |r| Event::Imu(r.cal)),
+            Either::Second(Either4::Second(m)) => received(m, "mag", |r| Event::Mag(r.cal)),
+            Either::Second(Either4::Third(m)) => received(m, "GNSS", |r| Event::Gnss(r.cal)),
+            Either::Second(Either4::Fourth(m)) => received(m, "baro", |r| Event::Baro(r.cal)),
+        };
+        let Some(event) = event else {
+            continue;
         };
         if pending.push(event).is_err() {
             warn!("SEF: input buffer full, dropped a sample");
+        }
+    }
+}
+
+/// The event for a received reading, or `None` after reporting lost ones.
+fn received<T: Clone>(message: WaitResult<T>, kind: &str, event: fn(T) -> Event) -> Option<Event> {
+    match message {
+        WaitResult::Message(reading) => Some(event(reading)),
+        WaitResult::Lagged(lost) => {
+            warn!("SEF: fell behind and lost {} {} readings", lost, kind);
+            None
         }
     }
 }
