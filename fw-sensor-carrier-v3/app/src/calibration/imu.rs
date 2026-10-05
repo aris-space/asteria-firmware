@@ -11,6 +11,11 @@ use crate::sensors::{IMU_COUNT, ImuId};
 use crate::tasks::readout::imu::{ACCEL_FULL_SCALE, GYRO_FULL_SCALE};
 use crate::types::{ImuSample, RawImuSample};
 
+// Plausible accelerometer correction, as in calibrate.py; a pasted line
+// outside these bounds is rejected rather than applied.
+const MAX_ACCEL_OFFSET_G: f32 = 0.2;
+const ACCEL_SCALE_RANGE: core::ops::RangeInclusive<f32> = 0.9..=1.1;
+
 /// Sensor-to-board axis remap for the LSM6DSO32 on this board: negate x and z.
 fn sensor_to_board([x, y, z]: [f32; 3]) -> [f32; 3] {
     [-x, y, -z]
@@ -44,11 +49,15 @@ impl super::Correction for Correction {
     }
 
     fn is_valid(&self) -> bool {
-        self.gyro_bias_dps
-            .iter()
-            .chain(&self.accel_offset_g)
-            .chain(&self.accel_scale)
-            .all(|v| v.is_finite())
+        self.gyro_bias_dps.iter().all(|v| v.is_finite())
+            && self
+                .accel_offset_g
+                .iter()
+                .all(|v| v.abs() <= MAX_ACCEL_OFFSET_G)
+            && self
+                .accel_scale
+                .iter()
+                .all(|v| ACCEL_SCALE_RANGE.contains(v))
     }
 }
 

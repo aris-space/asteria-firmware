@@ -29,7 +29,8 @@ IMU_HZ = 833.0
 STILL_WINDOW_S = 1.0
 STILL_MAX_SPREAD_DPS = 0.5
 MIN_STILL_S = 5.0
-# Plausible accelerometer correction; anything beyond means a bad fit.
+# Plausible accelerometer correction per axis, as in the firmware; anything
+# beyond means a bad fit.
 MAX_ACCEL_OFFSET_G = 0.2
 ACCEL_SCALE_RANGE = (0.9, 1.1)
 # Plausible Earth-field magnitude, as in the firmware.
@@ -73,6 +74,7 @@ class AccelFit:
     rest_g: np.ndarray
     offset_g: np.ndarray | None = None
     scale: np.ndarray | None = None
+    error_before_percent: float = 0.0
     error_percent: float = 0.0
 
     def corrected(self) -> np.ndarray:
@@ -146,13 +148,22 @@ def fit_accel(log, imu: int) -> AccelFit:
     offset = -linear / squares
     radius = np.sqrt((1 + np.sum(squares * offset**2)) / squares)
     scale = 1 / radius
-    if np.linalg.norm(offset) > MAX_ACCEL_OFFSET_G or np.any(
+    if np.any(np.abs(offset) > MAX_ACCEL_OFFSET_G) or np.any(
         (scale < ACCEL_SCALE_RANGE[0]) | (scale > ACCEL_SCALE_RANGE[1])
     ):
         return fit
     fit.offset_g, fit.scale = offset, scale
-    fit.error_percent = float(np.sqrt(np.mean((np.linalg.norm(fit.corrected(), axis=1) - 1) ** 2)) * 100)
+    fit.error_before_percent = magnitude_error_percent(rest)
+    fit.error_percent = magnitude_error_percent(fit.corrected())
+    # Never apply a correction that does not improve the data it was fitted on.
+    if fit.error_percent >= fit.error_before_percent:
+        fit.offset_g = fit.scale = None
     return fit
+
+
+def magnitude_error_percent(accel_g: np.ndarray) -> float:
+    """RMS deviation of |a| from 1 g, in percent."""
+    return float(np.sqrt(np.mean((np.linalg.norm(accel_g, axis=1) - 1) ** 2)) * 100)
 
 
 def fit_mag(log, mag: int) -> MagFit:
@@ -207,11 +218,12 @@ def print_lines(name: str, gyros, accels, mags, estimates) -> None:
                     f"# {fit.sensor}: WARNING IMU timestamps disagree by {us / 1000:.1f} ms; check the readout before using this"
                 )
             if accel.offset_g is None:
-                print(f"# {fit.sensor}: accelerometer not fitted (rest it on all six sides); identity")
+                print(f"# {fit.sensor}: accelerometer not fitted or not improved (rest it on all six sides); identity")
                 offset, scale = np.zeros(3), np.ones(3)
             else:
                 print(
-                    f"# {fit.sensor}: accelerometer error {accel.error_percent:.2f} % over {len(accel.rest_g)} still s"
+                    f"# {fit.sensor}: accelerometer |a| error {accel.error_before_percent:.2f} % -> "
+                    f"{accel.error_percent:.2f} % over {len(accel.rest_g)} still s"
                 )
                 offset, scale = accel.offset_g, accel.scale
             print(
