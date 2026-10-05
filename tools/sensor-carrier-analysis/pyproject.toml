@@ -1,0 +1,15 @@
+[project]
+name = "sensor-carrier-analysis"
+version = "0.1.0"
+description = "Calibration and estimator replay from fw-sensor-carrier-v3 SD logs"
+requires-python = ">=3.12"
+dependencies = ["matplotlib", "numpy", "pandas", "scipy", "sef-light"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+sef-light = { path = "../sef-light-py" }
+
+[tool.ruff]
+line-length = 120

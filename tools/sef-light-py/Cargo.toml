@@ -1,0 +1,16 @@
+[package]
+name = "sef-light-py"
+version = "0.1.0"
+edition = "2024"
+description = "Python bindings to asteria-sef-light for replaying SD logs"
+
+# Its own workspace: a Python extension only builds through maturin.
+[workspace]
+
+[lib]
+name = "sef_light"
+crate-type = ["cdylib"]
+
+[dependencies]
+asteria-sef-light = { path = "../../crates/asteria-sef-light", features = ["std"] }
+pyo3 = { version = "0.29", features = ["extension-module"] }
