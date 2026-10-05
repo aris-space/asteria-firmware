@@ -9,7 +9,7 @@ use asteria_estimator_selector::{
     Candidate, DualGnssSelector, GNSS_RECEIVER_COUNT, GnssSample, GnssSelectorConfig, GnssSolution,
     HysteresisSelector, SelectorConfig,
 };
-use heapless::Vec;
+use heapless::Deque;
 
 const MAX_MAGNETOMETER_AGE_US: u64 = 250_000;
 
@@ -167,7 +167,7 @@ pub struct DualVerticalEstimator<const FILTER_HISTORY_CAPACITY: usize> {
     gnss: DualGnssSelector,
     history_base_filters: [VerticalFilter; IMU_COUNT],
     history_base_scores: [f32; IMU_COUNT],
-    filter_history: Vec<FilterEvent, FILTER_HISTORY_CAPACITY>,
+    filter_history: Deque<FilterEvent, FILTER_HISTORY_CAPACITY>,
     history_floor_key: Option<(u64, u8)>,
     maximum_aiding_delay_us: u64,
     last_imu_sample_time_us: [Option<u64>; IMU_COUNT],
@@ -187,7 +187,8 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
     ///
     /// # Errors
     ///
-    /// Returns an error if the history capacity or delay window is zero.
+    /// Returns an error if the delay window is zero. A zero history capacity does
+    /// not compile.
     pub fn new(
         filter_config: VerticalFilterConfig,
         attitude_configs: [ImuAttitudeConfig; IMU_COUNT],
@@ -195,7 +196,7 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
         gnss_selector_config: GnssSelectorConfig,
         maximum_aiding_delay_us: u64,
     ) -> Result<Self, EstimatorError> {
-        if maximum_aiding_delay_us == 0 || FILTER_HISTORY_CAPACITY == 0 {
+        if maximum_aiding_delay_us == 0 {
             return Err(EstimatorError::OutOfRangeInput);
         }
         let selector = HysteresisSelector::new(selector_config.selection, 0);
@@ -213,7 +214,7 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
             gnss: DualGnssSelector::new(gnss_selector_config),
             history_base_filters: filters,
             history_base_scores: [0.0; IMU_COUNT],
-            filter_history: Vec::new(),
+            filter_history: Deque::new(),
             history_floor_key: None,
             maximum_aiding_delay_us,
             last_imu_sample_time_us: [None; IMU_COUNT],
@@ -371,7 +372,7 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
     ) -> Result<(), EstimatorError> {
         self.filters[0].set_barometer_bias_walk_std(barometer, standard_deviation_m_per_sqrt_s)?;
         self.filters[1].set_barometer_bias_walk_std(barometer, standard_deviation_m_per_sqrt_s)?;
-        let latest_history_key = self.filter_history.last().map(|event| event.sort_key());
+        let latest_history_key = self.filter_history.back().map(|event| event.sort_key());
         let latest_imu_key = self
             .last_imu_sample_time_us
             .into_iter()
@@ -530,7 +531,7 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
 
         let event_is_in_order = self
             .filter_history
-            .last()
+            .back()
             .is_none_or(|latest| latest.sort_key() <= event.sort_key());
         if event_is_in_order {
             let result = event.apply(&mut self.filters)?;
@@ -540,22 +541,28 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
                 .saturating_sub(self.maximum_aiding_delay_us);
             while self
                 .filter_history
-                .first()
+                .front()
                 .is_some_and(|oldest| oldest.sample_time_us() < history_cutoff_time_us)
             {
-                let evicted = self.filter_history.remove(0);
+                let evicted = self
+                    .filter_history
+                    .pop_front()
+                    .expect("history is not empty");
                 let result = evicted.apply(&mut self.history_base_filters)?;
                 Self::record_scores(&mut self.history_base_scores, &result, self.selector_config);
                 self.history_floor_key = Some(evicted.sort_key());
             }
             if self.filter_history.is_full() {
-                let evicted = self.filter_history.remove(0);
+                let evicted = self
+                    .filter_history
+                    .pop_front()
+                    .expect("history is not empty");
                 let result = evicted.apply(&mut self.history_base_filters)?;
                 Self::record_scores(&mut self.history_base_scores, &result, self.selector_config);
                 self.history_floor_key = Some(evicted.sort_key());
             }
             self.filter_history
-                .push(event)
+                .push_back(event)
                 .unwrap_or_else(|_| unreachable!("history capacity was made available"));
             return Ok(result);
         }
@@ -564,11 +571,11 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
         event.apply(&mut validation_filters)?;
 
         if self.filter_history.is_full() {
-            let oldest = self.filter_history[0];
+            let oldest = *self.filter_history.front().expect("history is full");
             if event.sort_key() < oldest.sort_key() {
                 return Err(EstimatorError::MeasurementTooOld);
             }
-            let evicted = self.filter_history.remove(0);
+            let evicted = self.filter_history.pop_front().expect("history is full");
             let result = evicted.apply(&mut self.history_base_filters)?;
             Self::record_scores(&mut self.history_base_scores, &result, self.selector_config);
             self.history_floor_key = Some(evicted.sort_key());
@@ -579,9 +586,19 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
             .iter()
             .position(|stored| stored.sort_key() > event.sort_key())
             .unwrap_or(self.filter_history.len());
-        self.filter_history
-            .insert(insertion_index, event)
-            .unwrap_or_else(|_| unreachable!("history capacity was made available"));
+        // A ring buffer cannot insert in the middle, so a late event rebuilds
+        // the history; late events are rare and replay the history anyway.
+        let mut reordered = Deque::new();
+        for (index, stored) in self.filter_history.iter().copied().enumerate() {
+            if index == insertion_index {
+                let _ = reordered.push_back(event);
+            }
+            let _ = reordered.push_back(stored);
+        }
+        if insertion_index == self.filter_history.len() {
+            let _ = reordered.push_back(event);
+        }
+        self.filter_history = reordered;
 
         let mut replayed_filters = self.history_base_filters;
         let mut replayed_scores = self.history_base_scores;

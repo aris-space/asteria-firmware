@@ -513,11 +513,7 @@ fn dual_gnss_keeps_the_better_receiver_when_solutions_disagree() {
 }
 
 #[test]
-fn zero_history_or_delay_is_rejected() {
-    assert!(matches!(
-        estimator::<0>(100_000),
-        Err(EstimatorError::OutOfRangeInput)
-    ));
+fn zero_delay_is_rejected() {
     assert!(matches!(
         estimator::<8>(0),
         Err(EstimatorError::OutOfRangeInput)
