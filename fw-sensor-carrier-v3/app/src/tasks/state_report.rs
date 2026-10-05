@@ -19,8 +19,11 @@ pub async fn task() -> ! {
         ticker.next().await;
         if let Some(estimate) = rx.try_changed() {
             info!(
-                "height {=f32} m, velocity up {=f32} m/s",
-                estimate.height_msl_m, estimate.velocity_mps
+                "height {=f32} ± {=f32} m, velocity up {=f32} ± {=f32} m/s",
+                estimate.height_msl_m,
+                estimate.height_std_m,
+                estimate.velocity_mps,
+                estimate.velocity_std_mps
             );
         }
     }
