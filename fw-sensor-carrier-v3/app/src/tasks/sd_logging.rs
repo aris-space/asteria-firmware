@@ -10,7 +10,7 @@
 //! - `cal_us`: `raw_us` minus the stored latency, the time the estimator uses,
 //! - the sensor index.
 //!
-//! IMU and magnetometer rows then hold raw sensor-frame counts (accel 4096
+//! IMU and magnetometer rows then hold raw sensor-frame counts (accel 2048
 //! LSB/g, gyro 70 mdps/LSB, mag 150 nT/LSB) followed by calibrated board-frame
 //! values. Other sensors have no value correction yet, so their values appear
 //! once.

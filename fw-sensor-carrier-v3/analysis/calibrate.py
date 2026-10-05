@@ -23,7 +23,8 @@ import sdlog
 
 # Units and axes as in the firmware's calibration/<kind>.rs.
 GYRO_DPS_PER_LSB = 0.07
-ACCEL_G_PER_LSB = 1 / 4096
+# Per accelerometer range; a log's range is recognised from its data.
+ACCEL_G_PER_LSB = {8: 1 / 4096, 16: 1 / 2048}
 MAG_NT_PER_LSB = 150.0
 IMU_HZ = 833.0
 # A one-second window counts as still if no axis varies more than this.
@@ -54,9 +55,19 @@ def imu_board_dps(imu) -> np.ndarray:
     return imu[["gx_raw", "gy_raw", "gz_raw"]].to_numpy() * [-1, 1, -1] * GYRO_DPS_PER_LSB
 
 
+def accel_g_per_lsb(imu) -> float:
+    """The accelerometer resolution the log was recorded with: the one closest
+    to the ratio of its calibrated values to its raw counts, which a
+    calibration changes by a few percent at most."""
+    raw = np.abs(imu["ax_raw"].to_numpy())
+    big = raw > 1_000
+    ratio = np.median(np.abs(imu["ax_g"].to_numpy()[big]) / raw[big])
+    return min(ACCEL_G_PER_LSB.values(), key=lambda lsb: abs(np.log(ratio / lsb)))
+
+
 def imu_board_g(imu) -> np.ndarray:
     """LSM6DSO32 sensor-to-board remap, as for the gyro."""
-    return imu[["ax_raw", "ay_raw", "az_raw"]].to_numpy() * [-1, 1, -1] * ACCEL_G_PER_LSB
+    return imu[["ax_raw", "ay_raw", "az_raw"]].to_numpy() * [-1, 1, -1] * accel_g_per_lsb(imu)
 
 
 def mag_board_counts(mag) -> np.ndarray:
