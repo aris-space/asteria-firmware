@@ -34,6 +34,12 @@ use panic_reset as _;
 
 #[embassy_executor::main]
 async fn main(thread_spawner: Spawner) -> ! {
+    // Code runs from flash, which is several times slower without the instruction
+    // cache. The data cache stays off: DMA buffers sit in cacheable SRAM and the
+    // HAL does no cache maintenance for them.
+    let mut core = cortex_m::Peripherals::take().expect("core peripherals");
+    core.SCB.enable_icache();
+
     let mut config = clocks::clocks_config();
     {
         use embassy_stm32::rcc::*;
