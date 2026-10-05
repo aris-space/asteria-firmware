@@ -1,0 +1,251 @@
+<!doctype html>
+<!--
+3D replay of a board's estimated motion. viewer.py fills in DATA and writes a
+self-contained copy per log; this template itself shows nothing.
+
+DATA = {
+  title: "LOG0038",
+  t: [s, ...],                               // ascending
+  position_enu_m: [[east, north, up], ...],  // any origin; recentred on the first point
+  orientation_body_to_ned_wxyz: [[w, x, y, z], ...],
+  readouts: [{ label: "height", unit: "m", values: [...], std: [...] }, ...],  // std optional
+  marks: [[t, "label"], ...],
+}
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Board replay</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #10141a; color: #e6e9ee; font: 14px system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  .panel { position: absolute; background: rgba(16, 20, 26, .85); padding: 10px 14px; border-radius: 8px; line-height: 1.6; }
+  #hud { top: 12px; left: 12px; min-width: 240px; }
+  #hud h1 { font-size: 15px; margin: 0 0 4px; }
+  #hud b { font-variant-numeric: tabular-nums; }
+  #mark { color: #ffd479; min-height: 1.6em; }
+  #legend { top: 12px; right: 12px; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  #bar { left: 12px; right: 12px; bottom: 12px; display: flex; gap: 8px; align-items: center; }
+  #track { position: relative; flex: 1; display: flex; align-items: center; }
+  #slider { width: 100%; margin: 0; }
+  .tick { position: absolute; top: -9px; width: 2px; height: 8px; background: #ffd479; pointer-events: none; }
+  button { background: #2a3340; color: #e6e9ee; border: 1px solid #3c4756; border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  button[aria-pressed="true"] { background: #3d6fd1; border-color: #3d6fd1; }
+  button:focus-visible, input:focus-visible { outline: 2px solid #ffd479; outline-offset: 2px; }
+  .hint { opacity: .7; margin-top: 6px; }
+</style>
+</head>
+<body>
+<section id="hud" class="panel" aria-label="Current state">
+  <h1 id="title"></h1>
+  <div>time <b id="time"></b> s</div>
+  <div id="mark"></div>
+  <div id="readouts"></div>
+</section>
+<section id="legend" class="panel" aria-label="Legend">
+  <div><span class="sw" style="background:#ff5a5a"></span>board x</div>
+  <div><span class="sw" style="background:#5ad16b"></span>board y</div>
+  <div><span class="sw" style="background:#5a9bff"></span>board z</div>
+  <div><span class="sw" style="background:#ffd479"></span>path so far, marks</div>
+  <div class="hint">board drawn 2.5 m long<br>drag to orbit, scroll to zoom<br>space: play/pause, ←/→: 1 s</div>
+</section>
+<div id="bar" class="panel" role="group" aria-label="Playback">
+  <button id="play" aria-label="Play">▶</button>
+  <button class="speed" data-speed="1" aria-pressed="false">1×</button>
+  <button class="speed" data-speed="5" aria-pressed="true">5×</button>
+  <button class="speed" data-speed="20" aria-pressed="false">20×</button>
+  <div id="track"><input id="slider" type="range" step="0.05" aria-label="Time"></div>
+  <button id="follow" aria-pressed="true">follow</button>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>/* DATA */</script>
+<script>
+const T = DATA.t, N = T.length, START = T[0], END = T[N - 1];
+const BOARD_LENGTH_M = 2.5;
+
+// Scene coordinates: x east, y up, z south.
+const origin = DATA.position_enu_m[0];
+const P = DATA.position_enu_m.map(([e, n, u]) => new THREE.Vector3(e - origin[0], u - origin[2], -(n - origin[1])));
+const NED_TO_SCENE = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().set(
+  0, 1, 0, 0,
+  0, 0, -1, 0,
+  -1, 0, 0, 0,
+  0, 0, 0, 1));
+const Q = DATA.orientation_body_to_ned_wxyz.map(([w, x, y, z]) => NED_TO_SCENE.clone().multiply(new THREE.Quaternion(x, y, z, w)));
+// Neighbours in the same hemisphere so interpolation takes the short way round.
+for (let k = 1; k < N; k++) if (Q[k].dot(Q[k - 1]) < 0) Q[k].set(-Q[k].x, -Q[k].y, -Q[k].z, -Q[k].w);
+
+document.title = `${DATA.title} replay`;
+document.getElementById("title").textContent = DATA.title;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.domElement.setAttribute("aria-label", "3D view of the board along its path");
+renderer.domElement.setAttribute("role", "img");
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x10141a);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 5000);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+sun.position.set(20, 40, 10);
+scene.add(sun);
+
+function label(text, color, size = 64) {
+  const c = document.createElement("canvas");
+  c.width = 256; c.height = 128;
+  const g = c.getContext("2d");
+  g.fillStyle = color; g.font = `bold ${size}px system-ui`; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(text, 128, 64);
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
+}
+
+// Ground grid below the lowest point, sized to the path, with compass labels.
+const box = new THREE.Box3().setFromPoints(P);
+const groundY = box.min.y - 2;
+const extent = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+const gridSize = Math.ceil((extent * 1.5 + 20) / 10) * 10;
+const centre = box.getCenter(new THREE.Vector3());
+const grid = new THREE.GridHelper(gridSize, gridSize / 2, 0x3c4756, 0x232b36);
+grid.position.set(centre.x, groundY, centre.z);
+scene.add(grid);
+for (const [text, dx, dz] of [["N", 0, -1], ["S", 0, 1], ["E", 1, 0], ["W", -1, 0]]) {
+  const s = label(text, "#9aa6b5");
+  s.position.set(centre.x + dx * gridSize / 2, groundY, centre.z + dz * gridSize / 2);
+  s.scale.set(gridSize / 20, gridSize / 40, 1);
+  scene.add(s);
+}
+
+// Whole path faint, travelled part highlighted, and its shadow on the ground to read height.
+scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(P), new THREE.LineBasicMaterial({ color: 0x55606e, transparent: true, opacity: 0.5 })));
+const travelled = new THREE.BufferGeometry().setFromPoints(P);
+scene.add(new THREE.Line(travelled, new THREE.LineBasicMaterial({ color: 0xffd479 })));
+scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(P.map(p => new THREE.Vector3(p.x, groundY + 0.01, p.z))), new THREE.LineBasicMaterial({ color: 0x2f3a48 })));
+
+// The board: a PCB with its x, y, z axes.
+const board = new THREE.Group();
+const s = BOARD_LENGTH_M / 2.5;
+board.add(new THREE.Mesh(new THREE.BoxGeometry(2.5 * s, 1.6 * s, 0.12 * s), new THREE.MeshStandardMaterial({ color: 0x1f7a4a, roughness: 0.6 })));
+const chip = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.5 * s, 0.1 * s), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+chip.position.set(0.6 * s, 0.3 * s, 0.1 * s);
+board.add(chip);
+for (const [axis, color, name] of [[[1, 0, 0], 0xff5a5a, "x"], [[0, 1, 0], 0x5ad16b, "y"], [[0, 0, 1], 0x5a9bff, "z"]]) {
+  const d = new THREE.Vector3(...axis);
+  board.add(new THREE.ArrowHelper(d, new THREE.Vector3(), 2.2 * s, color, 0.45 * s, 0.25 * s));
+  const l = label(name, "#" + color.toString(16).padStart(6, "0"), 90);
+  l.position.copy(d.multiplyScalar(2.6 * s));
+  l.scale.set(1.2 * s, 0.6 * s, 1);
+  board.add(l);
+}
+scene.add(board);
+const drop = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineDashedMaterial({ color: 0x55606e, dashSize: 0.3, gapSize: 0.2 }));
+scene.add(drop);
+
+// Readouts and marks.
+const readoutEls = DATA.readouts.map(r => {
+  const div = document.createElement("div");
+  div.append(`${r.label} `);
+  const b = document.createElement("b");
+  div.append(b);
+  document.getElementById("readouts").append(div);
+  return b;
+});
+const slider = document.getElementById("slider");
+slider.min = START; slider.max = END;
+for (const [t, text] of DATA.marks) {
+  const tick = document.createElement("div");
+  tick.className = "tick";
+  tick.style.left = `${(100 * (t - START)) / (END - START)}%`;
+  tick.title = text;
+  document.getElementById("track").append(tick);
+}
+function lastMark(t) {
+  let found = "";
+  for (const [mt, text] of DATA.marks) if (mt <= t) found = `${text} (${(t - mt).toFixed(0)} s ago)`;
+  return found;
+}
+
+// Playback, interpolating between samples.
+let k = 0, now = START, playing = false, speed = 5, follow = true;
+camera.position.copy(P[0]).add(new THREE.Vector3(10, 7, 12));
+controls.target.copy(P[0]);
+const q = new THREE.Quaternion();
+function show(t) {
+  while (k < N - 2 && T[k + 1] <= t) k++;
+  while (k > 0 && T[k] > t) k--;
+  const j = Math.min(k + 1, N - 1);
+  const a = j === k ? 0 : Math.min(Math.max((t - T[k]) / (T[j] - T[k]), 0), 1);
+  const previous = board.position.clone();
+  board.position.lerpVectors(P[k], P[j], a);
+  board.quaternion.copy(q.copy(Q[k]).slerp(Q[j], a));
+  travelled.setDrawRange(0, k + 1);
+  drop.geometry.setFromPoints([board.position, new THREE.Vector3(board.position.x, groundY, board.position.z)]);
+  drop.computeLineDistances();
+  if (follow) {
+    camera.position.add(board.position.clone().sub(previous));
+    controls.target.copy(board.position);
+  }
+  document.getElementById("time").textContent = (t - START).toFixed(1);
+  document.getElementById("mark").textContent = lastMark(t);
+  DATA.readouts.forEach((r, n) => {
+    const at = x => x[k] + (x[j] - x[k]) * a;
+    const value = at(r.values);
+    const sign = r.unit === "m/s" && value >= 0 ? "+" : "";
+    readoutEls[n].textContent = `${sign}${value.toFixed(2)}${r.std ? ` ± ${at(r.std).toFixed(2)}` : ""} ${r.unit}`;
+  });
+  slider.value = t;
+  slider.setAttribute("aria-valuetext", `${(t - START).toFixed(0)} seconds`);
+}
+function seek(t) { now = Math.min(Math.max(t, START), END); show(now); }
+function setPlaying(p) {
+  playing = p;
+  const play = document.getElementById("play");
+  play.textContent = p ? "❚❚" : "▶";
+  play.setAttribute("aria-label", p ? "Pause" : "Play");
+}
+document.getElementById("play").onclick = () => { if (now >= END) seek(START); setPlaying(!playing); };
+for (const b of document.querySelectorAll(".speed")) b.onclick = () => {
+  speed = +b.dataset.speed;
+  document.querySelectorAll(".speed").forEach(x => x.setAttribute("aria-pressed", x === b));
+};
+slider.oninput = () => seek(+slider.value);
+document.getElementById("follow").onclick = e => {
+  follow = !follow;
+  e.currentTarget.setAttribute("aria-pressed", follow);
+};
+addEventListener("keydown", e => {
+  if (e.target === slider) return;
+  if (e.code === "Space") { e.preventDefault(); document.getElementById("play").click(); }
+  if (e.code === "ArrowLeft") seek(now - 1);
+  if (e.code === "ArrowRight") seek(now + 1);
+});
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+resize();
+let last = performance.now();
+function frame(time) {
+  const dt = Math.min((time - last) / 1000, 0.1);
+  last = time;
+  if (playing) {
+    seek(now + dt * speed);
+    if (now >= END) setPlaying(false);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+show(now);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
