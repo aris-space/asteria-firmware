@@ -20,7 +20,6 @@ use embassy_time::{Duration, Instant, Timer};
 use crate::sensors::{AtomicSensorStatus, SensorStatus};
 
 pub mod baro;
-#[expect(dead_code, reason = "not spawned; see startup.rs")]
 pub mod dht;
 pub mod gnss;
 pub mod imu;
