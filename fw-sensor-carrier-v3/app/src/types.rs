@@ -92,6 +92,14 @@ pub struct BaroSample {
     pub temperature_c: f32,
 }
 
+impl BaroSample {
+    /// ISA pressure altitude. It differs from MSL height by the local
+    /// sea-level pressure, which the estimator's bias states absorb.
+    pub fn pressure_altitude_m(&self) -> f32 {
+        44_330.0 * (1.0 - libm::powf(self.pressure_mbar / 1_013.25, 0.190_294_95))
+    }
+}
+
 /// Raw humidity and temperature sample, stamped on completion.
 #[derive(Clone, Copy, Debug)]
 pub struct RawDhtSample {

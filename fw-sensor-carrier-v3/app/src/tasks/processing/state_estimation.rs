@@ -217,21 +217,17 @@ impl Processor {
                 }
             }
             Event::Gnss(sample) => self.update_gnss(sample),
-            Event::Baro(sample) => {
-                // ISA pressure altitude; the bias states absorb its offset from MSL.
-                let height_m =
-                    44_330.0 * (1.0 - libm::powf(sample.pressure_mbar / 1_013.25, 0.190_294_95));
-                self.estimator
-                    .update_pressure(
-                        sample.ts.as_micros(),
-                        BarometerId::ALL[sample.src.index()],
-                        PressureMeasurement {
-                            height_m,
-                            height_std_m: BARO_HEIGHT_STD_M,
-                        },
-                    )
-                    .map(|_| ())
-            }
+            Event::Baro(sample) => self
+                .estimator
+                .update_pressure(
+                    sample.ts.as_micros(),
+                    BarometerId::ALL[sample.src.index()],
+                    PressureMeasurement {
+                        height_m: sample.pressure_altitude_m(),
+                        height_std_m: BARO_HEIGHT_STD_M,
+                    },
+                )
+                .map(|_| ()),
         };
         if let Err(error) = result {
             let now = Instant::now();
