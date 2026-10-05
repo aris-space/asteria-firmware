@@ -24,7 +24,7 @@ async fn configure(bus: SharedI2cBus, id: BaroId) -> Result<Sensor, ()> {
     Ms5607::new(I2cDevice::new(bus), false)
         .init(&mut Delay)
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e.kind)))
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e.kind)))
 }
 
 /// Brings the barometer up at startup; see [`super`] for why this is separate.
@@ -48,12 +48,12 @@ impl State for Inactive {
             let sensor = match self.sensor.take() {
                 Some(sensor) => Ok(sensor),
                 None => {
-                    debug!("{} initializing", self.id);
+                    debug!("{}: initializing", self.id);
                     configure(self.bus, self.id).await
                 }
             };
             if let Ok(sensor) = sensor {
-                info!("{} active", self.id);
+                info!("{}: active", self.id);
                 return Active {
                     sensor,
                     bus: self.bus,
@@ -86,7 +86,7 @@ impl State for Active {
             }
             wait_for_sample(next_sample, self.id).await;
         }
-        error!("{} offline (too many consecutive errors)", self.id);
+        error!("{}: offline (too many consecutive errors)", self.id);
         Inactive {
             sensor: None,
             bus: self.bus,
@@ -103,7 +103,7 @@ impl Active {
             .sensor
             .measure(Oversampling::Osr2048, &mut Delay)
             .await
-            .map_err(|e| warn!("{} read error: {:?}", self.id, Debug2Format(&e)))?;
+            .map_err(|e| warn!("{}: read error: {:?}", self.id, Debug2Format(&e)))?;
         // Pressure is converted in the first half of the D1/D2 cycle.
         // Use the measured cycle midpoint instead of a fixed read delay.
         let read_ts = Instant::now();

@@ -88,7 +88,7 @@ impl Processor {
                 .last_warning
                 .is_none_or(|last| now.saturating_duration_since(last) >= WARNING_PERIOD)
             {
-                warn!("SEF-light update failed: {:?}", Debug2Format(&error));
+                warn!("SEF: update failed: {:?}", Debug2Format(&error));
                 self.last_warning = Some(now);
             }
         }

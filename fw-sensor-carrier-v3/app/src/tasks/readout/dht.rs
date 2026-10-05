@@ -25,11 +25,11 @@ async fn configure(bus: SharedI2cBus, id: DhtId) -> Result<Sensor, ()> {
     sensor
         .soft_reset(&mut Delay)
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e)))?;
     sensor
         .measure(Precision::Low, &mut Delay)
         .await
-        .map_err(|e| error!("{} init failed: {:?}", id, Debug2Format(&e)))?;
+        .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e)))?;
     Ok(sensor)
 }
 
@@ -54,12 +54,12 @@ impl State for Inactive {
             let sensor = match self.sensor.take() {
                 Some(sensor) => Ok(sensor),
                 None => {
-                    debug!("{} initializing", self.id);
+                    debug!("{}: initializing", self.id);
                     configure(self.bus, self.id).await
                 }
             };
             if let Ok(sensor) = sensor {
-                info!("{} active", self.id);
+                info!("{}: active", self.id);
                 return Active {
                     sensor,
                     bus: self.bus,
@@ -92,7 +92,7 @@ impl State for Active {
             }
             wait_for_sample(next_sample, self.id).await;
         }
-        error!("{} offline (too many consecutive errors)", self.id);
+        error!("{}: offline (too many consecutive errors)", self.id);
         Inactive {
             sensor: None,
             bus: self.bus,
@@ -108,7 +108,7 @@ impl Active {
             .sensor
             .measure(Precision::Low, &mut Delay)
             .await
-            .map_err(|e| warn!("{} read error: {:?}", self.id, Debug2Format(&e)))?;
+            .map_err(|e| warn!("{}: read error: {:?}", self.id, Debug2Format(&e)))?;
         let read_ts = Instant::now();
         let raw = RawDhtSample {
             src: self.id,

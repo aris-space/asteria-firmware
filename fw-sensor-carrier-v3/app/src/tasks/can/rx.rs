@@ -5,7 +5,7 @@ use hermes_can::messages::Message;
 use super::{CanReceiver, THIS_BOARD_ID};
 
 #[embassy_executor::task]
-pub async fn rx_task(mut can_rx: CanRx<'static>) -> ! {
+pub async fn task(mut can_rx: CanRx<'static>) -> ! {
     loop {
         match can_rx.recv().await {
             Ok((msg, _ts)) => match msg {
@@ -19,7 +19,7 @@ pub async fn rx_task(mut can_rx: CanRx<'static>) -> ! {
                 }
                 _ => {}
             },
-            Err(err) => error!("CAN RX error: {:?}", err),
+            Err(err) => error!("CAN: RX error: {:?}", err),
         }
     }
 }

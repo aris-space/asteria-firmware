@@ -53,7 +53,7 @@ pub async fn task() -> ! {
             && ts < last
         {
             warn!(
-                "SEF dropped a sample {} us older than the last",
+                "SEF: dropped a sample {} us older than the last",
                 (last - ts).as_micros()
             );
             continue;
@@ -83,7 +83,7 @@ fn refill<T: Clone>(
         }
         match subscriber.try_next_message() {
             Some(WaitResult::Message(sample)) => *head = Some(event(sample)),
-            Some(WaitResult::Lagged(count)) => warn!("SEF dropped {} {} samples", count, stream),
+            Some(WaitResult::Lagged(count)) => warn!("SEF: dropped {} {} samples", count, stream),
             None => {}
         }
     }

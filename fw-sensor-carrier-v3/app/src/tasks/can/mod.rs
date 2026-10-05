@@ -12,9 +12,6 @@ use hermes_can::{CanDecodeError, CanEncodeError, CanMessage, next_valid_length};
 pub mod rx;
 pub mod tx;
 
-pub use rx::rx_task;
-pub use tx::spawn_tx_tasks;
-
 pub const THIS_BOARD_ID: hermes_can::messages::BoardId =
     hermes_can::messages::BoardId::SensorCarrier;
 
@@ -56,7 +53,7 @@ macro_rules! impl_can_transmitter {
                 let frame = FdFrame::new(Header::new(id.into(), dlc as u8, false), payload)
                     .map_err(|_| CanError::Other)?;
                 if let Some(pushed) = self.write_fd(&frame).await {
-                    defmt::warn!("CAN dropped frame: {:?}", pushed);
+                    defmt::warn!("CAN: dropped frame: {:?}", pushed);
                 }
                 Ok(())
             }

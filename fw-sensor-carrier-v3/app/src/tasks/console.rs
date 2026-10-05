@@ -116,7 +116,7 @@ const HELP: &str = r"commands:
 
 /// Build the USB device + CDC class from static buffers and spawn the device
 /// and console tasks.
-pub fn start(driver: UsbDriver, storage: &'static Storage, spawner: Spawner) {
+pub fn spawn(driver: UsbDriver, storage: &'static Storage, spawner: Spawner) {
     static CONFIG_DESC: StaticCell<[u8; 256]> = StaticCell::new();
     static BOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
     static MSOS_DESC: StaticCell<[u8; 0]> = StaticCell::new();
