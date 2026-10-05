@@ -39,18 +39,30 @@ pub struct Scenario {
     pub description: &'static str,
     pub duration_s: f64,
     pub gnss_fix: bool,
+    /// Console marks as `(time, label)`.
+    marks: &'static [(f64, &'static str)],
     /// Upward acceleration in m/s² from time and upward velocity.
     up_accel: fn(f64, f64) -> f64,
     /// Body rotation rate in rad/s.
     body_rate: fn(f64) -> [f64; 3],
 }
 
-pub const SCENARIOS: [Scenario; 10] = [
+pub const SCENARIOS: [Scenario; 11] = [
+    Scenario {
+        name: "calibration",
+        description: "the calibration session: 10 s still, 40 s tumble, 10 s still, marked",
+        duration_s: 60.0,
+        gnss_fix: false,
+        marks: &[(0.5, "still"), (10.0, "tumble"), (50.0, "still")],
+        up_accel: |_, _| 0.0,
+        body_rate: |t| tumble(t).map(|w| w * smooth_window(t, 10.0, 50.0, 1.0)),
+    },
     Scenario {
         name: "still",
         description: "board lying on a table",
         duration_s: 60.0,
         gnss_fix: true,
+        marks: &[],
         up_accel: |_, _| 0.0,
         body_rate: |_| [0.0; 3],
     },
@@ -59,6 +71,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "turned through all orientations by hand, ~100 dps",
         duration_s: 60.0,
         gnss_fix: false,
+        marks: &[],
         up_accel: |_, _| 0.0,
         body_rate: tumble,
     },
@@ -67,6 +80,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "raised and lowered ±0.4 m at 0.6 Hz, indoors",
         duration_s: 60.0,
         gnss_fix: false,
+        marks: &[],
         up_accel: |t, _| sine_accel(0.4, 0.6, t),
         body_rate: wobble,
     },
@@ -75,6 +89,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "shaken up and down ±0.3 m at 1.2 Hz, indoors",
         duration_s: 60.0,
         gnss_fix: false,
+        marks: &[],
         up_accel: |t, _| sine_accel(0.3, 1.2, t),
         body_rate: wobble,
     },
@@ -83,6 +98,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "elevator 30 m up and down at 1.5 m/s, indoors",
         duration_s: 80.0,
         gnss_fix: false,
+        marks: &[],
         up_accel: |t, _| match t {
             t if (5.0..6.5).contains(&t) || (61.5..63.0).contains(&t) => 1.0,
             t if (26.5..28.0).contains(&t) || (40.0..41.5).contains(&t) => -1.0,
@@ -95,6 +111,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "walking over a hill outdoors, ±0.4 m/s vertical",
         duration_s: 180.0,
         gnss_fix: true,
+        marks: &[],
         up_accel: |t, _| 0.4 * TAU / 40.0 * (TAU * t / 40.0).cos() + sine_accel(0.03, 1.8, t),
         body_rate: |t| {
             [
@@ -109,6 +126,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "driving over hills, ±2.5 m/s vertical with road bumps",
         duration_s: 180.0,
         gnss_fix: true,
+        marks: &[],
         up_accel: |t, _| 2.5 * TAU / 30.0 * (TAU * t / 30.0).cos() + 0.5 * (TAU * 3.0 * t).sin(),
         body_rate: |t| {
             [
@@ -124,6 +142,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "15 s still, takeoff to 8 m, yaw sweeps and ±2 m climbs, then landing",
         duration_s: 120.0,
         gnss_fix: true,
+        marks: &[],
         up_accel: |t, _| {
             8.0 * smooth_ramp_kinematics(t, 15.0, 8.0).2
                 + windowed_height_accel(2.0, 0.2, t, 40.0, 90.0, 5.0)
@@ -144,6 +163,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "20 s on the pad, 3 s boost at 6 g, coast to ~1.2 km, descent at 20 m/s",
         duration_s: 90.0,
         gnss_fix: true,
+        marks: &[],
         up_accel: |t, v| {
             let airborne = smooth_ramp(t, 20.0, 0.2);
             let boost = smooth_window(t, 20.0, 23.0, 0.2);
@@ -175,6 +195,7 @@ pub const SCENARIOS: [Scenario; 10] = [
         description: "30 s tumble, 10 s still, 30 s shake, 20 s still, indoors",
         duration_s: 90.0,
         gnss_fix: false,
+        marks: &[],
         up_accel: |t, _| windowed_height_accel(0.3, 1.2, t, 40.0, 70.0, 0.5),
         body_rate: |t| {
             let tumble_weight = smooth_window(t, 0.0, 30.0, 0.5);
@@ -369,10 +390,21 @@ pub fn write(scenario: &Scenario, seed: u64, dir: &Path) -> std::io::Result<()> 
                 + noise.vector(0.004);
             let gyro_dps = truth.rate(t).map(f64::to_degrees) + gyro_bias[imu] + noise.vector(0.07);
             let stamp = us(t + latency + noise.normal(2e-5));
+            // Board to sensor frame (negate x and z), at 70 mdps per count.
+            let gyro_raw =
+                Vector3::new(-gyro_dps.x, gyro_dps.y, -gyro_dps.z).map(|v| (v / 0.07).round());
             writeln!(
                 csv,
-                "{stamp},{stamp},{stamp},{imu},0,0,0,0,0,0,{:.6},{:.6},{:.6},{:.4},{:.4},{:.4}",
-                accel_g.x, accel_g.y, accel_g.z, gyro_dps.x, gyro_dps.y, gyro_dps.z
+                "{stamp},{stamp},{stamp},{imu},0,0,0,{},{},{},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4}",
+                gyro_raw.x,
+                gyro_raw.y,
+                gyro_raw.z,
+                accel_g.x,
+                accel_g.y,
+                accel_g.z,
+                gyro_dps.x,
+                gyro_dps.y,
+                gyro_dps.z
             )
             .unwrap();
         }
@@ -393,10 +425,12 @@ pub fn write(scenario: &Scenario, seed: u64, dir: &Path) -> std::io::Result<()> 
                 + hard_iron
                 + noise.vector(150.0);
             let stamp = us(t + true_latency(name));
+            // Board to sensor frame (negate all axes), at 150 nT per count.
+            let raw = field.map(|v| (-v / 150.0).round() as i16);
             writeln!(
                 csv,
-                "{stamp},{stamp},{stamp},{mag},0,0,0,{:.2},{:.2},{:.2}",
-                field.x, field.y, field.z
+                "{stamp},{stamp},{stamp},{mag},{},{},{},{:.2},{:.2},{:.2}",
+                raw.x, raw.y, raw.z, field.x, field.y, field.z
             )
             .unwrap();
         }
@@ -488,6 +522,11 @@ pub fn write(scenario: &Scenario, seed: u64, dir: &Path) -> std::io::Result<()> 
         dir.join("DROPS.CSV"),
         "uptime_us,state,imu,mag,gnss,baro,dht\n",
     )?;
+    let mut csv = String::from("uptime_us,label\n");
+    for &(t, label) in scenario.marks {
+        writeln!(csv, "{},{label}", us(t)).unwrap();
+    }
+    fs::write(dir.join("MARKS.CSV"), csv)?;
     Ok(())
 }
 

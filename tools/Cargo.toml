@@ -1,4 +1,4 @@
 # Host-side tooling: board access over USB (asteria-tool) and SD log analysis.
 [workspace]
 resolver = "2"
-members = ["asteria-tool", "sensor-carrier-latency"]
+members = ["asteria-tool", "sensor-carrier-calibrate"]

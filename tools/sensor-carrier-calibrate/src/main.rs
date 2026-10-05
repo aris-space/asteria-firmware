@@ -1,13 +1,18 @@
-//! Fits each sensor's latency from fw-sensor-carrier-v3 SD logs.
+//! Fits fw-sensor-carrier-v3 calibration from an SD log session and prints
+//! it as `cal set` lines to paste into the board's USB console.
 //!
-//! The motion is modelled as continuous-time B-splines. IMU_1 is fitted
-//! against IMU_0's rotation, each magnetometer against IMU_0's gyro, and the
-//! barometers and GNSS receivers against IMU_0's vertical acceleration.
-//! Latencies are relative to IMU_0 and printed as `cal latency` commands.
+//! Gyro bias comes from still stretches, magnetometer hard and soft iron from
+//! all orientations the board was turned through, both from raw counts.
+//! Latencies come from modelling the motion as continuous-time B-splines:
+//! IMU_1 against IMU_0's rotation, each magnetometer against IMU_0's gyro,
+//! and the barometers and GNSS receivers against IMU_0's vertical
+//! acceleration. They are relative to IMU_0. `mark still` and `mark tumble`
+//! in the console narrow which stretches are used.
 //!
 //! `simulate` writes logs with known latencies in the same format, and
 //! `study` runs the fits on many simulated scenarios.
 
+mod calibrate;
 mod fit;
 mod log;
 mod models;
@@ -36,8 +41,8 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Fit the latencies of one logging session.
-    Fit {
+    /// Fit the calibration of one logging session.
+    Calibrate {
         /// A `LOGnnnn` directory, or the SD card root to use its newest session.
         log: PathBuf,
         /// Ignore samples before this many seconds into the session.
@@ -72,11 +77,12 @@ enum Command {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     match Args::parse().command {
-        Command::Fit { log, from, to } => {
+        Command::Calibrate { log, from, to } => {
             let mut log = Log::read(&log)?;
             print_overview(&log);
             log.crop(from, to);
-            print_fits(&log);
+            let latencies = fit_latencies(&log);
+            calibrate::print(&log, &latencies);
         }
         Command::Simulate {
             scenario,
@@ -187,7 +193,8 @@ fn print_overview(log: &Log) {
     println!();
 }
 
-fn print_fits(log: &Log) {
+/// Prints every latency fit and returns the determined latencies.
+fn fit_latencies(log: &Log) -> BTreeMap<String, f64> {
     let mut latencies = BTreeMap::from([("IMU_0".to_string(), 0.0)]);
     for (title, report) in models::fit_all(log) {
         println!("{title}");
@@ -212,10 +219,7 @@ fn print_fits(log: &Log) {
             offset_s * 1e3
         );
     }
-    println!("cal commands (latencies relative to IMU_0):");
-    for (name, latency) in latencies {
-        println!("cal latency {name} {}", (latency * 1e6).round() as i64);
-    }
+    latencies
 }
 
 fn print_report(report: &FitReport) {

@@ -1,8 +1,8 @@
 [package]
-name = "sensor-carrier-latency"
+name = "sensor-carrier-calibrate"
 version = "0.1.0"
 edition = "2024"
-description = "Fits per-sensor latencies from fw-sensor-carrier-v3 SD logs"
+description = "Fits sensor calibration and latencies from fw-sensor-carrier-v3 SD logs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -13,3 +13,4 @@ nalgebra-sparse = "0.11"
 serde = { version = "1", features = ["derive"] }
 rand = "0.9"
 rand_distr = "0.5"
+magcal = { git = "https://github.com/Rechenmaschine/magcal-rs.git", rev = "f2fb205" }

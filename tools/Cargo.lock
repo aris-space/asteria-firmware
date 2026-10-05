@@ -758,6 +758,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "magcal"
+version = "0.1.0"
+source = "git+https://github.com/Rechenmaschine/magcal-rs.git?rev=f2fb205#f2fb2056343a9103a93c677d2f8b431f4ff7190f"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "maitake-sync"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1319,12 +1327,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
-name = "sensor-carrier-latency"
+name = "sensor-carrier-calibrate"
 version = "0.1.0"
 dependencies = [
  "clap",
  "csv",
  "levenberg-marquardt",
+ "magcal",
  "nalgebra",
  "nalgebra-sparse",
  "rand",

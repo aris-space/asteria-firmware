@@ -16,6 +16,8 @@ pub struct Log {
     pub gnss: [Vec<Gnss>; 2],
     /// IMU_0 chain attitude, body to NED, as `(t, [w, x, y, z])`.
     pub attitude: Vec<(f64, [f64; 4])>,
+    /// Console `mark <label>` events, in time order.
+    pub marks: Vec<(f64, String)>,
     /// Readings the SD writer dropped, summed over the session.
     pub dropped: u64,
     /// Rows that could not be parsed, e.g. a line cut off by power loss.
@@ -27,12 +29,16 @@ pub struct Imu {
     pub t: f64,
     pub accel_g: [f64; 3],
     pub gyro_dps: [f64; 3],
+    /// Sensor-frame gyro counts, before any calibration.
+    pub gyro_raw: [f64; 3],
 }
 
 #[derive(Clone, Copy)]
 pub struct Mag {
     pub t: f64,
     pub field_nt: [f64; 3],
+    /// Sensor-frame counts, before any calibration.
+    pub field_raw: [i16; 3],
 }
 
 #[derive(Clone, Copy)]
@@ -57,6 +63,9 @@ pub struct Gnss {
 struct ImuRow {
     raw_us: u64,
     imu: usize,
+    gx_raw: f64,
+    gy_raw: f64,
+    gz_raw: f64,
     ax_g: f64,
     ay_g: f64,
     az_g: f64,
@@ -69,6 +78,9 @@ struct ImuRow {
 struct MagRow {
     raw_us: u64,
     mag: usize,
+    x_raw: i16,
+    y_raw: i16,
+    z_raw: i16,
     x_nt: f64,
     y_nt: f64,
     z_nt: f64,
@@ -92,6 +104,12 @@ struct GnssRow {
     velocity_down_mps: f64,
     vertical_accuracy_mm: f64,
     speed_accuracy_mps: f64,
+}
+
+#[derive(Deserialize)]
+struct MarkRow {
+    uptime_us: u64,
+    label: String,
 }
 
 #[derive(Deserialize)]
@@ -126,6 +144,7 @@ impl Log {
         let gnss_rows: Vec<GnssRow> = read_csv(&dir, "GNSS.CSV", &mut malformed)?;
         let state_rows: Vec<StateRow> = read_csv(&dir, "STATE.CSV", &mut malformed)?;
         let drop_rows: Vec<DropRow> = read_csv(&dir, "DROPS.CSV", &mut malformed)?;
+        let mark_rows: Vec<MarkRow> = read_csv(&dir, "MARKS.CSV", &mut malformed)?;
 
         let start_us = imu_rows
             .iter()
@@ -141,6 +160,10 @@ impl Log {
             baro: [Vec::new(), Vec::new()],
             gnss: [Vec::new(), Vec::new()],
             attitude: Vec::new(),
+            marks: mark_rows
+                .into_iter()
+                .map(|row| (t(row.uptime_us), row.label))
+                .collect(),
             dropped: drop_rows
                 .iter()
                 .map(|d| d.state + d.imu + d.mag + d.gnss + d.baro + d.dht)
@@ -152,12 +175,14 @@ impl Log {
                 t: t(row.raw_us),
                 accel_g: [row.ax_g, row.ay_g, row.az_g],
                 gyro_dps: [row.gx_dps, row.gy_dps, row.gz_dps],
+                gyro_raw: [row.gx_raw, row.gy_raw, row.gz_raw],
             });
         }
         for row in mag_rows.into_iter().filter(|row| row.mag < 2) {
             log.mag[row.mag].push(Mag {
                 t: t(row.raw_us),
                 field_nt: [row.x_nt, row.y_nt, row.z_nt],
+                field_raw: [row.x_raw, row.y_raw, row.z_raw],
             });
         }
         for row in baro_rows.into_iter().filter(|row| row.baro < 2) {
@@ -195,6 +220,7 @@ impl Log {
             samples.sort_by(|a, b| a.t.total_cmp(&b.t));
         }
         log.attitude.sort_by(|a, b| a.0.total_cmp(&b.0));
+        log.marks.sort_by(|a, b| a.0.total_cmp(&b.0));
         Ok(log)
     }
 
@@ -249,6 +275,7 @@ pub fn decimate(samples: &[Imu], n: usize) -> Vec<Imu> {
                 t: mean(&|s| s.t),
                 accel_g: std::array::from_fn(|k| mean(&|s| s.accel_g[k])),
                 gyro_dps: std::array::from_fn(|k| mean(&|s| s.gyro_dps[k])),
+                gyro_raw: std::array::from_fn(|k| mean(&|s| s.gyro_raw[k])),
             }
         })
         .collect()
