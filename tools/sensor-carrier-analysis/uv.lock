@@ -637,7 +637,7 @@ wheels = [
 [[package]]
 name = "sef-light"
 version = "0.1.0"
-source = { directory = "../sef-light-py" }
+source = { directory = "../../../../asteria-state-estimation/crates/sef-light-py" }
 
 [[package]]
 name = "sensor-carrier-analysis"
@@ -657,7 +657,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "scipy" },
-    { name = "sef-light", directory = "../sef-light-py" },
+    { name = "sef-light", directory = "../../../../asteria-state-estimation/crates/sef-light-py" },
 ]
 
 [[package]]
