@@ -108,8 +108,6 @@ define_sensor_family! {
 pub enum SensorStatus {
     Inactive,
     Active,
-    /// The readout is not running.
-    Disabled,
 }
 
 macro_rules! status_array {

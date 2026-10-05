@@ -105,7 +105,7 @@ async fn status_task(can_tx: &'static Mutex<ThreadModeRawMutex, CanTx<'static>>)
 
     fn convert(s: &AtomicSensorStatus) -> CanSensorStatus {
         match s.load(Ordering::Relaxed) {
-            SensorStatus::Inactive | SensorStatus::Disabled => CanSensorStatus::Offline,
+            SensorStatus::Inactive => CanSensorStatus::Offline,
             SensorStatus::Active => CanSensorStatus::Online,
         }
     }
