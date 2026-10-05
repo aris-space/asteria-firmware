@@ -2,13 +2,11 @@
 
 use core::fmt;
 
-use asteria_sef_light::{ImuMeasurement, STANDARD_GRAVITY_MPS2};
 use embassy_time::{Duration, Instant, with_deadline};
 use lsm6dso32::{Acceleration, AngularRate};
 use serde::{Deserialize, Serialize};
 
 use super::{Calibrations, Name};
-use crate::sef::imu_measurement;
 use crate::sensors::{IMU_0, IMU_1, IMU_COUNT, ImuId};
 use crate::signals::IMU_CHANNEL;
 use crate::storage::Storage;
@@ -77,8 +75,8 @@ pub fn apply_calibration(raw: RawImuSample) -> ImuSample {
 
 const CALIBRATION_TIME: Duration = Duration::from_secs(5);
 const MIN_SAMPLES: u32 = 1_000;
-const MAX_GYRO_NOISE_RAD_S: f32 = 0.01;
-const MAX_ACCEL_NOISE_MPS2: f32 = 0.3;
+const MAX_GYRO_NOISE_DPS: f32 = 0.57;
+const MAX_ACCEL_NOISE_G: f32 = 0.03;
 
 /// Stationary gyro calibration: [`collect`](Self::collect) records both IMUs
 /// for [`CALIBRATION_TIME`], then [`finish`](Self::finish) stores the result.
@@ -94,15 +92,8 @@ impl ImuCal {
             .expect("IMU calibration subscriber slot must be free");
         let deadline = Instant::now() + CALIBRATION_TIME;
         while let Ok(sample) = with_deadline(deadline, samples.next_message_pure()).await {
-            self.record(sample);
+            self.windows[sample.src.index()].record(sample);
         }
-    }
-
-    fn record(&mut self, sample: ImuSample) {
-        self.windows[sample.src.index()].record(imu_measurement(
-            [sample.accel.x, sample.accel.y, sample.accel.z],
-            [sample.gyro.x, sample.gyro.y, sample.gyro.z],
-        ));
     }
 
     pub fn counts(&self) -> [u32; IMU_COUNT] {
@@ -125,10 +116,8 @@ impl ImuCal {
             for report in &mut reports {
                 let summary = report.summary.expect("validated IMU summary");
                 let old = CAL.applied(report.id).correction.gyro_bias_dps;
-                const RAD_TO_DEG: f32 = 180.0 / core::f32::consts::PI;
-                let gyro_bias_dps = core::array::from_fn(|axis| {
-                    old[axis] + summary.gyro_mean_rad_s[axis] * RAD_TO_DEG
-                });
+                let gyro_bias_dps =
+                    core::array::from_fn(|axis| old[axis] + summary.gyro_mean_dps[axis]);
                 let correction = Correction {
                     gyro_bias_dps,
                     samples: summary.samples,
@@ -143,8 +132,8 @@ impl ImuCal {
     }
 }
 
-/// Statistics over a stationary window. The mean angular rate is the gyro
-/// bias; the noise terms reject a window in which the board moved.
+/// Statistics over a stationary window, in g and deg/s. The mean angular rate
+/// is the gyro bias; the noise terms reject a window in which the board moved.
 #[derive(Clone, Copy, Default)]
 struct ImuWindow {
     samples: u32,
@@ -157,29 +146,20 @@ struct ImuWindow {
 #[derive(Clone, Copy)]
 struct ImuWindowSummary {
     samples: u32,
-    gravity_error_noise_mps2: f32,
-    gyro_mean_rad_s: [f32; 3],
-    gyro_noise_rad_s: f32,
+    gravity_error_noise_g: f32,
+    gyro_mean_dps: [f32; 3],
+    gyro_noise_dps: f32,
 }
 
 impl ImuWindow {
-    fn record(&mut self, measurement: ImuMeasurement) {
-        let acceleration = libm::sqrtf(
-            measurement
-                .acceleration_body_mps2
-                .iter()
-                .map(|value| value * value)
-                .sum(),
-        );
-        let gravity_error = acceleration - STANDARD_GRAVITY_MPS2;
+    fn record(&mut self, sample: ImuSample) {
+        let a = sample.accel;
+        let gravity_error = libm::sqrtf(a.x * a.x + a.y * a.y + a.z * a.z) - 1.0;
         self.samples += 1;
         self.gravity_error_sum += gravity_error;
         self.gravity_error_square_sum += gravity_error * gravity_error;
-        for (sum, rate) in self
-            .gyro_sum
-            .iter_mut()
-            .zip(measurement.angular_rate_body_rad_s)
-        {
+        let gyro = [sample.gyro.x, sample.gyro.y, sample.gyro.z];
+        for (sum, rate) in self.gyro_sum.iter_mut().zip(gyro) {
             *sum += rate;
             self.gyro_square_sum += rate * rate;
         }
@@ -195,25 +175,23 @@ impl ImuWindow {
         let gyro_mean_square = gyro_mean.iter().map(|rate| rate * rate).sum::<f32>();
         Some(ImuWindowSummary {
             samples: self.samples,
-            gravity_error_noise_mps2: libm::sqrtf(
+            gravity_error_noise_g: libm::sqrtf(
                 (self.gravity_error_square_sum / count - gravity_error_mean * gravity_error_mean)
                     .max(0.0),
             ),
-            gyro_mean_rad_s: gyro_mean,
-            gyro_noise_rad_s: libm::sqrtf(
-                (self.gyro_square_sum / count - gyro_mean_square).max(0.0),
-            ),
+            gyro_mean_dps: gyro_mean,
+            gyro_noise_dps: libm::sqrtf((self.gyro_square_sum / count - gyro_mean_square).max(0.0)),
         })
     }
 }
 
 fn valid_summary(s: ImuWindowSummary) -> bool {
     s.samples >= MIN_SAMPLES
-        && s.gyro_noise_rad_s.is_finite()
-        && s.gyro_noise_rad_s <= MAX_GYRO_NOISE_RAD_S
-        && s.gravity_error_noise_mps2.is_finite()
-        && s.gravity_error_noise_mps2 <= MAX_ACCEL_NOISE_MPS2
-        && s.gyro_mean_rad_s.iter().all(|value| value.is_finite())
+        && s.gyro_noise_dps.is_finite()
+        && s.gyro_noise_dps <= MAX_GYRO_NOISE_DPS
+        && s.gravity_error_noise_g.is_finite()
+        && s.gravity_error_noise_g <= MAX_ACCEL_NOISE_G
+        && s.gyro_mean_dps.iter().all(|value| value.is_finite())
 }
 
 pub struct CalReport {
@@ -248,11 +226,11 @@ impl fmt::Display for CalReport {
         if !valid_summary(s) {
             return write!(
                 f,
-                "{}: rejected ({} samples, gyro noise {:.4} rad/s, accel noise {:.3} m/s²)",
+                "{}: rejected ({} samples, gyro noise {:.3} deg/s, accel noise {:.4} g)",
                 self.id.name(),
                 s.samples,
-                s.gyro_noise_rad_s,
-                s.gravity_error_noise_mps2
+                s.gyro_noise_dps,
+                s.gravity_error_noise_g
             );
         }
         if !self.all_valid {
