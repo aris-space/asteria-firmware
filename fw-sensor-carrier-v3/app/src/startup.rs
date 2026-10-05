@@ -32,7 +32,23 @@ pub struct SensorResources {
     pub bus2: SharedI2cBus,
 }
 
-pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
+pub async fn prepare(
+    resources: resources::AssignedResources,
+    level_0_spawner: SendSpawner,
+) -> PreparedBoard {
+    let green_led = resources.green_led.setup();
+    let yellow_led = resources.yellow_led.setup();
+    let red_led = resources.red_led.setup();
+    level_0_spawner
+        .spawn(tasks::blinky::heartbeat(green_led).expect("Failed to spawn heartbeat task"));
+    let warning_build = crate::built::GIT_DIRTY.unwrap_or(false)
+        || crate::built::PROFILE != "release"
+        || crate::built::FEATURES_LOWERCASE.contains(&"debug");
+    level_0_spawner.spawn(
+        tasks::blinky::build_status(red_led, warning_build)
+            .expect("Failed to spawn build status task"),
+    );
+
     let flash = resources.flash.setup();
     let storage = storage::Storage::init(flash);
     calibration::load(storage).await;
@@ -43,7 +59,6 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let imu1 = resources.imu1.setup();
     let imu2 = resources.imu2.setup();
 
-    let yellow_led = resources.yellow_led.setup();
     let buzzer = resources.buzzer.setup();
 
     let bus1 = resources.bus1.setup();
@@ -77,9 +92,11 @@ pub async fn spawn_tasks(
     level_0_spawner: SendSpawner,
     level_1_spawner: SendSpawner,
 ) {
-    level_0_spawner
-        .spawn(tasks::blinky::task(board.yellow_led).expect("Failed to spawn blinky task"));
     thread_spawner.spawn(tasks::buzzer::task(board.buzzer).expect("Failed to spawn buzzer task"));
+    level_0_spawner.spawn(
+        tasks::blinky::estimate_status(board.yellow_led)
+            .expect("Failed to spawn estimate status LED task"),
+    );
 
     let (sd, detect, power) = board.sd_card.setup();
     thread_spawner.spawn(
@@ -144,4 +161,5 @@ pub async fn spawn_tasks(
 
     thread_spawner.spawn(tasks::state_report::task().expect("Failed to spawn state report task"));
     tasks::console::spawn(board.usb, board.storage, thread_spawner);
+    tasks::blinky::mark_startup_complete();
 }

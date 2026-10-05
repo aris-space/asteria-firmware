@@ -36,4 +36,4 @@ define_sample_channel!(DHT_CHANNEL, submit_dht: DhtReading, cap = 8, subs = 1);
 define_sample_channel!(STATE_CHANNEL, submit_state: SefLogSample, cap = 64, subs = 1);
 define_sample_channel!(MARK_CHANNEL, submit_mark: Mark, cap = 4, subs = 1);
 
-pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 2> = Watch::new();
+pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 3> = Watch::new();
