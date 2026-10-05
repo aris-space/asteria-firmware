@@ -6,7 +6,7 @@
 //! write, loses its oldest readings and is told how many. The `Watch` carries
 //! the latest state estimate to CAN.
 
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::watch::Watch;
 
@@ -14,8 +14,8 @@ use crate::types::{
     BaroReading, DhtReading, GnssReading, ImuReading, MagReading, Mark, SefLogSample, StateEstimate,
 };
 
-// Readouts publish from the interrupt executor, so the sample channels need
-// a critical-section mutex.
+// Publishers and subscribers run on different executors, so the sample
+// channels need a critical-section mutex.
 macro_rules! define_sample_channel {
     ($channel:ident, $submit:ident: $T:ty, cap = $cap:expr, subs = $subs:expr) => {
         pub static $channel: PubSubChannel<CriticalSectionRawMutex, $T, $cap, $subs, 1> =
@@ -36,5 +36,4 @@ define_sample_channel!(DHT_CHANNEL, submit_dht: DhtReading, cap = 8, subs = 1);
 define_sample_channel!(STATE_CHANNEL, submit_state: SefLogSample, cap = 64, subs = 1);
 define_sample_channel!(MARK_CHANNEL, submit_mark: Mark, cap = 4, subs = 1);
 
-// Estimator and CAN both run on the thread-mode executor.
-pub static STATE_ESTIMATE_WATCH: Watch<ThreadModeRawMutex, StateEstimate, 1> = Watch::new();
+pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 1> = Watch::new();
