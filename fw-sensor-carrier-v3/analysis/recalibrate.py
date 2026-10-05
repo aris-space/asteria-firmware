@@ -13,7 +13,6 @@ import re
 
 import numpy as np
 
-import calibrate
 import sdlog
 
 # Console sensor name to SD table and row index.
@@ -51,12 +50,12 @@ def apply(log: sdlog.Log, text: str) -> sdlog.Log:
         table.loc[rows, "cal_us"] = table.loc[rows, "raw_us"] - int(fields["latency_us"][0])
         if name == "imu":
             imu = table[rows]
-            accel = (calibrate.imu_board_g(imu) - fields["accel_offset_g"]) * fields["accel_scale"]
-            gyro = calibrate.imu_board_dps(imu) - fields["gyro_bias_dps"]
+            accel = (sdlog.imu_board_g(imu) - fields["accel_offset_g"]) * fields["accel_scale"]
+            gyro = sdlog.imu_board_dps(imu) - fields["gyro_bias_dps"]
             table.loc[rows, ["ax_g", "ay_g", "az_g"]] = accel
             table.loc[rows, ["gx_dps", "gy_dps", "gz_dps"]] = gyro
         elif name == "mag":
-            board_nt = calibrate.mag_board_counts(table[rows]) * calibrate.MAG_NT_PER_LSB
+            board_nt = sdlog.mag_board_counts(table[rows]) * sdlog.MAG_NT_PER_LSB
             soft_iron = np.reshape(fields["soft"], (3, 3))
             table.loc[rows, ["x_nt", "y_nt", "z_nt"]] = (board_nt - fields["hard_nt"]) @ soft_iron.T
         setattr(log, name, table)

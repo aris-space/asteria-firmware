@@ -24,7 +24,6 @@ import numpy as np
 import pandas as pd
 from sef_light import Estimator
 
-import calibrate
 import recalibrate
 import sdlog
 
@@ -77,7 +76,7 @@ def mag_calibrated(log: sdlog.Log, index: int) -> bool:
     """Whether magnetometer `index` was logged with a calibration other than
     the identity, which the firmware does not fuse."""
     mag = log.sensor("mag", index)
-    identity_nt = calibrate.mag_board_counts(mag) * calibrate.MAG_NT_PER_LSB
+    identity_nt = sdlog.mag_board_counts(mag) * sdlog.MAG_NT_PER_LSB
     return len(mag) > 0 and not np.allclose(mag[["x_nt", "y_nt", "z_nt"]].to_numpy(), identity_nt)
 
 

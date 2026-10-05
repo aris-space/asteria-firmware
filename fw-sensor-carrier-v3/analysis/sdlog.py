@@ -12,6 +12,12 @@ import numpy as np
 import pandas as pd
 
 STANDARD_GRAVITY = 9.806_65
+# Raw-count units and sensor-to-board axes, as in the firmware's
+# calibration/<kind>.rs.
+GYRO_DPS_PER_LSB = 0.07
+# Per accelerometer range; a log's range is recognised from its data.
+ACCEL_G_PER_LSB = {8: 1 / 4096, 16: 1 / 2048}
+MAG_NT_PER_LSB = 150.0
 
 
 @dataclass
@@ -85,3 +91,28 @@ def read_csv(path: Path) -> pd.DataFrame:
 def pressure_altitude_m(pressure_mbar):
     """ISA pressure altitude, the same conversion the firmware uses."""
     return 44_330.0 * (1.0 - (np.asarray(pressure_mbar) / 1_013.25) ** 0.190_294_95)
+
+
+def imu_board_dps(imu) -> np.ndarray:
+    """LSM6DSO32 sensor-to-board remap: negate x and z."""
+    return imu[["gx_raw", "gy_raw", "gz_raw"]].to_numpy() * [-1, 1, -1] * GYRO_DPS_PER_LSB
+
+
+def accel_g_per_lsb(imu) -> float:
+    """The accelerometer resolution the log was recorded with: the one closest
+    to the ratio of its calibrated values to its raw counts, which a
+    calibration changes by a few percent at most."""
+    raw = np.abs(imu["ax_raw"].to_numpy())
+    big = raw > 1_000
+    ratio = np.median(np.abs(imu["ax_g"].to_numpy()[big]) / raw[big])
+    return min(ACCEL_G_PER_LSB.values(), key=lambda lsb: abs(np.log(ratio / lsb)))
+
+
+def imu_board_g(imu) -> np.ndarray:
+    """LSM6DSO32 sensor-to-board remap, as for the gyro."""
+    return imu[["ax_raw", "ay_raw", "az_raw"]].to_numpy() * [-1, 1, -1] * accel_g_per_lsb(imu)
+
+
+def mag_board_counts(mag) -> np.ndarray:
+    """LSM303AGR sensor-to-board remap: negate all axes."""
+    return -mag[["x_raw", "y_raw", "z_raw"]].to_numpy()

@@ -1,12 +1,15 @@
 """Fits fw-sensor-carrier-v3 calibration from one SD logging session and
 prints it as `cal set` lines to paste into the board's USB console.
 
-Gyro bias is the mean rate over still stretches, magnetometer hard and soft
-iron an ellipsoid fit over all orientations the board was turned through,
-both from raw counts. Latencies come from latency.py. `mark still` and
-`mark tumble` in the console narrow which stretches are used; without marks,
-still stretches are found from the gyro and the magnetometer fit uses every
-sample.
+All fits start from raw counts. Gyro bias is the mean rate over still
+stretches; accelerometer offset and scale an axis-aligned ellipsoid through
+the gravity seen resting on all six sides; magnetometer hard and soft iron an
+ellipsoid fit over all orientations the board was turned through, together
+with the local field strength. Latencies come from latency.py. `mark still`
+and `mark tumble` in the console narrow which stretches are used; without
+marks, still stretches are found from the gyro and the magnetometer fit uses
+every sample. A correction that does not improve the data it was fitted on
+is not printed.
 
     uv run calibrate.py /Volumes/SD [--from S] [--to S] [--plot]
 """
@@ -21,11 +24,6 @@ import numpy as np
 import latency
 import sdlog
 
-# Units and axes as in the firmware's calibration/<kind>.rs.
-GYRO_DPS_PER_LSB = 0.07
-# Per accelerometer range; a log's range is recognised from its data.
-ACCEL_G_PER_LSB = {8: 1 / 4096, 16: 1 / 2048}
-MAG_NT_PER_LSB = 150.0
 IMU_HZ = 833.0
 # A one-second window counts as still if no axis varies more than this.
 STILL_WINDOW_S = 1.0
@@ -48,31 +46,6 @@ MAX_MAG_FIT_ERROR_PERCENT = 3.0
 MAX_IMU_LATENCY_US = 1_000
 # Still samples are averaged over this long in the plot so noise does not hide drift.
 PLOT_MEAN_S = 0.1
-
-
-def imu_board_dps(imu) -> np.ndarray:
-    """LSM6DSO32 sensor-to-board remap: negate x and z."""
-    return imu[["gx_raw", "gy_raw", "gz_raw"]].to_numpy() * [-1, 1, -1] * GYRO_DPS_PER_LSB
-
-
-def accel_g_per_lsb(imu) -> float:
-    """The accelerometer resolution the log was recorded with: the one closest
-    to the ratio of its calibrated values to its raw counts, which a
-    calibration changes by a few percent at most."""
-    raw = np.abs(imu["ax_raw"].to_numpy())
-    big = raw > 1_000
-    ratio = np.median(np.abs(imu["ax_g"].to_numpy()[big]) / raw[big])
-    return min(ACCEL_G_PER_LSB.values(), key=lambda lsb: abs(np.log(ratio / lsb)))
-
-
-def imu_board_g(imu) -> np.ndarray:
-    """LSM6DSO32 sensor-to-board remap, as for the gyro."""
-    return imu[["ax_raw", "ay_raw", "az_raw"]].to_numpy() * [-1, 1, -1] * accel_g_per_lsb(imu)
-
-
-def mag_board_counts(mag) -> np.ndarray:
-    """LSM303AGR sensor-to-board remap: negate all axes."""
-    return -mag[["x_raw", "y_raw", "z_raw"]].to_numpy()
 
 
 @dataclass
@@ -139,7 +112,7 @@ def auto_still(t: np.ndarray, rate: np.ndarray, max_spread_dps: float = STILL_MA
 
 def fit_gyro(log, imu: int) -> GyroFit:
     samples = log.sensor("imu", imu)
-    t, rate = samples.t.to_numpy(), imu_board_dps(samples)
+    t, rate = samples.t.to_numpy(), sdlog.imu_board_dps(samples)
     ranges = intervals(log, "still")
     still = within(t, ranges) if ranges else auto_still(t, rate)
     bias = rate[still].mean(axis=0) if still.sum() / IMU_HZ >= MIN_STILL_S else None
@@ -148,8 +121,8 @@ def fit_gyro(log, imu: int) -> GyroFit:
 
 def fit_accel(log, imu: int) -> AccelFit:
     samples = log.sensor("imu", imu)
-    t, accel = samples.t.to_numpy(), imu_board_g(samples)
-    still = auto_still(t, imu_board_dps(samples), ACCEL_STILL_MAX_SPREAD_DPS)
+    t, accel = samples.t.to_numpy(), sdlog.imu_board_g(samples)
+    still = auto_still(t, sdlog.imu_board_dps(samples), ACCEL_STILL_MAX_SPREAD_DPS)
     window = np.floor(t / STILL_WINDOW_S)
     rest = np.array([accel[still & (window == w)].mean(axis=0) for w in np.unique(window[still])]).reshape(-1, 3)
     fit = AccelFit(f"IMU_{imu}", rest)
@@ -185,7 +158,7 @@ def magnitude_error_percent(accel_g: np.ndarray) -> float:
 
 def fit_mag(log, mag: int) -> MagFit:
     samples = log.sensor("mag", mag)
-    t, board = samples.t.to_numpy(), mag_board_counts(samples).astype(float)
+    t, board = samples.t.to_numpy(), sdlog.mag_board_counts(samples).astype(float)
     ranges = intervals(log, "tumble")
     used = within(t, ranges) if ranges else np.ones(len(t), bool)
     fit = MagFit(f"MAG_BUS_{mag + 1}", t, board, used)
@@ -210,7 +183,10 @@ def fit_mag(log, mag: int) -> MagFit:
     fit.field_strength = field
     magnitudes = np.linalg.norm(fit.corrected()[used], axis=1)
     fit.error_percent = float(np.sqrt(np.mean((magnitudes / field - 1) ** 2)) * 100)
-    if not MIN_FIELD_NT <= field * MAG_NT_PER_LSB <= MAX_FIELD_NT or fit.error_percent > MAX_MAG_FIT_ERROR_PERCENT:
+    if (
+        not MIN_FIELD_NT <= field * sdlog.MAG_NT_PER_LSB <= MAX_FIELD_NT
+        or fit.error_percent > MAX_MAG_FIT_ERROR_PERCENT
+    ):
         fit.hard_iron = None
     return fit
 
@@ -258,10 +234,10 @@ def print_lines(name: str, gyros, accels, mags, estimates) -> None:
             print(f"# {fit.sensor}: latency not observable; no line")
         else:
             print(
-                f"# {fit.sensor}: field {fit.field_strength * MAG_NT_PER_LSB / 1000:.1f} uT, error {fit.error_percent:.2f} %, {fit.used.sum()} samples"
+                f"# {fit.sensor}: field {fit.field_strength * sdlog.MAG_NT_PER_LSB / 1000:.1f} uT, error {fit.error_percent:.2f} %, {fit.used.sum()} samples"
             )
             print(
-                f"cal set {fit.sensor} name={name} latency_us={us} hard_nt={floats(fit.hard_iron * MAG_NT_PER_LSB, 1)} soft={floats(fit.soft_iron, 5)} field_nt={fit.field_strength * MAG_NT_PER_LSB:.0f}"
+                f"cal set {fit.sensor} name={name} latency_us={us} hard_nt={floats(fit.hard_iron * sdlog.MAG_NT_PER_LSB, 1)} soft={floats(fit.soft_iron, 5)} field_nt={fit.field_strength * sdlog.MAG_NT_PER_LSB:.0f}"
             )
     for sensor in ["BARO_BUS_1", "BARO_BUS_2", "GNSS_0", "GNSS_1"]:
         if sensor in latency_us:
@@ -300,7 +276,7 @@ def plot(gyros, accels, mags, estimates) -> None:
 
     _, axes = plt.subplots(len(mags), 1, sharex=True, num="Magnetometer field magnitude")
     for ax, fit in zip(axes, mags):
-        to_ut = MAG_NT_PER_LSB / 1000
+        to_ut = sdlog.MAG_NT_PER_LSB / 1000
         ax.plot(fit.t, np.linalg.norm(fit.board_counts, axis=1) * to_ut, label="uncorrected")
         if fit.hard_iron is not None:
             ax.plot(fit.t, np.linalg.norm(fit.corrected(), axis=1) * to_ut, label="corrected")
@@ -346,7 +322,7 @@ def main() -> None:
     accels = [fit_accel(log, i) for i in range(2)]
     mags = [fit_mag(log, i) for i in range(2)]
     # When the fit was made; exactly the firmware's 16-character name limit.
-    print_lines(datetime.now().strftime("%Y-%m-%dT%H:%M"), gyros, accels, mags, estimates)
+    print_lines(datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M"), gyros, accels, mags, estimates)
     if args.plot:
         plot(gyros, accels, mags, estimates)
 
