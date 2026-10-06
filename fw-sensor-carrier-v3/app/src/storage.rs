@@ -90,18 +90,23 @@ impl Storage {
         }
     }
 
-    /// Delete a single key in place. Relies on the flash being
-    /// `MultiwriteNorFlash` (the delete flips one flag bit, no erase).
-    pub async fn remove(&self, key: &Key) -> bool {
+    /// Delete a single key in place, returning whether it was stored. Relies on
+    /// the flash being `MultiwriteNorFlash` (the delete flips one flag bit, no erase).
+    pub async fn remove(&self, key: &Key) -> Result<bool, ()> {
         let mut scratch = [0u8; MAX_BYTES];
         let mut map = self.map.lock().await;
-        match map.remove_item(&mut scratch, key).await {
-            Ok(()) => true,
-            Err(e) => {
-                defmt::warn!("storage: remove failed: {:?}", defmt::Debug2Format(&e));
-                false
-            }
-        }
+        let stored = map
+            .fetch_item::<&[u8]>(&mut scratch, key)
+            .await
+            .map(|found| found.is_some());
+        let result = match stored {
+            Ok(false) => return Ok(false),
+            Ok(true) => map.remove_item(&mut scratch, key).await,
+            Err(e) => Err(e),
+        };
+        result.map(|()| true).map_err(|e| {
+            defmt::warn!("storage: remove failed: {:?}", defmt::Debug2Format(&e));
+        })
     }
 
     /// Erase the whole region (factory-reset stored config). Also recovers a
