@@ -31,7 +31,7 @@ import sdlog
 FIRMWARE = dict(
     acceleration_noise_std_mps2=10.0,
     degraded_acceleration_noise_std_mps2=20.0,
-    barometer_bias_walk_std_m_per_sqrt_s=[0.2, 0.2],
+    barometer_bias_walk_std_m_per_sqrt_s=[0.02, 0.02],
     initial_height_std_m=1_000.0,
     initial_velocity_std_mps=3.0,
     initial_barometer_bias_std_m=[200.0, 200.0],
@@ -50,9 +50,14 @@ FIRMWARE = dict(
     maximum_imu_age_us=100_000,
     gnss_switch_dwell_us=500_000,
     maximum_gnss_age_us=250_000,
+    stationary_maximum_angular_rate_rad_s=0.05,
+    stationary_maximum_specific_force_error_mps2=0.3,
+    stationary_minimum_duration_us=500_000,
+    stationary_update_interval_us=50_000,
+    stationary_velocity_std_mps=0.05,
     maximum_aiding_delay_us=400_000,
     baro_height_std_m=1.5,
-    gnss_height_std_scale=20.0,
+    gnss_height_std_scale=40.0,
     gnss_speed_std_scale=10.0,
 )
 # Smallest GNSS standard deviation passed on, for receivers reporting zero.
