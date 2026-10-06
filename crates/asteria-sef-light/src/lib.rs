@@ -16,7 +16,7 @@ mod generated;
 mod imu;
 mod sensor_id;
 
-pub use asteria_estimator_selector::{
+pub use asteria_state_estimation::{
     DualGnssSelector, GNSS_RECEIVER_COUNT, GnssSample, GnssSelectorConfig, GnssSource,
     SelectedGnss, SelectorConfig,
 };

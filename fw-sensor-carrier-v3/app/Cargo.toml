@@ -11,6 +11,7 @@ debug = ["dep:panic-probe"]
 
 [dependencies]
 asteria-sef-light = { path = "../../crates/asteria-sef-light" }
+asteria-state-estimation = { path = "../../crates/asteria-state-estimation" }
 libm = "0.2.11"
 
 [target.'cfg(target_os = "none")'.dependencies]

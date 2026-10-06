@@ -5,13 +5,61 @@ use crate::filter::{
 };
 use crate::imu::{ImuAttitudeConfig, ImuAttitudeStatus, ImuMeasurement, ImuVerticalizer};
 use crate::sensor_id::{BarometerId, IMU_0, IMU_1, IMU_COUNT, ImuId};
-use asteria_estimator_selector::{
-    Candidate, DualGnssSelector, GNSS_RECEIVER_COUNT, GnssSample, GnssSelectorConfig, GnssSolution,
-    HysteresisSelector, SelectorConfig,
+use asteria_state_estimation::{
+    BarometerAided, BarometerInput, Candidate, GNSS_RECEIVER_COUNT, GnssAided, GnssInput,
+    GnssSolution, HysteresisSelector, ImuAided, ImuInput, MagnetometerAided, MagnetometerInput,
+    NavigationState, SelectorConfig, StateEstimator, UpdateError,
 };
 use heapless::Deque;
 
 const MAX_MAGNETOMETER_AGE_US: u64 = 250_000;
+
+#[derive(Clone, Copy)]
+struct ImuSample {
+    time_us: u64,
+    measurement: ImuMeasurement,
+}
+
+/// North and east components of the newest fused GNSS fix, held until the next one. SEF Light
+/// neither filters nor propagates them.
+#[derive(Clone, Copy)]
+struct HorizontalFix {
+    position_ne_m: [f32; 2],
+    position_std_ne_m: [f32; 2],
+    velocity_ne_mps: [f32; 2],
+    velocity_std_ne_mps: [f32; 2],
+}
+
+impl HorizontalFix {
+    const UNKNOWN: Self = Self {
+        position_ne_m: [0.0; 2],
+        position_std_ne_m: [f32::INFINITY; 2],
+        velocity_ne_mps: [0.0; 2],
+        velocity_std_ne_mps: [f32::INFINITY; 2],
+    };
+
+    fn from_input(input: &GnssInput) -> Option<Self> {
+        let [north_m, east_m, _] = input.position_ned_m;
+        let [north_std_m, east_std_m, _] = input.position_std_m;
+        let [north_mps, east_mps, _] = input.velocity_ned_mps;
+        let [north_std_mps, east_std_mps, _] = input.velocity_std_mps;
+        let fix = Self {
+            position_ne_m: [north_m, east_m],
+            position_std_ne_m: [north_std_m, east_std_m],
+            velocity_ne_mps: [north_mps, east_mps],
+            velocity_std_ne_mps: [north_std_mps, east_std_mps],
+        };
+        let values = [fix.position_ne_m, fix.velocity_ne_mps]
+            .into_iter()
+            .flatten();
+        let deviations = [fix.position_std_ne_m, fix.velocity_std_ne_mps]
+            .into_iter()
+            .flatten();
+        (values.chain(deviations.clone()).all(f32::is_finite)
+            && deviations.into_iter().all(|std| std >= 0.0))
+        .then_some(fix)
+    }
+}
 
 #[derive(Clone, Copy)]
 enum FilterEvent {
@@ -164,13 +212,13 @@ pub struct DualVerticalEstimator<const FILTER_HISTORY_CAPACITY: usize> {
     imu_verticalizers: [ImuVerticalizer; IMU_COUNT],
     magnetic_field: [Option<(u64, [f32; 3])>; IMU_COUNT],
     filters: [VerticalFilter; IMU_COUNT],
-    gnss: DualGnssSelector,
     history_base_filters: [VerticalFilter; IMU_COUNT],
     history_base_scores: [f32; IMU_COUNT],
     filter_history: Deque<FilterEvent, FILTER_HISTORY_CAPACITY>,
     history_floor_key: Option<(u64, u8)>,
     maximum_aiding_delay_us: u64,
-    last_imu_sample_time_us: [Option<u64>; IMU_COUNT],
+    last_imu: [Option<ImuSample>; IMU_COUNT],
+    horizontal: HorizontalFix,
     imu_has_predicted: [bool; IMU_COUNT],
     consistency_scores: [f32; IMU_COUNT],
     selector: HysteresisSelector,
@@ -193,7 +241,6 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
         filter_config: VerticalFilterConfig,
         attitude_configs: [ImuAttitudeConfig; IMU_COUNT],
         selector_config: VerticalEstimatorSelectorConfig,
-        gnss_selector_config: GnssSelectorConfig,
         maximum_aiding_delay_us: u64,
     ) -> Result<Self, EstimatorError> {
         if maximum_aiding_delay_us == 0 {
@@ -211,13 +258,13 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
             ],
             magnetic_field: [None; IMU_COUNT],
             filters,
-            gnss: DualGnssSelector::new(gnss_selector_config),
             history_base_filters: filters,
             history_base_scores: [0.0; IMU_COUNT],
             filter_history: Deque::new(),
             history_floor_key: None,
             maximum_aiding_delay_us,
-            last_imu_sample_time_us: [None; IMU_COUNT],
+            last_imu: [None; IMU_COUNT],
+            horizontal: HorizontalFix::UNKNOWN,
             imu_has_predicted: [false; IMU_COUNT],
             consistency_scores: [0.0; IMU_COUNT],
             selector,
@@ -248,9 +295,16 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
         {
             return Err(EstimatorError::MeasurementTooOld);
         }
-        let Some(previous_time_us) = self.last_imu_sample_time_us[index] else {
+        let Some(ImuSample {
+            time_us: previous_time_us,
+            ..
+        }) = self.last_imu[index]
+        else {
             self.imu_verticalizers[index].align_to_gravity(measurement);
-            self.last_imu_sample_time_us[index] = Some(sample_time_us);
+            self.last_imu[index] = Some(ImuSample {
+                time_us: sample_time_us,
+                measurement,
+            });
             return Ok(false);
         };
         let elapsed_us = sample_time_us
@@ -279,7 +333,10 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
             degraded,
             dt_s,
         })?;
-        self.last_imu_sample_time_us[index] = Some(sample_time_us);
+        self.last_imu[index] = Some(ImuSample {
+            time_us: sample_time_us,
+            measurement,
+        });
         self.imu_has_predicted[index] = true;
         self.select_best();
         Ok(true)
@@ -329,33 +386,40 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
         Ok(updates)
     }
 
-    /// Applies one completed dual-receiver GNSS epoch.
-    ///
-    /// `fusion_time_us` is the only timestamp interpreted by the estimator. The sample array is
-    /// in receiver order and may contain one or both receiver solutions.
+    /// Applies one barometer observation using the shared sensor-update naming.
     ///
     /// # Errors
     ///
-    /// Returns an error if the GNSS observation is invalid or older than retained history.
-    pub fn update_gnss(
+    /// Returns the same errors as [`Self::update_pressure`].
+    pub fn update_barometer(
         &mut self,
-        fusion_time_us: u64,
-        samples: [Option<GnssSample<VerticalGnssMeasurement>>; GNSS_RECEIVER_COUNT],
-    ) -> Result<Option<[VerticalGnssUpdate; IMU_COUNT]>, EstimatorError> {
-        let mut gnss = self.gnss;
-        let Some(selected) = gnss.select(fusion_time_us, samples) else {
-            return Ok(None);
-        };
+        barometer: BarometerId,
+        sample_time_us: u64,
+        measurement: PressureMeasurement,
+    ) -> Result<[MeasurementUpdate; IMU_COUNT], EstimatorError> {
+        self.update_pressure(sample_time_us, barometer, measurement)
+    }
+
+    /// Applies one GNSS fix already selected by the caller to both estimator chains.
+    /// `sample_time_us` is its calibrated physical measurement time on the estimator clock.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the fix is invalid or older than retained history.
+    pub fn fuse_gnss(
+        &mut self,
+        sample_time_us: u64,
+        measurement: VerticalGnssMeasurement,
+    ) -> Result<[VerticalGnssUpdate; IMU_COUNT], EstimatorError> {
         let FilterEventResult::Gnss(updates) = self.apply_filter_event(FilterEvent::Gnss {
-            sample_time_us: fusion_time_us,
-            measurement: selected.measurement,
+            sample_time_us,
+            measurement,
         })?
         else {
             unreachable!("GNSS event returned a non-GNSS result")
         };
-        self.gnss = gnss;
         self.select_best();
-        Ok(Some(updates))
+        Ok(updates)
     }
 
     /// Changes one barometer bias random walk in both estimator chains.
@@ -374,12 +438,7 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
         self.filters[0].set_barometer_bias_walk_std(barometer, standard_deviation_m_per_sqrt_s)?;
         self.filters[1].set_barometer_bias_walk_std(barometer, standard_deviation_m_per_sqrt_s)?;
         let latest_history_key = self.filter_history.back().map(|event| event.sort_key());
-        let latest_imu_key = self
-            .last_imu_sample_time_us
-            .into_iter()
-            .flatten()
-            .max()
-            .map(|time_us| (time_us, 0));
+        let latest_imu_key = self.newest_imu_time_us().map(|time_us| (time_us, 0));
         self.history_floor_key = [self.history_floor_key, latest_history_key, latest_imu_key]
             .into_iter()
             .flatten()
@@ -457,7 +516,7 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
     /// Returns the latest sample timestamp seen for one IMU.
     #[must_use]
     pub fn last_imu_sample_time_us(&self, imu: ImuId) -> Option<u64> {
-        self.last_imu_sample_time_us[imu.index()]
+        self.last_imu[imu.index()].map(|sample| sample.time_us)
     }
 
     /// Returns whether one IMU chain has predicted and completed attitude initialization.
@@ -616,13 +675,16 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
         Ok(inserted_result.expect("inserted history event must be replayed"))
     }
 
-    fn select_best(&mut self) {
-        let newest_timestamp_us = self
-            .last_imu_sample_time_us
+    fn newest_imu_time_us(&self) -> Option<u64> {
+        self.last_imu
             .into_iter()
             .flatten()
+            .map(|sample| sample.time_us)
             .max()
-            .unwrap_or(0);
+    }
+
+    fn select_best(&mut self) {
+        let newest_timestamp_us = self.newest_imu_time_us().unwrap_or(0);
         let candidates = core::array::from_fn::<_, IMU_COUNT, _>(|imu| Candidate {
             index: imu,
             score: self.consistency_scores[imu]
@@ -632,12 +694,130 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
                     0.0
                 },
             valid: self.imu_has_predicted[imu]
-                && self.last_imu_sample_time_us[imu].is_some_and(|time_us| {
-                    newest_timestamp_us.saturating_sub(time_us)
+                && self.last_imu[imu].is_some_and(|sample| {
+                    newest_timestamp_us.saturating_sub(sample.time_us)
                         <= self.selector_config.maximum_imu_age_us
                 }),
         });
         self.selector.select(newest_timestamp_us, candidates);
+    }
+}
+
+impl<const FILTER_HISTORY_CAPACITY: usize> ImuAided
+    for DualVerticalEstimator<FILTER_HISTORY_CAPACITY>
+{
+    fn update_imu(&mut self, input: ImuInput) -> Result<(), UpdateError> {
+        let imu = ImuId::from_index(input.sensor_index).ok_or(UpdateError::InvalidSensor)?;
+        let measurement = ImuMeasurement {
+            acceleration_body_mps2: input.acceleration_body_mps2,
+            angular_rate_body_rad_s: input.angular_rate_body_rad_s,
+        };
+        DualVerticalEstimator::update_imu(self, imu, input.timestamp_us, measurement)
+            .map(|_| ())
+            .map_err(map_update_error)
+    }
+}
+
+impl<const FILTER_HISTORY_CAPACITY: usize> BarometerAided
+    for DualVerticalEstimator<FILTER_HISTORY_CAPACITY>
+{
+    fn update_barometer(&mut self, input: BarometerInput) -> Result<(), UpdateError> {
+        let barometer =
+            BarometerId::from_index(input.sensor_index).ok_or(UpdateError::InvalidSensor)?;
+        let measurement = PressureMeasurement {
+            height_m: input.height_m,
+            height_std_m: input.height_std_m,
+        };
+        DualVerticalEstimator::update_barometer(self, barometer, input.timestamp_us, measurement)
+            .map(|_| ())
+            .map_err(map_update_error)
+    }
+}
+
+impl<const FILTER_HISTORY_CAPACITY: usize> GnssAided
+    for DualVerticalEstimator<FILTER_HISTORY_CAPACITY>
+{
+    fn update_gnss(&mut self, input: GnssInput) -> Result<(), UpdateError> {
+        if input.sensor_index >= GNSS_RECEIVER_COUNT {
+            return Err(UpdateError::InvalidSensor);
+        }
+        let measurement = VerticalGnssMeasurement {
+            height_m: input.height_m,
+            velocity_mps: input.vertical_velocity_mps,
+            height_std_m: input.height_std_m,
+            velocity_std_mps: input.vertical_velocity_std_mps,
+        };
+        self.fuse_gnss(input.timestamp_us, measurement)
+            .map_err(map_update_error)?;
+        if let Some(fix) = HorizontalFix::from_input(&input) {
+            self.horizontal = fix;
+        }
+        Ok(())
+    }
+}
+
+impl<const FILTER_HISTORY_CAPACITY: usize> StateEstimator
+    for DualVerticalEstimator<FILTER_HISTORY_CAPACITY>
+{
+    /// Height and vertical velocity come from the selected chain's filter, attitude from its AHRS,
+    /// and north and east from the newest fused GNSS fix. SEF Light estimates no IMU biases, so
+    /// the rates and specific force are the selected IMU's newest calibrated sample.
+    fn navigation_state(&self) -> NavigationState {
+        let imu = self.selected_imu();
+        let vertical = self.state(imu);
+        let uncertainty = self.uncertainty(imu);
+        let horizontal = self.horizontal;
+        let sample = self.last_imu[imu.index()];
+        NavigationState {
+            time_us: sample.map_or(0, |sample| sample.time_us),
+            position_ned_m: [
+                horizontal.position_ne_m[0],
+                horizontal.position_ne_m[1],
+                -vertical.height_m,
+            ],
+            position_std_ned_m: [
+                horizontal.position_std_ne_m[0],
+                horizontal.position_std_ne_m[1],
+                libm::sqrtf(uncertainty.height_variance_m2),
+            ],
+            velocity_ned_mps: [
+                horizontal.velocity_ne_mps[0],
+                horizontal.velocity_ne_mps[1],
+                -vertical.velocity_mps,
+            ],
+            velocity_std_ned_mps: [
+                horizontal.velocity_std_ne_mps[0],
+                horizontal.velocity_std_ne_mps[1],
+                libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
+            ],
+            orientation_body_to_ned_wxyz: self.orientation_body_to_ned_wxyz(imu),
+            angular_rate_body_rad_s: sample.map_or([0.0; 3], |sample| {
+                sample.measurement.angular_rate_body_rad_s
+            }),
+            specific_force_body_mps2: sample
+                .map_or([0.0; 3], |sample| sample.measurement.acceleration_body_mps2),
+        }
+    }
+}
+
+impl<const FILTER_HISTORY_CAPACITY: usize> MagnetometerAided
+    for DualVerticalEstimator<FILTER_HISTORY_CAPACITY>
+{
+    fn update_magnetometer(&mut self, input: MagnetometerInput) -> Result<(), UpdateError> {
+        let imu = ImuId::from_index(input.sensor_index).ok_or(UpdateError::InvalidSensor)?;
+        DualVerticalEstimator::update_magnetometer(self, imu, input.timestamp_us, input.field_body)
+            .map_err(map_update_error)
+    }
+}
+
+fn map_update_error(error: EstimatorError) -> UpdateError {
+    match error {
+        EstimatorError::NonFiniteInput
+        | EstimatorError::NonPositiveInput
+        | EstimatorError::NegativeStandardDeviation
+        | EstimatorError::OutOfRangeInput => UpdateError::InvalidMeasurement,
+        EstimatorError::NonMonotonicImuTimestamp => UpdateError::NonMonotonicImuTimestamp,
+        EstimatorError::MeasurementTooOld => UpdateError::MeasurementTooOld,
     }
 }
 
@@ -654,48 +834,4 @@ impl GnssSolution for VerticalGnssMeasurement {
             && self.height_std_m > 0.0
             && self.velocity_std_mps > 0.0
     }
-
-    fn is_consistent_with(&self, other: &Self, gate_sigma: f32) -> bool {
-        residual_is_consistent(
-            self.height_m - other.height_m,
-            self.height_std_m,
-            other.height_std_m,
-            gate_sigma,
-        ) && residual_is_consistent(
-            self.velocity_mps - other.velocity_mps,
-            self.velocity_std_mps,
-            other.velocity_std_mps,
-            gate_sigma,
-        )
-    }
-
-    fn blend_with(&self, other: &Self) -> Self {
-        Self {
-            height_m: inverse_variance_blend(
-                self.height_m,
-                self.height_std_m,
-                other.height_m,
-                other.height_std_m,
-            ),
-            velocity_mps: inverse_variance_blend(
-                self.velocity_mps,
-                self.velocity_std_mps,
-                other.velocity_mps,
-                other.velocity_std_mps,
-            ),
-            height_std_m: self.height_std_m.min(other.height_std_m),
-            velocity_std_mps: self.velocity_std_mps.min(other.velocity_std_mps),
-        }
-    }
-}
-
-fn residual_is_consistent(residual: f32, first_std: f32, second_std: f32, gate_sigma: f32) -> bool {
-    residual * residual
-        <= gate_sigma * gate_sigma * (first_std * first_std + second_std * second_std)
-}
-
-fn inverse_variance_blend(first: f32, first_std: f32, second: f32, second_std: f32) -> f32 {
-    let first_weight = 1.0 / (first_std * first_std);
-    let second_weight = 1.0 / (second_std * second_std);
-    (first_weight * first + second_weight * second) / (first_weight + second_weight)
 }

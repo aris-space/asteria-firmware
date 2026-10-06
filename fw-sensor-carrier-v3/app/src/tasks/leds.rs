@@ -7,6 +7,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer, with_timeout};
 
 use crate::resources::leds::BoardLeds;
 use crate::signals;
+use crate::tasks::state_estimation::height_msl_referenced;
 
 const ESTIMATE_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -57,10 +58,11 @@ async fn estimate_status(mut yellow: Output<'static>) {
         let now = Instant::now();
         if let Some(estimate) = estimates.try_changed() {
             last_estimate = Some(now);
-            msl_ready = estimate.msl_ready;
+            msl_ready = height_msl_referenced(estimate.position_std_ned_m[2]);
         }
-        // `msl_ready` stays true after GNSS loss. Solid yellow means a fresh
-        // estimate with an established MSL reference, not a live GNSS fix.
+        // The height stays MSL-referenced long after GNSS loss. Solid yellow
+        // means a fresh estimate with an established MSL reference, not a live
+        // GNSS fix.
         let fresh = last_estimate
             .is_some_and(|last| now.saturating_duration_since(last) <= ESTIMATE_TIMEOUT);
         yellow.set_level(if fresh && (msl_ready || blink_phase == 0) {

@@ -10,7 +10,7 @@ default = []
 std = []
 
 [dependencies]
-asteria-estimator-selector = { path = "../asteria-estimator-selector" }
+asteria-state-estimation = { path = "../asteria-state-estimation" }
 fusion-ahrs = "0.7.0"
 heapless = { version = "0.9.3", default-features = false }
 libm = "0.2.16"

@@ -3,9 +3,9 @@
 use std::{collections::VecDeque, mem::size_of, time::Instant};
 
 use asteria_sef_light::{
-    BARO_BUS_1, BARO_BUS_2, DualVerticalEstimator, EstimatorError, GnssSample, GnssSelectorConfig,
-    IMU_0, IMU_1, ImuAttitudeConfig, ImuMeasurement, PressureMeasurement, STANDARD_GRAVITY_MPS2,
-    SelectorConfig, VerticalEstimatorSelectorConfig, VerticalFilterConfig, VerticalGnssMeasurement,
+    BARO_BUS_1, BARO_BUS_2, DualVerticalEstimator, EstimatorError, IMU_0, IMU_1, ImuAttitudeConfig,
+    ImuMeasurement, PressureMeasurement, STANDARD_GRAVITY_MPS2, SelectorConfig,
+    VerticalEstimatorSelectorConfig, VerticalFilterConfig, VerticalGnssMeasurement,
 };
 
 const IMU_PERIOD_US: u64 = 1_200; // Approximately 833 Hz.
@@ -22,29 +22,16 @@ fn estimator<const HISTORY: usize>() -> DualVerticalEstimator<HISTORY> {
     let selection = SelectorConfig::new(2.0, 100_000).unwrap();
     let selector =
         VerticalEstimatorSelectorConfig::new(0.95, 25.0, 10.0, 20_000, selection).unwrap();
-    let gnss = GnssSelectorConfig::new(3, 4.0, 500_000).unwrap();
-    DualVerticalEstimator::new(filter, [attitude, attitude], selector, gnss, 240_000).unwrap()
+    DualVerticalEstimator::new(filter, [attitude, attitude], selector, 240_000).unwrap()
 }
 
-fn gnss_pair() -> [Option<GnssSample<VerticalGnssMeasurement>>; 2] {
-    let measurement = VerticalGnssMeasurement {
+fn gnss_measurement() -> VerticalGnssMeasurement {
+    VerticalGnssMeasurement {
         height_m: 2.0,
         velocity_mps: 0.2,
         height_std_m: 1.5,
         velocity_std_mps: 0.3,
-    };
-    [
-        Some(GnssSample {
-            measurement,
-            fix_tier: 3,
-            pdop_centi: 120,
-        }),
-        Some(GnssSample {
-            measurement,
-            fix_tier: 3,
-            pdop_centi: 140,
-        }),
-    ]
+    }
 }
 
 fn delayed_gnss<const HISTORY: usize>(
@@ -75,7 +62,7 @@ fn delayed_gnss<const HISTORY: usize>(
     }
     let started = Instant::now();
     let result = estimator
-        .update_gnss(fusion_time_us, gnss_pair())
+        .fuse_gnss(fusion_time_us, gnss_measurement())
         .map(|_| ());
     (result, started.elapsed())
 }
@@ -149,7 +136,7 @@ fn fifo_bursts_with_delayed_gnss_remain_processable() {
     const SAMPLES_PER_IMU_BURST: u64 = 13; // Firmware FIFO watermark is 26 accel/gyro entries.
     let mut estimator = estimator::<256>();
     let mut worst_burst = std::time::Duration::ZERO;
-    let mut gnss_epochs = 0;
+    let mut gnss_fixes = 0;
 
     for burst in 0..40 {
         let started = Instant::now();
@@ -178,17 +165,17 @@ fn fifo_bursts_with_delayed_gnss_remain_processable() {
         if burst >= 8 && burst.is_multiple_of(8) {
             let newest_sample_time_us = ((burst + 1) * SAMPLES_PER_IMU_BURST - 1) * IMU_PERIOD_US;
             estimator
-                .update_gnss(newest_sample_time_us - 100_800, gnss_pair())
+                .fuse_gnss(newest_sample_time_us - 100_800, gnss_measurement())
                 .unwrap();
-            gnss_epochs += 1;
+            gnss_fixes += 1;
         }
         worst_burst = worst_burst.max(started.elapsed());
     }
 
     println!(
-        "host worst 26-sample FIFO burst with aiding: {worst_burst:?}; GNSS epochs {gnss_epochs}"
+        "host worst 26-sample FIFO burst with aiding: {worst_burst:?}; GNSS fixes {gnss_fixes}"
     );
-    assert_eq!(gnss_epochs, 4);
+    assert_eq!(gnss_fixes, 4);
     assert!(
         estimator
             .states()

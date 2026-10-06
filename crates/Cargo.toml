@@ -4,7 +4,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "asteria-estimator-selector",
+    "asteria-state-estimation",
     "asteria-sef-light",
     "embedded-utils",
     "wire-types",

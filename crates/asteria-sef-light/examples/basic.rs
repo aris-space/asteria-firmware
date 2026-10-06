@@ -1,7 +1,7 @@
 use asteria_sef_light::{
-    BARO_BUS_1, BARO_BUS_2, DualVerticalEstimator, EstimatorError, GnssSample, GnssSelectorConfig,
-    IMU_0, IMU_1, ImuAttitudeConfig, ImuMeasurement, PressureMeasurement, SelectorConfig,
-    VerticalEstimatorSelectorConfig, VerticalFilterConfig, VerticalGnssMeasurement,
+    BARO_BUS_1, BARO_BUS_2, DualVerticalEstimator, EstimatorError, IMU_0, IMU_1, ImuAttitudeConfig,
+    ImuMeasurement, PressureMeasurement, SelectorConfig, VerticalEstimatorSelectorConfig,
+    VerticalFilterConfig, VerticalGnssMeasurement,
 };
 
 fn main() -> Result<(), EstimatorError> {
@@ -11,15 +11,12 @@ fn main() -> Result<(), EstimatorError> {
     let selection = SelectorConfig::new(2.0, 250_000).ok_or(EstimatorError::OutOfRangeInput)?;
     let selector_config =
         VerticalEstimatorSelectorConfig::new(0.95, 25.0, 10.0, 100_000, selection)?;
-    let gnss_selector_config =
-        GnssSelectorConfig::new(3, 4.0, 500_000).ok_or(EstimatorError::OutOfRangeInput)?;
     // Size history for the combined sensor event rate and measured aiding delay. At two 833 Hz
     // IMUs and two 40 Hz barometers, 256 entries cover roughly 120 ms with some margin.
     let mut estimator = DualVerticalEstimator::<256>::new(
         filter_config,
         [attitude_config, attitude_config],
         selector_config,
-        gnss_selector_config,
         120_000,
     )?;
 
@@ -54,28 +51,14 @@ fn main() -> Result<(), EstimatorError> {
         },
     )?;
 
-    // Submit one compensated GNSS epoch containing whichever receiver solutions are available.
+    // Submit one selected GNSS fix at its calibrated physical measurement time.
     let gnss_measurement = VerticalGnssMeasurement {
         height_m: 2.1,
         velocity_mps: 0.2,
         height_std_m: 2.0,
         velocity_std_mps: 0.5,
     };
-    let gnss_updates = estimator.update_gnss(
-        1_005_000,
-        [
-            Some(GnssSample {
-                measurement: gnss_measurement,
-                fix_tier: 3,
-                pdop_centi: 120,
-            }),
-            Some(GnssSample {
-                measurement: gnss_measurement,
-                fix_tier: 3,
-                pdop_centi: 140,
-            }),
-        ],
-    )?;
+    let gnss_updates = estimator.fuse_gnss(1_005_000, gnss_measurement)?;
 
     // Flight-phase logic decides whether each barometer bias may wander. Zero freezes additional
     // process-noise growth; a nonzero value allows tracking slow atmospheric or sensor drift.

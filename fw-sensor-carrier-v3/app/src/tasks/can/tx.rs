@@ -1,8 +1,9 @@
-//! The only CAN transmitter: state estimates, board status and build info.
+//! The only CAN transmitter: navigation state, board status and build info.
 //! One task owns `CanTx` and sends one frame at a time.
 
 use core::sync::atomic::Ordering;
 
+use asteria_state_estimation::{GeodeticReference, NavigationState};
 use defmt::{error, trace};
 use embassy_futures::select::{Either3, select3};
 use embassy_stm32::can::CanTx;
@@ -15,7 +16,7 @@ use crate::sensors::{
     AtomicSensorStatus, BARO_STATUS, DHT_STATUS, GNSS_STATUS, IMU_STATUS, MAG_STATUS, SensorStatus,
 };
 use crate::signals;
-use crate::types::StateEstimate;
+use crate::tasks::state_estimation::{height_msl_referenced, launch_site};
 
 const TX_TIMEOUT: Duration = Duration::from_millis(100);
 const NEW_DATA_TIMEOUT: Duration = Duration::from_secs(10);
@@ -30,6 +31,7 @@ pub async fn task(mut can_tx: CanTx<'static>) -> ! {
     let mut estimates = signals::STATE_ESTIMATE_WATCH
         .receiver()
         .expect("CAN: state estimate receiver available");
+    let reference = launch_site();
     let mut status = Ticker::every(STATUS_PERIOD);
     let mut build_info = Ticker::every(BUILD_INFO_PERIOD);
     let mut last_estimate = Instant::now();
@@ -43,7 +45,7 @@ pub async fn task(mut can_tx: CanTx<'static>) -> ! {
                 estimate_missing = false;
                 if now - last_state_sent >= STATE_MIN_PERIOD {
                     last_state_sent = now;
-                    send_state(&mut can_tx, &estimate).await;
+                    send_state(&mut can_tx, &reference, &estimate).await;
                 }
             }
             Either3::Second(()) => {
@@ -72,9 +74,16 @@ async fn send<M: CanMessage + Clone + defmt::Format>(can_tx: &mut CanTx<'static>
     }
 }
 
-async fn send_state(can_tx: &mut CanTx<'static>, estimate: &StateEstimate) {
-    use hermes_can::messages::sensor_data::{OrientationData, VerticalStateData};
-    let [w, x, y, z] = estimate.orientation_body_to_ned_wxyz;
+async fn send_state(
+    can_tx: &mut CanTx<'static>,
+    reference: &GeodeticReference,
+    state: &NavigationState,
+) {
+    use hermes_can::messages::sensor_data::{ImuData, OrientationData, PositionData, VelocityData};
+    const RAD_TO_DEG: f32 = 180.0 / core::f32::consts::PI;
+
+    let q = state.orientation_body_to_ned_wxyz;
+    let [w, x, y, z] = q;
     // The CAN contract uses the inverse (NED-to-body) quaternion.
     send(
         can_tx,
@@ -86,20 +95,86 @@ async fn send_state(can_tx: &mut CanTx<'static>, estimate: &StateEstimate) {
         },
     )
     .await;
-    if estimate.msl_ready {
+
+    let [velocity_north, velocity_east, velocity_down] = state.velocity_ned_mps;
+    let [velocity_x, velocity_y, velocity_z] = rotate(conjugate(q), state.velocity_ned_mps);
+    send(
+        can_tx,
+        VelocityData {
+            velocity_x,
+            velocity_y,
+            velocity_z,
+            velocity_north,
+            velocity_east,
+            velocity_down,
+        },
+    )
+    .await;
+
+    let rate_body_dps = state.angular_rate_body_rad_s.map(|rate| rate * RAD_TO_DEG);
+    let [acceleration_x, acceleration_y, acceleration_z] = state.specific_force_body_mps2;
+    let [angular_velocity_x, angular_velocity_y, angular_velocity_z] = rate_body_dps;
+    let [acceleration_north, acceleration_east, acceleration_down] =
+        rotate(q, state.specific_force_body_mps2);
+    let [
+        angular_velocity_north,
+        angular_velocity_east,
+        angular_velocity_down,
+    ] = rotate(q, rate_body_dps);
+    send(
+        can_tx,
+        ImuData {
+            acceleration_x,
+            acceleration_y,
+            acceleration_z,
+            angular_velocity_x,
+            angular_velocity_y,
+            angular_velocity_z,
+            acceleration_north,
+            acceleration_east,
+            acceleration_down,
+            angular_velocity_north,
+            angular_velocity_east,
+            angular_velocity_down,
+        },
+    )
+    .await;
+
+    let [north_std_m, east_std_m, down_std_m] = state.position_std_ned_m;
+    if height_msl_referenced(down_std_m) {
+        let position = reference.unproject(state.position_ned_m);
         send(
             can_tx,
-            VerticalStateData {
-                height_m: estimate.height_msl_m,
-                velocity_mps: estimate.velocity_mps,
-                height_std_m: estimate.height_std_m,
-                velocity_std_mps: estimate.velocity_std_mps,
-                selected_imu: estimate.selected_imu.index() as u8,
-                redundancy_ready: estimate.redundancy_ready,
+            PositionData {
+                location_latitude: position.latitude_deg,
+                location_longitude: position.longitude_deg,
+                location_hamsl: position.height_msl_m,
+                horizontal_accuracy: north_std_m.max(east_std_m),
+                vertical_accuracy: down_std_m,
             },
         )
         .await;
     }
+}
+
+fn conjugate([w, x, y, z]: [f32; 4]) -> [f32; 4] {
+    [w, -x, -y, -z]
+}
+
+/// Rotates `v` by the unit quaternion `q` (scalar first).
+fn rotate([w, x, y, z]: [f32; 4], v: [f32; 3]) -> [f32; 3] {
+    // v + 2w(u × v) + 2u × (u × v), with u the vector part of q.
+    let cross = |a: [f32; 3], b: [f32; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let u = [x, y, z];
+    let uv = cross(u, v);
+    let uuv = cross(u, uv);
+    core::array::from_fn(|i| v[i] + 2.0 * (w * uv[i] + uuv[i]))
 }
 
 fn status_message() -> hermes_can::messages::board_status::SensorCarrierStatus {

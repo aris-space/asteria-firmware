@@ -48,7 +48,6 @@ FIRMWARE = dict(
     degraded_score_penalty=10.0,
     maximum_imu_age_us=100_000,
     gnss_minimum_fix_tier=3,
-    gnss_consistency_gate_sigma=4.0,
     gnss_switch_dwell_us=500_000,
     maximum_aiding_delay_us=400_000,
     baro_height_std_m=1.5,
@@ -57,6 +56,9 @@ FIRMWARE = dict(
 )
 # Smallest GNSS standard deviation passed on, for receivers reporting zero.
 GNSS_MIN_STD = 0.1
+# As on the board, the height is MSL-referenced once its standard deviation is
+# below this.
+MSL_REFERENCED_HEIGHT_STD_M = 100.0
 # As on the board, magnetometer samples whose field strength differs from the
 # calibrated one by more than this fraction are not fused, and neither are
 # uncalibrated magnetometers. The log does not hold the calibrated field
@@ -102,7 +104,6 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
     events.sort(key=lambda event: event[0])
 
     errors = Counter()
-    msl_ready = [False, False]
     rows = []
     last_output = None
     for time_us, kind, s in events:
@@ -123,7 +124,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
                 height = float(sdlog.pressure_altitude_m(s.pressure_mbar))
                 estimator.update_pressure(time_us, int(s.baro), height, baro_std)
             else:
-                accepted = estimator.update_gnss(
+                estimator.update_gnss(
                     time_us,
                     int(s.gnss),
                     s.height_msl_m,
@@ -133,8 +134,6 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
                     fix_tier(bool(s.fix_ok), int(s.fix_type)),
                     int(s.pdop_centi),
                 )
-                if accepted is not None:
-                    msl_ready = [ready or a for ready, a in zip(msl_ready, accepted)]
         except ValueError as error:
             errors[(kind, str(error))] += 1
             continue
@@ -152,7 +151,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
                     imu=chain,
                     selected=chain == selected,
                     ready=estimator.imu_ready(chain),
-                    msl_ready=msl_ready[chain],
+                    msl_ready=np.sqrt(height_var) < MSL_REFERENCED_HEIGHT_STD_M,
                     height_msl_m=height,
                     velocity_mps=velocity,
                     bias0_m=bias[0],
