@@ -3,10 +3,10 @@
 //! Readings go through a [`BufferedTimeHorizon`], which hands them to SEF-light
 //! in time order: IMU samples arrive in FIFO batches up to ~15 ms old, and a
 //! late sample would make SEF-light replay its history.
-//! Every reading publishes the estimator's
-//! [`NavigationState`](asteria_sef_core::NavigationState) to
-//! [`signals::STATE_ESTIMATE_WATCH`]; every [`LOG_PERIOD`] each SEF-light chain
-//! is also logged to SD.
+//! Every [`PUBLISH_PERIOD`] the estimator's
+//! [`NavigationState`](asteria_sef_core::NavigationState), run forward through
+//! the held readings, goes to [`signals::STATE_ESTIMATE_WATCH`], and each
+//! SEF-light chain is logged to SD.
 //!
 //! Positions are north-east-down metres from [`launch_site`], whose down is
 //! the negated MSL height. GNSS fixes are converted into that frame before
@@ -60,8 +60,9 @@ type Estimator = BufferedTimeHorizon<DualVerticalEstimator<HISTORY_CAPACITY>, PE
 const HOLDBACK_US: u64 = 35_000;
 // Two IMUs at 833 Hz fill about 60 slots during the holdback.
 const PENDING_CAPACITY: usize = 128;
-// Rows per second of the per-chain state in the SD log.
-const LOG_PERIOD: Duration = Duration::from_millis(50);
+// The CAN rate. Each publish runs a copy of the estimator through the held
+// readings, so publishing every reading would cost far more than estimating.
+const PUBLISH_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const WARNING_PERIOD: Duration = Duration::from_secs(1);
 // Two 833 Hz IMUs produce about 667 events in 400 ms. The remaining capacity
@@ -147,7 +148,7 @@ struct Processor {
     estimator: Estimator,
     gnss: DualGnssSelector,
     reference: GeodeticReference,
-    last_log: Option<Instant>,
+    last_publish: Option<Instant>,
     last_warning: Option<Instant>,
 }
 
@@ -202,7 +203,7 @@ impl Processor {
             ),
             gnss: DualGnssSelector::new(gnss),
             reference: launch_site(),
-            last_log: None,
+            last_publish: None,
             last_warning: None,
         })
     }
@@ -314,20 +315,22 @@ impl Processor {
 
     fn publish(&mut self) {
         let now = Instant::now();
+        if self
+            .last_publish
+            .is_some_and(|last| now.saturating_duration_since(last) < PUBLISH_PERIOD)
+        {
+            return;
+        }
+        self.last_publish = Some(now);
         let state = self.estimator.navigation_state();
-        let ts = Instant::from_micros(state.time_us);
-        if now.saturating_duration_since(ts) > IMU_FRESH {
+        if now.saturating_duration_since(Instant::from_micros(state.time_us)) > IMU_FRESH {
             return;
         }
         signals::STATE_ESTIMATE_WATCH.sender().send(state);
 
-        if self
-            .last_log
-            .is_some_and(|last| now.saturating_duration_since(last) < LOG_PERIOD)
-        {
-            return;
-        }
+        // The chains as fused, without the held readings.
         let sef = self.estimator.inner();
+        let ts = Instant::from_micros(sef.navigation_state().time_us);
         let selected = sef.selected_imu().index();
         let scores = sef.consistency_scores();
         for (id, imu) in ImuId::ALL.into_iter().zip(asteria_sef_light::ImuId::ALL) {
@@ -350,7 +353,6 @@ impl Processor {
                 orientation_body_to_ned_wxyz: sef.orientation_body_to_ned_wxyz(imu),
             });
         }
-        self.last_log = Some(now);
     }
 }
 
