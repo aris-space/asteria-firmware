@@ -313,16 +313,17 @@ impl Processor {
         // The chains as fused, without the held readings.
         let sef = self.estimator.inner();
         let ts = Instant::from_micros(sef.navigation_state().time_us);
-        let selected = sef.selected_imu().index();
+        let selected = sef.selected_imu();
         let scores = sef.consistency_scores();
-        for (id, imu) in ImuId::ALL.into_iter().zip(asteria_sef_light::ImuId::ALL) {
+        for id in ImuId::ALL {
+            let imu = id.index();
             let state = sef.state(imu);
             let uncertainty = sef.uncertainty(imu);
             let height_std_m = libm::sqrtf(uncertainty.height_variance_m2);
             signals::submit_state(SefLogSample {
                 ts,
                 imu: id,
-                selected: imu.index() == selected,
+                selected: imu == selected,
                 msl_ready: height_msl_referenced(height_std_m),
                 redundancy_ready: sef.redundancy_ready(),
                 height_msl_m: state.height_m,
@@ -331,7 +332,7 @@ impl Processor {
                 height_std_m,
                 velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
                 barometer_bias_std_m: uncertainty.barometer_bias_variance_m2.map(libm::sqrtf),
-                consistency_score: scores[imu.index()],
+                consistency_score: scores[imu],
                 orientation_body_to_ned_wxyz: sef.orientation_body_to_ned_wxyz(imu),
             });
         }
