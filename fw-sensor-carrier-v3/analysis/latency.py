@@ -21,7 +21,7 @@ from scipy.optimize import least_squares
 from scipy.sparse.linalg import spsolve
 from scipy.spatial.transform import Rotation, Slerp
 
-from sdlog import STANDARD_GRAVITY, Log, pressure_altitude_m
+from sdlog import STANDARD_GRAVITY, Log, pressure_altitude_m, usable_fix
 
 # A latency whose standard deviation exceeds this is not determined by the log.
 OBSERVABLE_SIGMA_S = 0.02
@@ -208,7 +208,7 @@ def vertical(log: Log) -> Model | None:
     gnsss = []
     for i in range(2):
         gnss = log.sensor("gnss", i)
-        gnss = gnss[(gnss.fix_ok != 0) & gnss.fix_type.isin([3, 4])]
+        gnss = gnss[usable_fix(gnss)]
         if len(gnss):
             gnsss.append((i, gnss))
     if not baros:

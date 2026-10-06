@@ -88,6 +88,16 @@ def read_csv(path: Path) -> pd.DataFrame:
     return complete.reset_index(drop=True)
 
 
+def usable_fix(gnss: pd.DataFrame) -> pd.Series:
+    """The fixes the firmware passes to the estimator: 3D (u-blox 3D or
+    GNSS+DR), and of each receiver only those newer than all its fixes before;
+    older logs hold stale ones that a UART error replayed."""
+    has_fix = (gnss.fix_ok != 0) & gnss.fix_type.isin([2, 3, 4])
+    itow = gnss.itow_ms.where(has_fix)
+    newest_before = itow.groupby(gnss.gnss).transform(lambda s: s.cummax().shift())
+    return has_fix & gnss.fix_type.isin([3, 4]) & ~(itow <= newest_before)
+
+
 def pressure_altitude_m(pressure_mbar):
     """ISA pressure altitude, the same conversion the firmware uses."""
     return 44_330.0 * (1.0 - (np.asarray(pressure_mbar) / 1_013.25) ** 0.190_294_95)

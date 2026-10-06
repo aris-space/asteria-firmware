@@ -76,16 +76,6 @@ MAX_FIELD_ERROR = 0.1
 OUTPUT_PERIOD_US = 50_000
 
 
-def usable_fix(gnss: pd.DataFrame) -> pd.Series:
-    """As on the board, only 3D fixes (u-blox 3D or GNSS+DR) reach the estimator,
-    and of a receiver's fixes only those newer than all before; older logs hold
-    stale ones that a UART error replayed."""
-    has_fix = (gnss.fix_ok != 0) & gnss.fix_type.isin([2, 3, 4])
-    itow = gnss.itow_ms.where(has_fix)
-    newest_before = itow.groupby(gnss.gnss).transform(lambda s: s.cummax().shift())
-    return has_fix & gnss.fix_type.isin([3, 4]) & ~(itow <= newest_before)
-
-
 def mag_calibrated(log: sdlog.Log, index: int) -> bool:
     """Whether magnetometer `index` was logged with a calibration other than
     the identity, which the firmware does not fuse."""
@@ -103,7 +93,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
     estimator = Estimator(**settings)
 
     imu, mag, baro, gnss = log.imu, log.mag, log.baro, log.gnss
-    gnss = gnss[usable_fix(gnss)] if len(gnss) else gnss
+    gnss = gnss[sdlog.usable_fix(gnss)] if len(gnss) else gnss
     mag = mag[mag.mag.isin([i for i in range(2) if mag_calibrated(log, i)])]
     field_nt = pd.Series(np.linalg.norm(mag[["x_nt", "y_nt", "z_nt"]].to_numpy(), axis=1), index=mag.index)
     expected_nt = field_nt.groupby(mag.mag).transform("median")
@@ -185,7 +175,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
 
 def plot(log: sdlog.Log, states: pd.DataFrame) -> None:
     _, (height_ax, velocity_ax) = plt.subplots(2, 1, sharex=True, num="Replay")
-    gnss = log.gnss[(log.gnss.fix_ok != 0) & log.gnss.fix_type.isin([3, 4])] if len(log.gnss) else log.gnss
+    gnss = log.gnss[sdlog.usable_fix(log.gnss)] if len(log.gnss) else log.gnss
     if len(gnss):
         height_ax.plot(gnss.t, gnss.height_msl_m, ".", markersize=2, label="GNSS")
         velocity_ax.plot(gnss.t, -gnss.velocity_down_mps, ".", markersize=2, label="GNSS")

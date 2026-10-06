@@ -32,7 +32,7 @@ TRACK_SMOOTHING_S = 1.3
 def track_en_m(log: sdlog.Log, t: np.ndarray) -> np.ndarray:
     """East and north of the receiver with the most fixes, relative to its
     first fix, at times `t`; zero without any fix."""
-    fixes = log.gnss[log.gnss.fix_ok == 1]
+    fixes = log.gnss[sdlog.usable_fix(log.gnss)] if len(log.gnss) else log.gnss
     if fixes.empty:
         return np.zeros((len(t), 2))
     fixes = fixes[fixes.gnss == fixes.gnss.value_counts().idxmax()]
@@ -50,7 +50,9 @@ def estimate(log: sdlog.Log, use_replay: bool) -> pd.DataFrame:
         import replay
 
         states = replay.replay(log)
-        state = states[states.selected & states.ready].reset_index(drop=True)
+        state = states[states.selected]
+        # Only the attitude's start-up is skipped; a later reset shows as it happened.
+        state = state[state.ready.cummax()].reset_index(drop=True)
     else:
         state = log.state[log.state.selected == 1].reset_index(drop=True)
     if state.empty:

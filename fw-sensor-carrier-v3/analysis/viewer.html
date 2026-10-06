@@ -190,7 +190,7 @@ function show(t) {
     camera.position.add(board.position.clone().sub(previous));
     controls.target.copy(board.position);
   }
-  document.getElementById("time").textContent = (t - START).toFixed(1);
+  document.getElementById("time").textContent = t.toFixed(1);
   document.getElementById("mark").textContent = lastMark(t);
   DATA.readouts.forEach((r, n) => {
     const at = x => x[k] + (x[j] - x[k]) * a;
@@ -199,7 +199,7 @@ function show(t) {
     readoutEls[n].textContent = `${sign}${value.toFixed(2)}${r.std ? ` ± ${at(r.std).toFixed(2)}` : ""} ${r.unit}`;
   });
   slider.value = t;
-  slider.setAttribute("aria-valuetext", `${(t - START).toFixed(0)} seconds`);
+  slider.setAttribute("aria-valuetext", `${t.toFixed(0)} seconds`);
 }
 function seek(t) { now = Math.min(Math.max(t, START), END); show(now); }
 function setPlaying(p) {
