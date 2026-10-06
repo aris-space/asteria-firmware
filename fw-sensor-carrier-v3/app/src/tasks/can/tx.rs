@@ -1,14 +1,14 @@
 //! CAN transmission of every `dp-sensor-carrier` message.
 //!
 //! Each message has its own task that builds it at the message's rate and
-//! queues it without waiting. One task owns `CanTx` and sends the queue, so no
-//! task ever waits on another for the bus; with a dead bus the queue fills and
-//! new frames are dropped.
+//! hands it to the CAN peripheral's TX buffer without waiting; the driver's
+//! interrupt moves frames from there into the hardware. With a dead bus the
+//! buffer fills and new frames are dropped.
 
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use asteria_state_estimation::NavigationState;
-use can_utils::rxtx::TypedCanTransmit as _;
+use data_core::can::hal::CanEncode as _;
 use datatypes::status::{SensorStatus as CanSensorStatus, StatusCommonMessage};
 use datatypes::units::{Celsius, HPa};
 use defmt::{error, info, warn};
@@ -16,12 +16,10 @@ use dp_sensor_carrier::{
     EnvironmentalData, ImuData, MagnetometerData, Message, OrientationData, PositionData,
     SensorCarrierStatus, SensorsHealth, VelocityData,
 };
-use embassy_executor::SendSpawner;
-use embassy_stm32::can::CanTx;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
+use embassy_stm32::can::BufferedFdCanSender;
+use embassy_stm32::can::frame::{FdFrame, Header};
 use embassy_sync::pubsub::{DynSubscriber, WaitResult};
-use embassy_time::{Duration, Instant, Ticker, with_timeout};
+use embassy_time::{Duration, Instant, Ticker};
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
 use crate::calibration;
@@ -42,73 +40,57 @@ const ENVIRONMENTAL_PERIOD: Duration = Duration::from_secs(1);
 const STATUS_PERIOD: Duration = Duration::from_secs(1);
 const BUILD_INFO_PERIOD: Duration = Duration::from_secs(5);
 
-// One frame of every message, with room to spare.
-const QUEUE_LEN: usize = 16;
-const TX_TIMEOUT: Duration = Duration::from_millis(100);
 // The estimator publishes with every IMU sample, so an older state means it stopped.
 const STATE_MAX_AGE: Duration = Duration::from_millis(100);
 // The slowest sensors (DHT) read at 1 Hz; older readings are not sent.
 const READING_MAX_AGE: Duration = Duration::from_secs(2);
 
-static QUEUE: Channel<CriticalSectionRawMutex, Message, QUEUE_LEN> = Channel::new();
+// Whether the last frame found the TX buffer full, so the change is logged once.
+static TX_BUFFER_FULL: AtomicBool = AtomicBool::new(false);
 
-pub fn spawn(can_tx: CanTx<'static>, spawner: SendSpawner) {
-    spawner.spawn(sender(can_tx).expect("Failed to spawn CAN sender task"));
-    spawner.spawn(orientation().expect("Failed to spawn CAN orientation task"));
-    spawner.spawn(imu().expect("Failed to spawn CAN IMU task"));
-    spawner.spawn(pressure().expect("Failed to spawn CAN pressure task"));
-    spawner.spawn(position().expect("Failed to spawn CAN position task"));
-    spawner.spawn(velocity().expect("Failed to spawn CAN velocity task"));
-    spawner.spawn(magnetometer().expect("Failed to spawn CAN magnetometer task"));
-    spawner.spawn(environmental().expect("Failed to spawn CAN environmental task"));
-    spawner.spawn(status().expect("Failed to spawn CAN status task"));
-    spawner.spawn(build_info().expect("Failed to spawn CAN build info task"));
-}
-
-/// Sends the queue, reporting only when the bus stops or starts taking frames.
-#[embassy_executor::task]
-async fn sender(mut can_tx: CanTx<'static>) -> ! {
-    let mut healthy = true;
-    loop {
-        let msg = QUEUE.receive().await;
-        match with_timeout(TX_TIMEOUT, can_tx.transmit(msg)).await {
-            Ok(Ok(())) => {
-                if !healthy {
-                    info!("CAN: bus takes frames again");
-                    healthy = true;
-                }
-            }
-            Ok(Err(err)) => error!("CAN: TX error: {:?}", err),
-            Err(_) => {
-                if healthy {
-                    warn!(
-                        "CAN: TX timed out after {} ms, is the bus connected?",
-                        TX_TIMEOUT.as_millis()
-                    );
-                    healthy = false;
-                }
-                // What queued up meanwhile is stale by the time the bus is back.
-                QUEUE.clear();
-            }
+/// Encodes `msg` and hands it to the CAN peripheral; a full TX buffer means
+/// the bus takes no frames, and the frame is dropped.
+fn send(can: &mut BufferedFdCanSender, msg: Message) {
+    let mut payload = [0u8; 64];
+    let Ok((id, len)) = msg.encode_into(&mut payload) else {
+        error!("CAN: a message failed to encode");
+        return;
+    };
+    let Ok(frame) = FdFrame::new(
+        Header::new(id.into(), len, false),
+        &payload[..usize::from(len)],
+    ) else {
+        error!("CAN: a frame failed to build");
+        return;
+    };
+    let full = can.try_write(frame).is_err();
+    if full != TX_BUFFER_FULL.swap(full, Ordering::Relaxed) {
+        if full {
+            warn!("CAN: TX buffer full, is the bus connected?");
+        } else {
+            info!("CAN: bus takes frames again");
         }
     }
 }
 
-/// Queues the message `build` returns every `period`, if it returns one.
-async fn every(period: Duration, mut build: impl FnMut() -> Option<Message>) -> ! {
+/// Sends the message `build` returns every `period`, if it returns one.
+async fn every(
+    mut can: BufferedFdCanSender,
+    period: Duration,
+    mut build: impl FnMut() -> Option<Message>,
+) -> ! {
     let mut ticker = Ticker::every(period);
     loop {
         ticker.next().await;
         if let Some(msg) = build() {
-            // A full queue means a dead bus; the frame is dropped.
-            let _ = QUEUE.try_send(msg);
+            send(&mut can, msg);
         }
     }
 }
 
 #[embassy_executor::task]
-async fn orientation() -> ! {
-    every(ORIENTATION_PERIOD, || {
+pub async fn orientation(can: BufferedFdCanSender) -> ! {
+    every(can, ORIENTATION_PERIOD, || {
         // The CAN contract uses the NED-to-body rotation.
         let ned_to_body = body_to_ned(&fresh_state()?).inverse();
         Some(Message::OrientationData(OrientationData {
@@ -122,8 +104,8 @@ async fn orientation() -> ! {
 }
 
 #[embassy_executor::task]
-async fn imu() -> ! {
-    every(IMU_PERIOD, || {
+pub async fn imu(can: BufferedFdCanSender) -> ! {
+    every(can, IMU_PERIOD, || {
         let state = fresh_state()?;
         let body_to_ned = body_to_ned(&state);
         let acceleration = Vector3::from(state.specific_force_body_mps2);
@@ -149,8 +131,8 @@ async fn imu() -> ! {
 }
 
 #[embassy_executor::task]
-async fn velocity() -> ! {
-    every(VELOCITY_PERIOD, || {
+pub async fn velocity(can: BufferedFdCanSender) -> ! {
+    every(can, VELOCITY_PERIOD, || {
         let state = fresh_state()?;
         let ned = Vector3::from(state.velocity_ned_mps);
         let body = body_to_ned(&state).inverse() * ned;
@@ -168,9 +150,9 @@ async fn velocity() -> ! {
 
 /// Sent once GNSS has referenced the height to MSL.
 #[embassy_executor::task]
-async fn position() -> ! {
+pub async fn position(can: BufferedFdCanSender) -> ! {
     let reference = launch_site();
-    every(POSITION_PERIOD, || {
+    every(can, POSITION_PERIOD, || {
         let state = fresh_state()?;
         let [north_std_m, east_std_m, down_std_m] = state.position_std_ned_m;
         if !height_msl_referenced(down_std_m) {
@@ -190,12 +172,12 @@ async fn position() -> ! {
 
 /// The mean of the barometers' newest pressures.
 #[embassy_executor::task]
-async fn pressure() -> ! {
+pub async fn pressure(can: BufferedFdCanSender) -> ! {
     let mut baro = signals::BARO_CHANNEL
         .dyn_subscriber()
         .expect("CAN: barometer subscriber slot");
     let mut pressure_hpa = [None; BARO_COUNT];
-    every(PRESSURE_PERIOD, || {
+    every(can, PRESSURE_PERIOD, || {
         drain(&mut baro, |reading| {
             pressure_hpa[reading.raw.src.index()] =
                 Some(Latest::new(reading.raw.read_ts, reading.cal.pressure_mbar));
@@ -208,13 +190,13 @@ async fn pressure() -> ! {
 /// The mean of the calibrated magnetometers' newest fields; the message
 /// promises hard- and soft-iron correction.
 #[embassy_executor::task]
-async fn magnetometer() -> ! {
+pub async fn magnetometer(can: BufferedFdCanSender) -> ! {
     const NT_TO_UT: f32 = 1e-3;
     let mut mag = signals::MAG_CHANNEL
         .dyn_subscriber()
         .expect("CAN: magnetometer subscriber slot");
     let mut field_ut = [None; MAG_COUNT];
-    every(MAGNETOMETER_PERIOD, || {
+    every(can, MAGNETOMETER_PERIOD, || {
         drain(&mut mag, |reading| {
             let cal = calibration::mag::CAL.applied(reading.raw.src);
             if cal.correction.is_calibrated() {
@@ -243,7 +225,7 @@ async fn magnetometer() -> ! {
 
 /// Temperature and humidity, with the mean pressure over the last period.
 #[embassy_executor::task]
-async fn environmental() -> ! {
+pub async fn environmental(can: BufferedFdCanSender) -> ! {
     let mut baro = signals::BARO_CHANNEL
         .dyn_subscriber()
         .expect("CAN: barometer subscriber slot");
@@ -252,7 +234,7 @@ async fn environmental() -> ! {
         .expect("CAN: DHT subscriber slot");
     let mut temperature_c = [None; DHT_COUNT];
     let mut humidity_rh = [None; DHT_COUNT];
-    every(ENVIRONMENTAL_PERIOD, || {
+    every(can, ENVIRONMENTAL_PERIOD, || {
         let (mut pressure_sum_hpa, mut pressure_count) = (0.0, 0);
         drain(&mut baro, |reading| {
             pressure_sum_hpa += reading.cal.pressure_mbar;
@@ -277,7 +259,7 @@ async fn environmental() -> ! {
 }
 
 #[embassy_executor::task]
-async fn status() -> ! {
+pub async fn status(can: BufferedFdCanSender) -> ! {
     fn convert(s: &AtomicSensorStatus) -> CanSensorStatus {
         match s.load(Ordering::Relaxed) {
             SensorStatus::Inactive => CanSensorStatus::Offline,
@@ -285,7 +267,7 @@ async fn status() -> ! {
         }
     }
 
-    every(STATUS_PERIOD, || {
+    every(can, STATUS_PERIOD, || {
         Some(Message::BoardStatus(SensorCarrierStatus {
             common: StatusCommonMessage {
                 errors: 0,
@@ -309,8 +291,8 @@ async fn status() -> ! {
 }
 
 #[embassy_executor::task]
-async fn build_info() -> ! {
-    every(BUILD_INFO_PERIOD, || {
+pub async fn build_info(can: BufferedFdCanSender) -> ! {
+    every(can, BUILD_INFO_PERIOD, || {
         Some(Message::BuildInfo(crate::built::can_build_information()))
     })
     .await
