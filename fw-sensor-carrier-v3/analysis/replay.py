@@ -69,8 +69,13 @@ OUTPUT_PERIOD_US = 50_000
 
 
 def usable_fix(gnss: pd.DataFrame) -> pd.Series:
-    """As on the board, only 3D fixes (u-blox 3D or GNSS+DR) reach the estimator."""
-    return (gnss.fix_ok != 0) & gnss.fix_type.isin([3, 4])
+    """As on the board, only 3D fixes (u-blox 3D or GNSS+DR) reach the estimator,
+    and of a receiver's fixes only those newer than all before; older logs hold
+    stale ones that a UART error replayed."""
+    has_fix = (gnss.fix_ok != 0) & gnss.fix_type.isin([2, 3, 4])
+    itow = gnss.itow_ms.where(has_fix)
+    newest_before = itow.groupby(gnss.gnss).transform(lambda s: s.cummax().shift())
+    return has_fix & gnss.fix_type.isin([3, 4]) & ~(itow <= newest_before)
 
 
 def mag_calibrated(log: sdlog.Log, index: int) -> bool:
