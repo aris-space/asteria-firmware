@@ -18,7 +18,7 @@
 use core::fmt::Write as _;
 
 use block_device_adapters::BufStream;
-use defmt::{Debug2Format, info, warn};
+use defmt::{Debug2Format, debug, info, warn};
 use embassy_futures::select::{Either, Either6, select, select6};
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::sdmmc::sd::{Addressable, CmdBlock, StorageDevice};
@@ -151,7 +151,7 @@ impl<F: Write + Seek> CsvLog<F> {
 
 #[embassy_executor::task]
 pub async fn task(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>) {
-    info!(
+    debug!(
         "SD: card detect pin is {}",
         if detect.is_high() { "high" } else { "low" }
     );
@@ -320,9 +320,15 @@ async fn run_session(sdmmc: &mut Sd) -> Result<(), ()> {
                 .map_err(|e| warn!("SD: {} flush failed: {}", log.name, Debug2Format(&e)))?;
         }
         longest_write = longest_write.max(started.elapsed());
+        if dropped.iter().any(|&count| count > 0) {
+            warn!(
+                "SD: dropped state/IMU/mag/GNSS/baro/DHT/mark readings: {}",
+                dropped
+            );
+        }
         // Readings arriving during a card operation wait in the channels, so
         // this must stay well below the time those channels can hold.
-        info!(
+        debug!(
             "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, DHT={}, dropped={}, longest card write={} ms",
             rows[0],
             rows[1],
