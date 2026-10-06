@@ -1,12 +1,8 @@
-"""Applies `cal set` lines to a logged session, as if the board had had them.
-
-The calibrated columns (`cal_us`, `ax_g`, ..., `x_nt`, ...) are recomputed from
-the raw ones the way the firmware does, so a replay shows what a calibration
-would have done before it is pasted into the board:
+"""Recomputes a log's calibrated columns from `cal set` lines, so a replay shows
+what a calibration would do before it goes on the board. Sensors without a line
+keep the calibration they were logged with.
 
     log = recalibrate.apply(sdlog.read("/Volumes/SD"), Path("cal.txt").read_text())
-
-Sensors without a line keep the calibration they were logged with.
 """
 
 import re
@@ -42,7 +38,6 @@ def parse(text: str) -> dict[str, dict[str, list[float]]]:
 
 
 def apply(log: sdlog.Log, text: str) -> sdlog.Log:
-    """`log` with the calibration of every `cal set` line in `text` applied."""
     for sensor, fields in parse(text).items():
         name, index = SENSORS[sensor]
         table = getattr(log, name).copy()

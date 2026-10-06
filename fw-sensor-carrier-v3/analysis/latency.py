@@ -1,15 +1,8 @@
-"""Per-sensor latencies relative to IMU_0's timestamps.
-
-A sample stamped `t` by a sensor with latency `τ` measures the signal at
-`t − τ`. Each fit models the motion as a cubic B-spline and compares sensors
-that see the same motion: IMU_1 against IMU_0's rotation rate, each
-magnetometer against IMU_0's gyro, and the barometers and GNSS receivers
-against IMU_0's vertical acceleration.
-
-Every measurement is linear in the spline coefficients and biases, and only
-the latencies enter non-linearly. For given latencies the linear unknowns are
-solved exactly (one sparse solve); a trust-region least-squares solver fits
-the latencies on what remains.
+"""Per-sensor latencies relative to IMU_0's timestamps: a sample stamped `t` with
+latency `τ` measured the signal at `t − τ`. Sensors that see the same motion are
+fitted to one spline: IMU_1 and the magnetometers against IMU_0's gyro, the
+barometers and GNSS against its vertical acceleration. Only the latencies are
+non-linear, so the rest is one sparse solve per step.
 """
 
 from collections.abc import Callable
@@ -25,11 +18,10 @@ from sdlog import STANDARD_GRAVITY, Log, pressure_altitude_m, usable_fix
 
 # A latency whose standard deviation exceeds this is not determined by the log.
 OBSERVABLE_SIGMA_S = 0.02
-# The covariance describes the fit only near its minimum. Without real motion
-# that minimum is a ripple in the noise, and moving the latency changes the
-# fit far less than the covariance predicts. A latency counts as determined
-# only if the fit at shifts of at least TEST_MIN_SHIFT_S worsens by at least a
-# quarter of the predicted amount, and clearly (five standard deviations).
+# Without real motion the minimum is a ripple in the noise, and the covariance
+# overstates how well the latency is known. So it only counts if shifting it by
+# TEST_MIN_SHIFT_S worsens the fit by a quarter of the predicted amount, and
+# clearly (five standard deviations).
 PROFILE_SHIFTS_S = np.array([-0.1, -0.05, -0.02, -0.01, -0.005, 0.0, 0.005, 0.01, 0.02, 0.05, 0.1])
 TEST_MIN_SHIFT_S = 0.05
 MIN_PREDICTED_FRACTION = 0.25

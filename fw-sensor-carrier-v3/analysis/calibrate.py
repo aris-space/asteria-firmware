@@ -1,15 +1,7 @@
-"""Fits fw-sensor-carrier-v3 calibration from one SD logging session and
-prints it as `cal set` lines to paste into the board's USB console.
-
-All fits start from raw counts. Gyro bias is the mean rate over still
-stretches; accelerometer offset and scale an axis-aligned ellipsoid through
-the gravity seen resting on all six sides; magnetometer hard and soft iron an
-ellipsoid fit over all orientations the board was turned through, together
-with the local field strength. Latencies come from latency.py. `mark still`
-and `mark tumble` in the console narrow which stretches are used; without
-marks, still stretches are found from the gyro and the magnetometer fit uses
-every sample. A correction that does not improve the data it was fitted on
-is not printed.
+"""Fits the board's calibration from one SD log and prints `cal set` lines to
+paste into the console. Fits start from raw counts, so whatever calibration the
+log was recorded with doesn't matter. `mark still` and `mark tumble` narrow which
+stretches the gyro and magnetometer fits use.
 
     uv run calibrate.py /Volumes/SD [--from S] [--to S] [--plot]
 """
@@ -32,8 +24,7 @@ STILL_MAX_SPREAD_DPS = 0.5
 # but leaves the measured gravity unchanged.
 ACCEL_STILL_MAX_SPREAD_DPS = 2.0
 MIN_STILL_S = 5.0
-# Plausible accelerometer correction per axis, as in the firmware; anything
-# beyond means a bad fit.
+# Corrections past these, as in the firmware, mean a bad fit.
 MAX_ACCEL_OFFSET_G = 0.2
 ACCEL_SCALE_RANGE = (0.9, 1.1)
 # Plausible Earth-field magnitude, as in the firmware.

@@ -1,18 +1,9 @@
-"""Replays an SD logging session through SEF-light, to tune the estimator offline.
+"""Runs a log through SEF-light with the firmware's settings, to tune the
+estimator offline. Readings go in time order, so unlike on the board nothing
+arrives late.
 
-The calibrated readings (`cal_us` and calibrated values) are fed to the same
-estimator the firmware runs, in timestamp order and with the firmware's
-settings unless overridden. From Python:
-
-    import sdlog, replay
     states = replay.replay(sdlog.read("/Volumes/SD"), acceleration_noise_std_mps2=5.0)
-
-or from the shell, with plots of the replayed and the on-board estimate:
-
     uv run replay.py /Volumes/SD [--set acceleration_noise_std_mps2=5.0 ...] [--cal cal.txt]
-
-`--cal` replays as if the board had had the `cal set` lines in that file (see
-recalibrate.py).
 """
 
 import argparse
@@ -63,15 +54,11 @@ FIRMWARE = dict(
     gnss_height_std_scale=10.0,
     gnss_speed_std_scale=10.0,
 )
-# Smallest GNSS standard deviation passed on, for receivers reporting zero.
-GNSS_MIN_STD = 0.1
-# As on the board, the height is MSL-referenced once its standard deviation is
-# below this.
+GNSS_MIN_STD = 0.1  # receivers can report zero
 MSL_REFERENCED_HEIGHT_STD_M = 100.0
-# As on the board, magnetometer samples whose field strength differs from the
-# calibrated one by more than this fraction are not fused, and neither are
-# uncalibrated magnetometers. The log does not hold the calibrated field
-# strength, so the median of the logged one stands in for it.
+# The firmware fuses no uncalibrated magnetometer, nor samples this far off the
+# calibrated field strength. The log doesn't hold that strength, so its median
+# stands in.
 MAX_FIELD_ERROR = 0.1
 OUTPUT_PERIOD_US = 50_000
 

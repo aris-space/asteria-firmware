@@ -1,14 +1,9 @@
-"""Writes a 3D replay of one SD logging session as a single HTML file and opens it.
-
-The board moves along the GNSS track at the estimated height, turned by the
-estimated attitude, with height, vertical velocity and the log's marks shown
-alongside. The file carries its data, so it can be sent on as it is.
+"""Writes a self-contained 3D replay of one log as HTML and opens it: the board
+along the GNSS track at the estimated height and attitude. `--replay` uses the
+current estimator settings instead of the on-board estimate; `--cal` also
+applies `cal set` lines.
 
     uv run viewer.py /Volumes/SD [--replay] [--cal cal.txt] [--out replay.html]
-
-With `--replay`, the estimate comes from `replay.py` (the current estimator
-settings) instead of the one logged on the board. `--cal` replays as if the
-board had had the `cal set` lines in that file (see recalibrate.py).
 """
 
 import argparse

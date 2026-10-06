@@ -38,14 +38,12 @@ class Log:
             setattr(self, name, table[table.t.between(start, end)])
 
     def sensor(self, name: str, index: int) -> pd.DataFrame:
-        """The samples of one sensor, e.g. `sensor("imu", 0)`."""
         table = getattr(self, name)
         return table[table[name] == index]
 
 
 def read(path: str | Path) -> Log:
-    """Reads `path`, a LOGnnnn directory or one holding them (such as the SD
-    card root, in which case the newest session is read)."""
+    """A LOGnnnn directory, or the newest one under `path` (e.g. the SD card root)."""
     dir = session_dir(Path(path))
     tables = {name: read_csv(dir / f"{name.upper()}.CSV") for name in Log.__annotations__ if name != "dir"}
     if tables["imu"].empty:
@@ -75,8 +73,7 @@ def session_dir(path: Path) -> Path:
 
 
 def read_csv(path: Path) -> pd.DataFrame:
-    """The rows of a CSV file; rows that do not parse, e.g. one cut off by
-    power loss, are skipped and counted. A missing or empty file has no rows."""
+    """Skips (and counts) rows that don't parse, e.g. one cut off by power loss."""
     if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
     table = pd.read_csv(path, on_bad_lines="skip", dtype=str)
@@ -109,9 +106,8 @@ def imu_board_dps(imu) -> np.ndarray:
 
 
 def accel_g_per_lsb(imu) -> float:
-    """The accelerometer resolution the log was recorded with: the one closest
-    to the ratio of its calibrated values to its raw counts, which a
-    calibration changes by a few percent at most."""
+    """The log's accelerometer range, recognised from calibrated vs raw values
+    (calibration moves them a few percent at most)."""
     raw = np.abs(imu["ax_raw"].to_numpy())
     big = raw > 1_000
     ratio = np.median(np.abs(imu["ax_g"].to_numpy()[big]) / raw[big])
