@@ -110,14 +110,24 @@ async fn flash_clear(io: &mut ConsoleIo<'_>, storage: &Storage, name: &str) {
             ),
         )
         .await;
-    } else if storage.remove(&storage::key(name)).await {
-        sayf(
-            io,
-            format_args!(paint!(green, "cleared {}; reset to apply.\n"), name),
-        )
-        .await;
     } else {
-        say(io, paint!(red, "flash error\n")).await;
+        match storage.remove(&storage::key(name)).await {
+            Ok(true) => {
+                sayf(
+                    io,
+                    format_args!(paint!(green, "cleared {}; reset to apply.\n"), name),
+                )
+                .await
+            }
+            Ok(false) => {
+                sayf(
+                    io,
+                    format_args!(paint!(yellow, "{} is not stored; nothing cleared.\n"), name),
+                )
+                .await
+            }
+            Err(()) => say(io, paint!(red, "flash error\n")).await,
+        }
     }
 }
 
