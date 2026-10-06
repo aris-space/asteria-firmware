@@ -76,7 +76,7 @@ const MAG_MAX_AGE_US: u64 = mag::SAMPLE_INTERVAL.as_micros() * 5 / 2;
 const GNSS_MIN_STD: f32 = 0.1;
 // GNSS height errors persist for a minute or more, so 20 Hz epochs are not
 // independent: at rest the height spread 9 m while the receiver reported 3 m.
-const GNSS_HEIGHT_STD_SCALE: f32 = 10.0;
+const GNSS_HEIGHT_STD_SCALE: f32 = 20.0;
 // Walking with the board, the receiver reported up to 0.75 m/s of vertical
 // speed the barometers did not see, which bent the height by up to 1 m.
 const GNSS_SPEED_STD_SCALE: f32 = 10.0;
@@ -155,7 +155,7 @@ impl Processor {
         let filter = VerticalFilterConfig::new(
             10.0,       // healthy acceleration noise, m/s² per sample
             20.0,       // degraded acceleration noise, m/s² per sample
-            [1.0; 2],   // barometer-bias random walk, m/√s
+            [0.2; 2],   // barometer-bias random walk, m/√s
             1_000.0,    // initial height uncertainty, m; GNSS references it to MSL
             3.0,        // initial vertical-velocity uncertainty, m/s
             [200.0; 2], // initial pressure-altitude bias uncertainty, m
