@@ -136,6 +136,7 @@ impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
     async fn run(mut self) -> Inactive<'a, RX> {
         let mut recv_buf = [0u8; RECV_LEN];
         let mut errors: u8 = 0;
+        let mut had_fix = true;
 
         loop {
             match with_timeout(LINK_SILENCE_TIMEOUT, self.rx.read(&mut recv_buf)).await {
@@ -144,10 +145,25 @@ impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
                     while let Some(msg) = parsed.next() {
                         match msg {
                             Ok(PacketRef::NavPvt(pvt)) => {
-                                if read_pvt(self.id, &pvt, &mut self.newest_fix)
-                                    .is_some_and(|sample| has_fix(&sample.pvt))
-                                {
+                                let Some(sample) = read_pvt(self.id, &pvt, &mut self.newest_fix)
+                                else {
+                                    continue;
+                                };
+                                let fix = has_fix(&sample.pvt);
+                                if fix {
                                     errors = 0;
+                                }
+                                if fix != had_fix {
+                                    if fix {
+                                        info!(
+                                            "{}: fix regained ({:?})",
+                                            self.id,
+                                            Debug2Format(&sample.pvt.fix_type)
+                                        );
+                                    } else {
+                                        warn!("{}: fix lost", self.id);
+                                    }
+                                    had_fix = fix;
                                 }
                             }
                             Ok(_) => {}

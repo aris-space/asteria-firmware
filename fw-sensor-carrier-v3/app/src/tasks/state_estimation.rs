@@ -13,7 +13,7 @@ use asteria_sef_light::{
     DualVerticalEstimator, EstimatorError, ImuAttitudeConfig, STANDARD_GRAVITY_MPS2,
     StationaryConfig, VerticalEstimatorSelectorConfig, VerticalFilterConfig,
 };
-use defmt::{Debug2Format, warn};
+use defmt::{Debug2Format, info, warn};
 use embassy_futures::select::{Either4, select4};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant};
@@ -149,6 +149,8 @@ struct Processor {
     reference: GeodeticReference,
     last_publish: Option<Instant>,
     last_warning: Option<Instant>,
+    msl_referenced: bool,
+    selected_imu: usize,
 }
 
 impl Processor {
@@ -205,6 +207,8 @@ impl Processor {
             reference: launch_site(),
             last_publish: None,
             last_warning: None,
+            msl_referenced: false,
+            selected_imu: 0,
         })
     }
 
@@ -320,9 +324,22 @@ impl Processor {
         }
         signals::STATE_ESTIMATE_WATCH.sender().send(state);
 
+        let msl_referenced = height_msl_referenced(state.position_std_ned_m[2]);
+        if msl_referenced != self.msl_referenced {
+            if msl_referenced {
+                info!("SEF: height referenced to MSL");
+            } else {
+                warn!("SEF: height no longer referenced to MSL");
+            }
+            self.msl_referenced = msl_referenced;
+        }
         let sef = &self.estimator;
-        let ts = Instant::from_micros(state.time_us);
         let selected = sef.selected_imu();
+        if selected != self.selected_imu {
+            info!("SEF: switched to {}", ImuId::ALL[selected]);
+            self.selected_imu = selected;
+        }
+        let ts = Instant::from_micros(state.time_us);
         let scores = sef.consistency_scores();
         for id in ImuId::ALL {
             let imu = id.index();
