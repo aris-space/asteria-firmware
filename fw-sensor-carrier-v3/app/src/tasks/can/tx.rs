@@ -1,13 +1,14 @@
 //! CAN transmission of every `dp-sensor-carrier` message.
 //!
 //! Each message has its own task that builds it at the message's rate and
-//! sends it through its own [`TypedCanSender`], which never waits. With a dead
-//! bus the TX buffer fills and new frames are dropped.
+//! hands it to the CAN peripheral's TX buffer without waiting; the driver's
+//! interrupt moves frames from there into the hardware. With a dead bus the
+//! buffer fills and new frames are dropped.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use asteria_sef_core::NavigationState;
-use can_utils::rxtx::{TxError, TypedCanSender};
+use data_core::can::hal::CanEncode as _;
 use datatypes::status::{SensorStatus as CanSensorStatus, StatusCommonMessage};
 use datatypes::units::{Celsius, HPa};
 use defmt::{error, info, warn};
@@ -15,6 +16,8 @@ use dp_sensor_carrier::{
     EnvironmentalData, ImuData, MagnetometerData, Message, OrientationData, PositionData,
     SensorCarrierStatus, SensorsHealth, VelocityData,
 };
+use embassy_stm32::can::BufferedFdCanSender;
+use embassy_stm32::can::frame::{FdFrame, Header};
 use embassy_sync::pubsub::{DynSubscriber, WaitResult};
 use embassy_time::{Duration, Instant, Ticker};
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
@@ -45,17 +48,22 @@ const READING_MAX_AGE: Duration = Duration::from_secs(2);
 // Whether the last frame found the TX buffer full, so the change is logged once.
 static TX_BUFFER_FULL: AtomicBool = AtomicBool::new(false);
 
-/// Sends `msg`; a full TX buffer means the bus takes no frames, and the frame
-/// is dropped.
-fn send(can: &mut TypedCanSender, msg: Message) {
-    let full = match can.try_transmit(msg) {
-        Ok(()) => false,
-        Err(TxError::BufferFull) => true,
-        Err(err) => {
-            error!("CAN: TX error: {:?}", err);
-            return;
-        }
+/// Encodes `msg` and hands it to the CAN peripheral; a full TX buffer means
+/// the bus takes no frames, and the frame is dropped.
+fn send(can: &mut BufferedFdCanSender, msg: Message) {
+    let mut payload = [0u8; 64];
+    let Ok((id, len)) = msg.encode_into(&mut payload) else {
+        error!("CAN: a message failed to encode");
+        return;
     };
+    let Ok(frame) = FdFrame::new(
+        Header::new(id.into(), len, false),
+        &payload[..usize::from(len)],
+    ) else {
+        error!("CAN: a frame failed to build");
+        return;
+    };
+    let full = can.try_write(frame).is_err();
     if full != TX_BUFFER_FULL.swap(full, Ordering::Relaxed) {
         if full {
             warn!("CAN: TX buffer full, is the bus connected?");
@@ -67,7 +75,7 @@ fn send(can: &mut TypedCanSender, msg: Message) {
 
 /// Sends the message `build` returns every `period`, if it returns one.
 async fn every(
-    mut can: TypedCanSender,
+    mut can: BufferedFdCanSender,
     period: Duration,
     mut build: impl FnMut() -> Option<Message>,
 ) -> ! {
@@ -81,7 +89,7 @@ async fn every(
 }
 
 #[embassy_executor::task]
-pub async fn orientation(can: TypedCanSender) -> ! {
+pub async fn orientation(can: BufferedFdCanSender) -> ! {
     every(can, ORIENTATION_PERIOD, || {
         // The CAN contract uses the NED-to-body rotation.
         let ned_to_body = body_to_ned(&fresh_state()?).inverse();
@@ -96,7 +104,7 @@ pub async fn orientation(can: TypedCanSender) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn imu(can: TypedCanSender) -> ! {
+pub async fn imu(can: BufferedFdCanSender) -> ! {
     every(can, IMU_PERIOD, || {
         let state = fresh_state()?;
         let body_to_ned = body_to_ned(&state);
@@ -123,7 +131,7 @@ pub async fn imu(can: TypedCanSender) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn velocity(can: TypedCanSender) -> ! {
+pub async fn velocity(can: BufferedFdCanSender) -> ! {
     every(can, VELOCITY_PERIOD, || {
         let state = fresh_state()?;
         let ned = Vector3::from(state.velocity_ned_mps);
@@ -142,7 +150,7 @@ pub async fn velocity(can: TypedCanSender) -> ! {
 
 /// Sent once GNSS has referenced the height to MSL.
 #[embassy_executor::task]
-pub async fn position(can: TypedCanSender) -> ! {
+pub async fn position(can: BufferedFdCanSender) -> ! {
     let reference = launch_site();
     every(can, POSITION_PERIOD, || {
         let state = fresh_state()?;
@@ -164,7 +172,7 @@ pub async fn position(can: TypedCanSender) -> ! {
 
 /// The mean of the barometers' newest pressures.
 #[embassy_executor::task]
-pub async fn pressure(can: TypedCanSender) -> ! {
+pub async fn pressure(can: BufferedFdCanSender) -> ! {
     let mut baro = signals::BARO_CHANNEL
         .dyn_subscriber()
         .expect("CAN: barometer subscriber slot");
@@ -182,7 +190,7 @@ pub async fn pressure(can: TypedCanSender) -> ! {
 /// The mean of the calibrated magnetometers' newest fields; the message
 /// promises hard- and soft-iron correction.
 #[embassy_executor::task]
-pub async fn magnetometer(can: TypedCanSender) -> ! {
+pub async fn magnetometer(can: BufferedFdCanSender) -> ! {
     const NT_TO_UT: f32 = 1e-3;
     let mut mag = signals::MAG_CHANNEL
         .dyn_subscriber()
@@ -217,7 +225,7 @@ pub async fn magnetometer(can: TypedCanSender) -> ! {
 
 /// Temperature and humidity, with the mean pressure over the last period.
 #[embassy_executor::task]
-pub async fn environmental(can: TypedCanSender) -> ! {
+pub async fn environmental(can: BufferedFdCanSender) -> ! {
     let mut baro = signals::BARO_CHANNEL
         .dyn_subscriber()
         .expect("CAN: barometer subscriber slot");
@@ -251,7 +259,7 @@ pub async fn environmental(can: TypedCanSender) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn status(can: TypedCanSender) -> ! {
+pub async fn status(can: BufferedFdCanSender) -> ! {
     fn convert(s: &AtomicSensorStatus) -> CanSensorStatus {
         match s.load(Ordering::Relaxed) {
             SensorStatus::Inactive => CanSensorStatus::Offline,
@@ -283,7 +291,7 @@ pub async fn status(can: TypedCanSender) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn build_info(can: TypedCanSender) -> ! {
+pub async fn build_info(can: BufferedFdCanSender) -> ! {
     every(can, BUILD_INFO_PERIOD, || {
         Some(Message::BuildInfo(crate::built::can_build_information()))
     })

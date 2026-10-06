@@ -1,7 +1,6 @@
 //! CAN bus: the RX task handles resets, one TX task per `dp-sensor-carrier`
 //! message sends it at its rate.
 
-use can_utils::rxtx::{TypedCanReceiver, TypedCanSender};
 use data_core::can::hal::CanDecode as _;
 use datatypes::status::BoardId;
 use embassy_executor::SendSpawner;
@@ -37,10 +36,8 @@ pub fn spawn(can: Can<'static>, spawner: SendSpawner) {
         TX_BUFFER.init(TxFdBuf::new()),
         RX_BUFFER.init(RxFdBuf::new()),
     );
-    let tx = TypedCanSender::from(can.writer());
-    spawner.spawn(
-        rx::task(TypedCanReceiver::from(can.reader())).expect("Failed to spawn CAN RX task"),
-    );
+    let tx = can.writer();
+    spawner.spawn(rx::task(can.reader()).expect("Failed to spawn CAN RX task"));
     spawner.spawn(tx::orientation(tx.clone()).expect("Failed to spawn CAN orientation task"));
     spawner.spawn(tx::imu(tx.clone()).expect("Failed to spawn CAN IMU task"));
     spawner.spawn(tx::pressure(tx.clone()).expect("Failed to spawn CAN pressure task"));

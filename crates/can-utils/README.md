@@ -149,39 +149,3 @@ match with_timeout(
     }
 }
 ```
-
-## Sending from many tasks without a shared lock
-
-Sharing one `CanTx` behind the `Mutex` from `make_multiplexable` makes every sender wait on the bus.
-With no bus taking frames, each send holds the lock until its timeout,
-and the waiting tasks keep waking each other, because embassy's `Mutex` holds a single waker.
-That spins the executor and starves lower-priority tasks.
-
-If several tasks send, you can instead put the peripheral into buffered FD mode
-and give each task its own `TypedCanSender`.
-A send then only puts the frame into a buffer, which the driver's interrupt moves into the hardware,
-so no task ever waits on another; with no bus the buffer fills and sends fail with `TxError::BufferFull`.
-
-```rust
-use can_utils::rxtx::{TypedCanReceiver, TypedCanSender};
-use embassy_stm32::can::{RxFdBuf, TxFdBuf};
-use static_cell::StaticCell;
-
-static TX_BUFFER: StaticCell<TxFdBuf<16>> = StaticCell::new();
-static RX_BUFFER: StaticCell<RxFdBuf<4>> = StaticCell::new();
-
-let can = setup_can(todo!(), todo!(), todo!(), Irqs, ReceivedMessage::SUPPORTED_IDS)
-    .buffered_fd(TX_BUFFER.init(TxFdBuf::new()), RX_BUFFER.init(RxFdBuf::new()));
-let mut tx = TypedCanSender::from(can.writer()); // clone one per sending task
-let mut rx = TypedCanReceiver::from(can.reader());
-
-// In a sending task:
-if let Err(err) = tx.try_transmit(dp_sensor_carrier::Message::PressureData(pressure)) {
-    // TxError::BufferFull: the bus takes no frames, the frame is dropped
-}
-
-// In the receiving task:
-match rx.recv::<ReceivedMessage>().await { /* ... */ }
-```
-
-`fw-sensor-carrier-v3` sends this way, one task per message.
