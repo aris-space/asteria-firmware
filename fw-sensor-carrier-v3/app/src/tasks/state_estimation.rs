@@ -34,6 +34,7 @@ use crate::calibration;
 use crate::sensors::{GNSS_COUNT, IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
+use crate::tasks::readout::mag;
 use crate::types::{
     BaroReading, BaroSample, GnssReading, GnssSample, ImuReading, ImuSample, MagReading, MagSample,
     SefLogSample,
@@ -74,6 +75,9 @@ const WARNING_PERIOD: Duration = Duration::from_secs(1);
 const HISTORY_CAPACITY: usize = 768;
 const MAX_AIDING_DELAY_US: u64 = 400_000;
 const BARO_HEIGHT_STD_M: f32 = 1.5;
+// A magnetometer sample keeps aiding attitude for two and a half sample
+// periods, so one late or rejected sample does not drop magnetometer aiding.
+const MAG_MAX_AGE_US: u64 = mag::SAMPLE_INTERVAL.as_micros() * 5 / 2;
 // Smallest GNSS standard deviation passed on, for receivers reporting zero.
 const GNSS_MIN_STD: f32 = 0.1;
 // GNSS height errors persist for a minute or more, so 20 Hz epochs are not
@@ -263,7 +267,10 @@ impl Processor {
             10.0, // accelerometer rejection angle, degrees
             300,  // rejected samples before acceleration recovery
         )?
-        .with_magnetic_rejection(20.0)?;
+        .with_magnetometer(
+            20.0, // magnetic rejection angle, degrees
+            MAG_MAX_AGE_US,
+        )?;
         let selection = SelectorConfig::new(
             0.0025,    // IMU score improvement required for a handover
             5_000_000, // required improvement duration and minimum time between handovers, µs
