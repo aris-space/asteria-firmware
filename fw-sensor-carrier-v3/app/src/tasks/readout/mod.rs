@@ -14,7 +14,7 @@
 
 use core::sync::atomic::Ordering;
 
-use defmt::{Format, debug, info, warn};
+use defmt::{Format, debug, warn};
 use embassy_time::{Duration, Instant, Timer};
 
 use crate::sensors::{AtomicSensorStatus, SensorStatus};
@@ -69,7 +69,7 @@ async fn init_at_startup<S>(
     for attempt in 1..=MAX_INIT_ATTEMPTS {
         debug!("{}: initializing (attempt {})", id, attempt);
         if let Ok(sensor) = configure().await {
-            info!("{}: initialized", id);
+            debug!("{}: initialized", id);
             return Some(sensor);
         }
         if attempt < MAX_INIT_ATTEMPTS {
