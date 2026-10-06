@@ -76,8 +76,7 @@ const MAG_MAX_AGE_US: u64 = mag::SAMPLE_INTERVAL.as_micros() * 5 / 2;
 const GNSS_MIN_STD: f32 = 0.1;
 // GNSS height errors persist for a minute or more, so 20 Hz epochs are not
 // independent: at rest the height spread 9 m while the receiver reported 3 m.
-// Weighted down further so the shielded barometers carry the shape.
-const GNSS_HEIGHT_STD_SCALE: f32 = 40.0;
+const GNSS_HEIGHT_STD_SCALE: f32 = 10.0;
 // Walking with the board, the receiver reported up to 0.75 m/s of vertical
 // speed the barometers did not see, which bent the height by up to 1 m.
 const GNSS_SPEED_STD_SCALE: f32 = 10.0;
@@ -165,9 +164,7 @@ impl Processor {
         // A clipped sample hides an unknown part of the acceleration.
         .with_saturated_acceleration_noise(1_000.0)?
         // In free fall the vertical acceleration is -g whatever the attitude.
-        .with_free_fall_acceleration_noise(1.0)?
-        // Fitted on tossed boards, whose barometers read the airflow.
-        .with_dynamic_pressure_fraction(2.0)?;
+        .with_free_fall_acceleration_noise(1.0)?;
         let attitude = ImuAttitudeConfig::new(
             2.0, // AHRS feedback gain
             // A reading beyond this resets the attitude.

@@ -32,7 +32,6 @@ FIRMWARE = dict(
     acceleration_noise_std_mps2=10.0,
     degraded_acceleration_noise_std_mps2=20.0,
     saturated_acceleration_noise_std_mps2=1_000.0,
-    dynamic_pressure_fraction=2.0,
     free_fall_acceleration_noise_std_mps2=1.0,
     accelerometer_saturation_mps2=0.97 * 16 * 9.806_65,
     barometer_bias_walk_std_m_per_sqrt_s=[0.02, 0.02],
@@ -61,7 +60,7 @@ FIRMWARE = dict(
     stationary_velocity_std_mps=0.05,
     maximum_aiding_delay_us=400_000,
     baro_height_std_m=1.5,
-    gnss_height_std_scale=40.0,
+    gnss_height_std_scale=10.0,
     gnss_speed_std_scale=10.0,
 )
 # Smallest GNSS standard deviation passed on, for receivers reporting zero.
