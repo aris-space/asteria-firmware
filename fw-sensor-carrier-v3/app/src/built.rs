@@ -5,7 +5,7 @@
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::needless_raw_string_hashes)]
 
-use hermes_can::messages::debug_info::BuildInformationCommon;
+use datatypes::status::BuildInformationCommon;
 
 include!(concat!(env!("OUT_DIR"), "/built.rs"));
 
@@ -23,9 +23,9 @@ pub fn can_build_information() -> BuildInformationCommon {
         commit_hash,
         is_git_dirty: GIT_DIRTY.unwrap_or(false),
         can_semver: [
-            hermes_can::VERSION_MAJOR,
-            hermes_can::VERSION_MINOR,
-            hermes_can::VERSION_PATCH,
+            dp_sensor_carrier::VERSION_MAJOR,
+            dp_sensor_carrier::VERSION_MINOR,
+            dp_sensor_carrier::VERSION_PATCH,
         ],
     }
 }

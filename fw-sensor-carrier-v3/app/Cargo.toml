@@ -19,7 +19,17 @@ libm = "0.2.11"
 embedded-utils = { path = "../../crates/embedded-utils", features = ["defmt"] }
 ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
 lsm6dso32 = { path = "../../crates/devices/lsm6dso32", features = ["defmt-03"] }
-hermes-can = { path = "../../hermes-can", version = "=0.3", features = ["defmt"] }
+can-utils = { path = "../../crates/can-utils", features = ["defmt"] }
+data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
+dp-sensor-carrier = { path = "../../data-definitions/datapoints/dp-sensor-carrier", version = "=0.3", features = [
+    "can",
+    "derive_defmt",
+] }
+dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [
+    "can",
+    "derive_defmt",
+] }
+datatypes = { path = "../../data-definitions/datatypes", features = ["derive_defmt"] }
 
 # Param storage
 sequential-storage = { version = "7.2.0", features = ["postcard"] }
@@ -80,7 +90,6 @@ defmt-rtt = { version = "1.0.0", features = ["disable-blocking-mode"] }
 # Math
 nalgebra = { version = "0.33", default-features = false, features = ["libm"] }
 
-thiserror = { version = "2.0.11", default-features = false }
 atomic_enum = { version = "0.3.0", default-features = false }
 
 panic-probe = { version = "1.0.0", features = [

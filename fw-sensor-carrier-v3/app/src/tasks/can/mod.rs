@@ -1,70 +1,22 @@
-//! CAN bus: RX task handles reset/control frames, TX tasks subscribe to
-//! derived signals and emit hermes-can frames at rate-limited cadences.
+//! CAN bus: the RX task handles resets, the TX task sends every
+//! `dp-sensor-carrier` message.
 
-use embassy_stm32::can::enums::BusError;
-use embassy_stm32::can::frame::{self, FdFrame, Header};
-use embassy_stm32::can::{CanRx, CanTx};
-use embedded_can::Id;
-use hermes_can::messages::Message;
-use hermes_can::{CanDecodeError, CanEncodeError, CanMessage, next_valid_length};
+use data_core::can::hal::CanDecode as _;
+use datatypes::status::BoardId;
+use embedded_can::StandardId;
 
 pub mod rx;
 pub mod tx;
 
-pub const THIS_BOARD_ID: hermes_can::messages::BoardId =
-    hermes_can::messages::BoardId::SensorCarrier;
-// The largest CAN FD payload.
-const MAX_FD_PAYLOAD: usize = 64;
+pub const THIS_BOARD_ID: BoardId = BoardId::SensorCarrier;
 
-#[derive(Debug, thiserror::Error, defmt::Format)]
-pub enum CanError {
-    #[error("CAN bus error")]
-    Bus(BusError),
-
-    #[error("Encoding CAN message failed")]
-    Encode(#[from] CanEncodeError),
-
-    #[error("Decoding CAN message failed")]
-    Decode(#[from] CanDecodeError),
-
-    #[error("Invalid frame or Id sent/received")]
-    Other,
-}
-
-// Local traits, because the orphan rule forbids adding these methods to
-// embassy's CAN types directly.
-pub trait CanTransmitter {
-    async fn transmit<M: CanMessage>(&mut self, msg: M) -> Result<(), CanError>;
-}
-
-pub trait CanReceiver {
-    async fn recv(&mut self) -> Result<(Message, frame::Timestamp), CanError>;
-}
-
-impl CanTransmitter for CanTx<'_> {
-    async fn transmit<M: CanMessage>(&mut self, msg: M) -> Result<(), CanError> {
-        let mut buf = [0u8; MAX_FD_PAYLOAD];
-        let (id, len) = msg.try_write_into(&mut buf)?;
-        let dlc = next_valid_length(len).ok_or(CanError::Other)?;
-        let payload = &buf[..dlc];
-        let frame = FdFrame::new(Header::new(id.into(), dlc as u8, false), payload)
-            .map_err(|_| CanError::Other)?;
-        if let Some(pushed) = self.write_fd(&frame).await {
-            defmt::warn!("CAN: dropped frame: {:?}", pushed);
-        }
-        Ok(())
+// The only messages the Sensor Carrier receives.
+data_core::can::sparse_decodable_can_message! {
+    enum ReceivedMessage {
+        ResetAll(dp_system_management::Message::ResetAll),
+        ResetSpecific(dp_system_management::Message::ResetSpecific),
     }
 }
 
-impl CanReceiver for CanRx<'_> {
-    async fn recv(&mut self) -> Result<(Message, frame::Timestamp), CanError> {
-        let envelope = self.read_fd().await.map_err(CanError::Bus)?;
-        let frame = envelope.frame;
-        let id = match frame.id() {
-            Id::Standard(id) => id,
-            Id::Extended(_) => return Err(CanError::Other),
-        };
-        let msg = Message::try_from_parts(*id, frame.data())?;
-        Ok((msg, envelope.ts))
-    }
-}
+/// The IDs of [`ReceivedMessage`], the only ones the hardware filter passes.
+pub const RECEIVED_IDS: &[StandardId] = ReceivedMessage::SUPPORTED_IDS;
