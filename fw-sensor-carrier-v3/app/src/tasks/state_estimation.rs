@@ -13,13 +13,13 @@ use asteria_sef_light::{
     DualVerticalEstimator, EstimatorError, ImuAttitudeConfig, STANDARD_GRAVITY_MPS2,
     StationaryConfig, VerticalEstimatorSelectorConfig, VerticalFilterConfig,
 };
-use defmt::{Debug2Format, warn};
+use defmt::{Debug2Format, info, warn};
 use embassy_futures::select::{Either4, select4};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant};
 
 use crate::calibration;
-use crate::sensors::{IMU_COUNT, ImuId};
+use crate::sensors::{GnssId, IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::{ACCEL_RANGE_G, GYRO_SATURATION_DPS};
 use crate::tasks::readout::mag;
@@ -149,6 +149,9 @@ struct Processor {
     reference: GeodeticReference,
     last_publish: Option<Instant>,
     last_warning: Option<Instant>,
+    msl_referenced: bool,
+    selected_imu: usize,
+    selected_gnss: usize,
 }
 
 impl Processor {
@@ -205,6 +208,9 @@ impl Processor {
             reference: launch_site(),
             last_publish: None,
             last_warning: None,
+            msl_referenced: false,
+            selected_imu: 0,
+            selected_gnss: 0,
         })
     }
 
@@ -320,9 +326,27 @@ impl Processor {
         }
         signals::STATE_ESTIMATE_WATCH.sender().send(state);
 
+        let msl_referenced = height_msl_referenced(state.position_std_ned_m[2]);
+        if msl_referenced != self.msl_referenced {
+            if msl_referenced {
+                info!("SEF: height referenced to MSL");
+            } else {
+                warn!("SEF: height no longer referenced to MSL");
+            }
+            self.msl_referenced = msl_referenced;
+        }
         let sef = &self.estimator;
-        let ts = Instant::from_micros(state.time_us);
         let selected = sef.selected_imu();
+        if selected != self.selected_imu {
+            info!("SEF: switched to {}", ImuId::ALL[selected]);
+            self.selected_imu = selected;
+        }
+        let selected_gnss = sef.selected_gnss_receiver();
+        if selected_gnss != self.selected_gnss {
+            info!("SEF: switched to {}", GnssId::ALL[selected_gnss]);
+            self.selected_gnss = selected_gnss;
+        }
+        let ts = Instant::from_micros(state.time_us);
         let scores = sef.consistency_scores();
         for id in ImuId::ALL {
             let imu = id.index();
