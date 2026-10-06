@@ -29,7 +29,7 @@ use embassy_time::{Duration, Instant};
 use crate::calibration;
 use crate::sensors::{IMU_COUNT, ImuId};
 use crate::signals;
-use crate::tasks::readout::imu::GYRO_RANGE_DPS;
+use crate::tasks::readout::imu::{ACCEL_RANGE_G, GYRO_RANGE_DPS};
 use crate::tasks::readout::mag;
 use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, SefLogSample};
 
@@ -161,7 +161,9 @@ impl Processor {
             3.0,        // initial vertical-velocity uncertainty, m/s
             [200.0; 2], // initial pressure-altitude bias uncertainty, m
             5.0,        // measurement innovation gate, standard deviations
-        )?;
+        )?
+        // A clipped sample hides an unknown part of the acceleration.
+        .with_saturated_acceleration_noise(1_000.0)?;
         let attitude = ImuAttitudeConfig::new(
             2.0, // AHRS feedback gain
             GYRO_RANGE_DPS,
@@ -171,7 +173,9 @@ impl Processor {
         .with_magnetometer(
             20.0, // magnetic rejection angle, degrees
             MAG_MAX_AGE_US,
-        )?;
+        )?
+        // Calibration scales a clipped reading by a few percent either way.
+        .with_accelerometer_saturation(0.97 * ACCEL_RANGE_G * STANDARD_GRAVITY_MPS2)?;
         let selector = VerticalEstimatorSelectorConfig {
             score_memory: 0.95,
             maximum_nis_contribution: 25.0,

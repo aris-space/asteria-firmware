@@ -51,6 +51,12 @@ pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
     GyroscopeFullScale::Dps1000 => 1000.0,
     GyroscopeFullScale::Dps2000 => 2000.0,
 };
+pub const ACCEL_RANGE_G: f32 = match ACCEL_FULL_SCALE {
+    AccelerometerFullScale::G4 => 4.0,
+    AccelerometerFullScale::G8 => 8.0,
+    AccelerometerFullScale::G16 => 16.0,
+    AccelerometerFullScale::G32 => 32.0,
+};
 
 /// Local scratch buffer for FIFO drains. Sized larger than the expected
 /// per-interrupt batch; the sensor's hardware FIFO is independent.
