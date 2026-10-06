@@ -113,8 +113,9 @@ def auto_still(t: np.ndarray, rate: np.ndarray, max_spread_dps: float = STILL_MA
 def fit_gyro(log, imu: int) -> GyroFit:
     samples = log.sensor("imu", imu)
     t, rate = samples.t.to_numpy(), sdlog.imu_board_dps(samples)
+    # A `still` mark narrows the search; any rotation inside it would bias the mean.
     ranges = intervals(log, "still")
-    still = within(t, ranges) if ranges else auto_still(t, rate)
+    still = auto_still(t, rate) & (within(t, ranges) if ranges else True)
     bias = rate[still].mean(axis=0) if still.sum() / IMU_HZ >= MIN_STILL_S else None
     return GyroFit(f"IMU_{imu}", t, rate, still, bias)
 
