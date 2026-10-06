@@ -163,7 +163,11 @@ impl Processor {
             5.0,        // measurement innovation gate, standard deviations
         )?
         // A clipped sample hides an unknown part of the acceleration.
-        .with_saturated_acceleration_noise(1_000.0)?;
+        .with_saturated_acceleration_noise(1_000.0)?
+        // In free fall the vertical acceleration is -g whatever the attitude.
+        .with_free_fall_acceleration_noise(1.0)?
+        // Fitted on tossed boards, whose barometers read the airflow.
+        .with_dynamic_pressure_fraction(2.0)?;
         let attitude = ImuAttitudeConfig::new(
             2.0, // AHRS feedback gain
             GYRO_RANGE_DPS,
