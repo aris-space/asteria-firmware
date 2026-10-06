@@ -16,9 +16,6 @@ rustflags = [
 target = "thumbv7em-none-eabihf" # Cortex-M7F (with single and double-precision FPU)
 
 [env]
-# CAN logs are silenced because most bench testing runs without a bus, where
-# every TX times out and the idle bus emits Bus(Stuff) RX errors at high rate.
-# Drop the `,fw_sensor_carrier_v3::tasks::can=off` suffix to re-enable them.
-DEFMT_LOG = "info,fw_sensor_carrier_v3::tasks::can=off"
+DEFMT_LOG = "info"
 # Room for bursts such as the boot messages before the probe catches up.
 DEFMT_RTT_BUFFER_SIZE = "16384"

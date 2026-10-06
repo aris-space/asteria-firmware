@@ -5,13 +5,13 @@
 //! interrupt moves frames from there into the hardware. With a dead bus the
 //! buffer fills and new frames are dropped.
 
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use asteria_sef_core::NavigationState;
 use data_core::can::hal::CanEncode as _;
 use datatypes::status::{SensorStatus as CanSensorStatus, StatusCommonMessage};
 use datatypes::units::{Celsius, HPa};
-use defmt::{error, trace};
+use defmt::{error, info, warn};
 use dp_sensor_carrier::{
     EnvironmentalData, ImuData, MagnetometerData, Message, OrientationData, PositionData,
     SensorCarrierStatus, SensorsHealth, VelocityData,
@@ -39,6 +39,9 @@ const BUILD_INFO_PERIOD: Duration = Duration::from_secs(5);
 // The estimator publishes with every IMU sample. Older state means it stopped.
 const STATE_MAX_AGE: Duration = Duration::from_millis(100);
 
+// Reported by the status task, so a dead bus warns once a second, not per frame.
+static DROPPED_FRAMES: AtomicU32 = AtomicU32::new(0);
+
 /// Encodes `msg` and hands it to the CAN peripheral; a full TX buffer means
 /// the bus takes no frames, and the frame is dropped.
 fn send(can: &mut BufferedFdCanSender, msg: Message) {
@@ -55,7 +58,7 @@ fn send(can: &mut BufferedFdCanSender, msg: Message) {
         return;
     };
     if can.try_write(frame).is_err() {
-        trace!("CAN: TX buffer full, frame dropped");
+        DROPPED_FRAMES.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -221,7 +224,15 @@ pub async fn status(can: BufferedFdCanSender) -> ! {
         }
     }
 
-    every(can, STATUS_PERIOD, || {
+    let mut dropping = false;
+    every(can, STATUS_PERIOD, move || {
+        let dropped = DROPPED_FRAMES.swap(0, Ordering::Relaxed);
+        if dropped > 0 {
+            warn!("CAN: bus takes no frames, dropped {}", dropped);
+        } else if dropping {
+            info!("CAN: bus takes frames again");
+        }
+        dropping = dropped > 0;
         Some(Message::BoardStatus(SensorCarrierStatus {
             common: StatusCommonMessage {
                 errors: 0,
