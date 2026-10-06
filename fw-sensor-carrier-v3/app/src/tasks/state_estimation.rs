@@ -13,10 +13,9 @@
 //! fusion.
 
 use asteria_sef_core::{
-    BarometerAided, BarometerInput, BufferedTimeHorizon, DualGnssSelector, GeodeticPosition,
-    GeodeticReference, GnssAided, GnssInput, GnssSelectorConfig, GnssSolution, ImuAided, ImuInput,
-    MagnetometerAided, MagnetometerInput, SelectorConfig, StateEstimator, TimeHorizonConfig,
-    UpdateError,
+    BarometerAided, BarometerInput, BufferedTimeHorizon, GeodeticPosition, GeodeticReference,
+    GnssAided, GnssInput, ImuAided, ImuInput, MagnetometerAided, MagnetometerInput, SelectorConfig,
+    StateEstimator, TimeHorizonConfig, UpdateError,
 };
 use asteria_sef_light::{
     DualVerticalEstimator, EstimatorError, ImuAttitudeConfig, STANDARD_GRAVITY_MPS2,
@@ -28,7 +27,7 @@ use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant};
 
 use crate::calibration;
-use crate::sensors::{GNSS_COUNT, IMU_COUNT, ImuId};
+use crate::sensors::{IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::tasks::readout::mag;
@@ -146,7 +145,6 @@ fn received<T>(message: WaitResult<T>, kind: &str) -> Option<T> {
 
 struct Processor {
     estimator: Estimator,
-    gnss: DualGnssSelector,
     reference: GeodeticReference,
     last_publish: Option<Instant>,
     last_warning: Option<Instant>,
@@ -176,19 +174,22 @@ impl Processor {
         let selection = SelectorConfig::new(
             0.0025,    // IMU score improvement required for a handover
             5_000_000, // required improvement duration and minimum time between handovers, µs
+            100_000,   // maximum IMU sample age, µs
+        )
+        .ok_or(EstimatorError::OutOfRangeInput)?;
+        let gnss_selection = SelectorConfig::new(
+            0.0,     // height accuracy improvement required for a handover, m
+            500_000, // required improvement duration and minimum time between handovers, µs
+            250_000, // maximum fix age, µs
         )
         .ok_or(EstimatorError::OutOfRangeInput)?;
         let selector = VerticalEstimatorSelectorConfig::new(
-            0.95,    // previous score weight
-            25.0,    // maximum contribution from one innovation
-            10.0,    // degraded acceleration penalty
-            100_000, // maximum IMU sample age, µs
+            0.95, // previous score weight
+            25.0, // maximum contribution from one innovation
+            10.0, // degraded acceleration penalty
             selection,
+            gnss_selection,
         )?;
-        let gnss = GnssSelectorConfig::new(
-            3,       // minimum fix tier
-            500_000, // minimum time between receiver handovers, µs
-        );
         Ok(Self {
             estimator: BufferedTimeHorizon::new(
                 DualVerticalEstimator::new(
@@ -201,7 +202,6 @@ impl Processor {
                     max_span_us: HOLDBACK_US,
                 },
             ),
-            gnss: DualGnssSelector::new(gnss),
             reference: launch_site(),
             last_publish: None,
             last_warning: None,
@@ -265,25 +265,11 @@ impl Processor {
         }
     }
 
-    /// Fuses one receiver's solution on its own, weighted by its reported
-    /// accuracy, if the receiver selector picks it.
-    fn update_gnss(&mut self, sample: GnssSample) -> Result<(), UpdateError> {
-        let mut candidates = [None; GNSS_COUNT];
-        candidates[sample.src.index()] = Some(asteria_sef_core::GnssSample {
-            measurement: sample,
-            // 3 is a usable 3D fix; the selector ignores tiers below.
-            fix_tier: match sample.pvt.fix_type {
-                _ if !sample.pvt.fix_ok => 0,
-                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning => 3,
-                ublox::GpsFix::Fix2D => 2,
-                _ => 0,
-            },
-            pdop_centi: sample.pvt.pdop_centi,
-        });
-        let Some(selected) = self.gnss.select(sample.ts.as_micros(), candidates) else {
+    /// The estimator picks which receiver to fuse.
+    fn update_gnss(&mut self, fix: GnssSample) -> Result<(), UpdateError> {
+        if !fix.pvt.has_3d_fix() {
             return Ok(());
-        };
-        let fix = selected.measurement;
+        }
         let position_ned_m = self.reference.project(GeodeticPosition {
             latitude_deg: fix.pvt.latitude_deg,
             longitude_deg: fix.pvt.longitude_deg,
@@ -353,22 +339,5 @@ impl Processor {
                 orientation_body_to_ned_wxyz: sef.orientation_body_to_ned_wxyz(imu),
             });
         }
-    }
-}
-
-impl GnssSolution for GnssSample {
-    fn is_valid(&self) -> bool {
-        let pvt = &self.pvt;
-        pvt.latitude_deg.is_finite()
-            && pvt.longitude_deg.is_finite()
-            && [
-                pvt.height_msl_m,
-                pvt.velocity_north_mps,
-                pvt.velocity_east_mps,
-                pvt.velocity_down_mps,
-                pvt.speed_accuracy_mps,
-            ]
-            .iter()
-            .all(|value| value.is_finite())
     }
 }

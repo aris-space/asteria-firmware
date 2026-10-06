@@ -48,8 +48,8 @@ FIRMWARE = dict(
     maximum_nis_contribution=25.0,
     degraded_score_penalty=10.0,
     maximum_imu_age_us=100_000,
-    gnss_minimum_fix_tier=3,
     gnss_switch_dwell_us=500_000,
+    maximum_gnss_age_us=250_000,
     maximum_aiding_delay_us=400_000,
     baro_height_std_m=1.5,
     gnss_height_std_scale=10.0,
@@ -68,11 +68,9 @@ MAX_FIELD_ERROR = 0.1
 OUTPUT_PERIOD_US = 50_000
 
 
-def fix_tier(fix_ok: bool, fix_type: int) -> int:
-    """SEF-light's convention: 3 is a usable 3D fix (u-blox 3D or GNSS+DR)."""
-    if not fix_ok:
-        return 0
-    return {3: 3, 4: 3, 2: 2}.get(fix_type, 0)
+def usable_fix(gnss: pd.DataFrame) -> pd.Series:
+    """As on the board, only 3D fixes (u-blox 3D or GNSS+DR) reach the estimator."""
+    return (gnss.fix_ok != 0) & gnss.fix_type.isin([3, 4])
 
 
 def mag_calibrated(log: sdlog.Log, index: int) -> bool:
@@ -92,6 +90,7 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
     estimator = Estimator(**settings)
 
     imu, mag, baro, gnss = log.imu, log.mag, log.baro, log.gnss
+    gnss = gnss[usable_fix(gnss)] if len(gnss) else gnss
     mag = mag[mag.mag.isin([i for i in range(2) if mag_calibrated(log, i)])]
     field_nt = pd.Series(np.linalg.norm(mag[["x_nt", "y_nt", "z_nt"]].to_numpy(), axis=1), index=mag.index)
     expected_nt = field_nt.groupby(mag.mag).transform("median")
@@ -132,8 +131,6 @@ def replay(log: sdlog.Log, **overrides) -> pd.DataFrame:
                     -s.velocity_down_mps,
                     max(s.vertical_accuracy_mm / 1000 * gnss_height_scale, GNSS_MIN_STD),
                     max(s.speed_accuracy_mps * gnss_speed_scale, GNSS_MIN_STD),
-                    fix_tier(bool(s.fix_ok), int(s.fix_type)),
-                    int(s.pdop_centi),
                 )
         except ValueError as error:
             errors[(kind, str(error))] += 1
