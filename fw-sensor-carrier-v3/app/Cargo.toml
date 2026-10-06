@@ -16,7 +16,6 @@ libm = "0.2.11"
 
 [target.'cfg(target_os = "none")'.dependencies]
 # Shared crates from the repo
-embedded-utils = { path = "../../crates/embedded-utils", features = ["defmt"] }
 ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
 lsm6dso32 = { path = "../../crates/devices/lsm6dso32", features = ["defmt-03"] }
 can-utils = { path = "../../crates/can-utils", features = ["defmt"] }
@@ -32,11 +31,10 @@ dp-system-management = { path = "../../data-definitions/datapoints/dp-system-man
 datatypes = { path = "../../data-definitions/datatypes", features = ["derive_defmt"] }
 
 # Param storage
-sequential-storage = { version = "7.2.0", features = ["postcard"] }
+sequential-storage = "7.2.0"
 embedded-storage-async = "0.4.1"
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
-postcard = { version = "1.1.3", features = ["experimental-derive"] }
-postcard-schema = { version = "0.2.5", features = ["derive"] }
+postcard = "1.1.3"
 
 # cortex-m setup
 cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
@@ -74,7 +72,6 @@ ublox = { version = "0.4.5", default-features = false }
 
 
 embedded-can = "0.4.1"
-embedded-hal = "1.0.0"
 embedded-hal-async = { version = "1.0.0", features = ["defmt-03"] }
 embedded-hal-bus = { version = "0.3.0", features = ["async", "defmt-03"] }
 embedded-io-async = { version = "0.7.0", default-features = false, features = ["defmt"] }
