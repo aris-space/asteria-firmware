@@ -9,9 +9,10 @@ dependencies = ["matplotlib", "numpy", "pandas", "scipy", "sef-light"]
 package = false
 
 [tool.uv.sources]
-# The bindings live with SEF-light in the asteria-state-estimation repo,
-# checked out next to the Asteria directory.
-sef-light = { path = "../../../../asteria-state-estimation/crates/sef-light-py" }
+# The bindings live with SEF-light in the asteria-state-estimation repo. The
+# firmware's copy of SEF-light comes from its state-estimation-trait branch,
+# which is checked out in this worktree until it is merged.
+sef-light = { path = "../../../../../.codex/worktrees/state-estimation-trait-prototype/asteria-state-estimation/crates/sef-light-py" }
 
 [tool.ruff]
 line-length = 120
