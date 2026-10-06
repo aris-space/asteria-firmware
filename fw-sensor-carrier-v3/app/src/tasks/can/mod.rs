@@ -1,25 +1,20 @@
-//! CAN bus through `can-utils`: the publishers in [`tx`] fill [`OUTPUTS`],
-//! whose broadcast tasks send each value at its message's rate; the RX task
-//! handles resets.
+//! CAN bus: the RX task handles resets, one TX task per `dp-sensor-carrier`
+//! message sends it at its rate.
 
-use can_utils::broadcast::Broadcast as _;
 use data_core::can::hal::CanDecode as _;
-use datatypes::status::{BoardId, BuildInformationCommon};
-use datatypes::units::HPa;
-use dp_sensor_carrier::{
-    EnvironmentalData, ImuData, MagnetometerData, Message, OrientationData, PositionData,
-    SensorCarrierStatus, VelocityData,
-};
-use embassy_executor::{SendSpawner, Spawner};
-use embassy_stm32::can::{Can, CanTx};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::watch::Watch;
+use datatypes::status::BoardId;
+use embassy_executor::SendSpawner;
+use embassy_stm32::can::{Can, RxFdBuf, TxFdBuf};
 use embedded_can::StandardId;
+use static_cell::StaticCell;
 
 pub mod rx;
 pub mod tx;
 
 pub const THIS_BOARD_ID: BoardId = BoardId::SensorCarrier;
+// One frame of every message, with room to spare.
+const TX_BUFFER_LEN: usize = 16;
+const RX_BUFFER_LEN: usize = 4;
 
 // The only messages the Sensor Carrier receives.
 data_core::can::sparse_decodable_can_message! {
@@ -32,107 +27,24 @@ data_core::can::sparse_decodable_can_message! {
 /// The IDs of [`ReceivedMessage`], the only ones the hardware filter passes.
 pub const RECEIVED_IDS: &[StandardId] = ReceivedMessage::SUPPORTED_IDS;
 
-// max_freq_hz is 1.2 times the message's specified rate, so jitter never
-// throttles it; min_freq_hz resends the last value when nothing new arrives.
-#[derive(can_utils::broadcast::Broadcast)]
-#[broadcast(loop_type = "can_utils::broadcast::ResponsiveLoop")]
-pub struct Outputs {
-    #[broadcast(
-        map = "Message::OrientationData(#value)",
-        min_freq_hz = 0.1,
-        max_freq_hz = 48.0
-    )]
-    pub orientation: Watch<CriticalSectionRawMutex, OrientationData, 1>,
-
-    #[broadcast(
-        map = "Message::ImuData(#value)",
-        min_freq_hz = 0.1,
-        max_freq_hz = 48.0
-    )]
-    pub inertial: Watch<CriticalSectionRawMutex, ImuData, 1>,
-
-    #[broadcast(
-        map = "Message::PressureData(#value)",
-        min_freq_hz = 0.1,
-        max_freq_hz = 48.0
-    )]
-    pub pressure: Watch<CriticalSectionRawMutex, HPa, 1>,
-
-    #[broadcast(
-        map = "Message::PositionData(#value)",
-        min_freq_hz = 0.1,
-        max_freq_hz = 24.0
-    )]
-    pub position: Watch<CriticalSectionRawMutex, PositionData, 1>,
-
-    #[broadcast(
-        map = "Message::VelocityData(#value)",
-        min_freq_hz = 0.1,
-        max_freq_hz = 24.0
-    )]
-    pub velocity: Watch<CriticalSectionRawMutex, VelocityData, 1>,
-
-    #[broadcast(
-        map = "Message::MagnetometerData(#value)",
-        min_freq_hz = 0.1,
-        max_freq_hz = 12.0
-    )]
-    pub magnetic_field: Watch<CriticalSectionRawMutex, MagnetometerData, 1>,
-
-    #[broadcast(
-        map = "Message::EnvironmentalData(#value)",
-        min_freq_hz = 0.1,
-        max_freq_hz = 1.2
-    )]
-    pub environmental: Watch<CriticalSectionRawMutex, EnvironmentalData, 1>,
-
-    #[broadcast(
-        map = "Message::BoardStatus(#value)",
-        min_freq_hz = 1.0,
-        max_freq_hz = 1.2
-    )]
-    pub status: Watch<CriticalSectionRawMutex, SensorCarrierStatus, 1>,
-
-    #[broadcast(
-        map = "Message::BuildInfo(#value)",
-        min_freq_hz = 0.2,
-        max_freq_hz = 0.24
-    )]
-    pub build_info: Watch<CriticalSectionRawMutex, BuildInformationCommon, 1>,
-}
-
-pub static OUTPUTS: Outputs = Outputs {
-    orientation: Watch::new(),
-    inertial: Watch::new(),
-    pressure: Watch::new(),
-    position: Watch::new(),
-    velocity: Watch::new(),
-    magnetic_field: Watch::new(),
-    environmental: Watch::new(),
-    status: Watch::new(),
-    build_info: Watch::new(),
-};
-
+/// Switches `can` to buffered mode and spawns the RX task and every TX task,
+/// each with its own handle to the TX buffer.
 pub fn spawn(can: Can<'static>, spawner: SendSpawner) {
-    let (can_tx, can_rx, _properties) = can.split();
-    spawner.spawn(rx::task(can_rx).expect("Failed to spawn CAN RX task"));
-    spawner.spawn(start_broadcasting(can_tx).expect("Failed to spawn CAN broadcast start task"));
-    spawner.spawn(tx::navigation().expect("Failed to spawn CAN navigation publisher"));
-    spawner.spawn(tx::pressure().expect("Failed to spawn CAN pressure publisher"));
-    spawner.spawn(tx::magnetic_field().expect("Failed to spawn CAN magnetic field publisher"));
-    spawner.spawn(tx::environmental().expect("Failed to spawn CAN environmental publisher"));
-    spawner.spawn(tx::status().expect("Failed to spawn CAN status publisher"));
-    spawner.spawn(tx::build_info().expect("Failed to spawn CAN build info publisher"));
-}
-
-/// Starts the broadcast tasks on this executor; `start_broadcasting` takes a
-/// `Spawner`, which only a task running on the executor can get.
-#[embassy_executor::task]
-async fn start_broadcasting(can_tx: CanTx<'static>) {
-    // SAFETY: this runs in an embassy task, polled with the executor's own
-    // context; embassy names an InterruptExecutor's Spawner as this call's use.
-    let spawner = unsafe { Spawner::for_current_executor() }.await;
-    OUTPUTS
-        .start_broadcasting(spawner, can_utils::setup::make_multiplexable(can_tx))
-        .expect("Failed to start CAN broadcasting");
+    static TX_BUFFER: StaticCell<TxFdBuf<TX_BUFFER_LEN>> = StaticCell::new();
+    static RX_BUFFER: StaticCell<RxFdBuf<RX_BUFFER_LEN>> = StaticCell::new();
+    let can = can.buffered_fd(
+        TX_BUFFER.init(TxFdBuf::new()),
+        RX_BUFFER.init(RxFdBuf::new()),
+    );
+    let tx = can.writer();
+    spawner.spawn(rx::task(can.reader()).expect("Failed to spawn CAN RX task"));
+    spawner.spawn(tx::orientation(tx.clone()).expect("Failed to spawn CAN orientation task"));
+    spawner.spawn(tx::imu(tx.clone()).expect("Failed to spawn CAN IMU task"));
+    spawner.spawn(tx::position(tx.clone()).expect("Failed to spawn CAN position task"));
+    spawner.spawn(tx::velocity(tx.clone()).expect("Failed to spawn CAN velocity task"));
+    spawner.spawn(tx::pressure(tx.clone()).expect("Failed to spawn CAN pressure task"));
+    spawner.spawn(tx::magnetometer(tx.clone()).expect("Failed to spawn CAN magnetometer task"));
+    spawner.spawn(tx::environmental(tx.clone()).expect("Failed to spawn CAN environmental task"));
+    spawner.spawn(tx::status(tx.clone()).expect("Failed to spawn CAN status task"));
+    spawner.spawn(tx::build_info(tx).expect("Failed to spawn CAN build info task"));
 }

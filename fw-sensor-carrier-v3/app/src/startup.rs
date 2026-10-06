@@ -142,6 +142,7 @@ pub async fn spawn_tasks(
     level_1_spawner
         .spawn(tasks::state_estimation::task().expect("Failed to spawn state estimation task"));
 
+    level_1_spawner.spawn(tasks::selection::task().expect("Failed to spawn sensor selection task"));
     tasks::can::spawn(board.can, level_1_spawner);
 
     thread_spawner.spawn(tasks::state_report::task().expect("Failed to spawn state report task"));
