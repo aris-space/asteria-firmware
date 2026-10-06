@@ -19,7 +19,7 @@ use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant};
 
 use crate::calibration;
-use crate::sensors::{IMU_COUNT, ImuId};
+use crate::sensors::{GnssId, IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::{ACCEL_RANGE_G, GYRO_SATURATION_DPS};
 use crate::tasks::readout::mag;
@@ -151,6 +151,7 @@ struct Processor {
     last_warning: Option<Instant>,
     msl_referenced: bool,
     selected_imu: usize,
+    selected_gnss: usize,
 }
 
 impl Processor {
@@ -209,6 +210,7 @@ impl Processor {
             last_warning: None,
             msl_referenced: false,
             selected_imu: 0,
+            selected_gnss: 0,
         })
     }
 
@@ -338,6 +340,11 @@ impl Processor {
         if selected != self.selected_imu {
             info!("SEF: switched to {}", ImuId::ALL[selected]);
             self.selected_imu = selected;
+        }
+        let selected_gnss = sef.selected_gnss_receiver();
+        if selected_gnss != self.selected_gnss {
+            info!("SEF: switched to {}", GnssId::ALL[selected_gnss]);
+            self.selected_gnss = selected_gnss;
         }
         let ts = Instant::from_micros(state.time_us);
         let scores = sef.consistency_scores();
