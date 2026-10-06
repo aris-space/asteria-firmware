@@ -51,6 +51,9 @@ pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
     GyroscopeFullScale::Dps1000 => 1000.0,
     GyroscopeFullScale::Dps2000 => 2000.0,
 };
+// The datasheet sensitivity (70 mdps/LSB at ±2000 dps) reads past the nominal range; the
+// gyroscope only clips at full scale.
+pub const GYRO_SATURATION_DPS: f32 = i16::MAX as f32 * GYRO_RANGE_DPS * 35e-6;
 pub const ACCEL_RANGE_G: f32 = match ACCEL_FULL_SCALE {
     AccelerometerFullScale::G4 => 4.0,
     AccelerometerFullScale::G8 => 8.0,

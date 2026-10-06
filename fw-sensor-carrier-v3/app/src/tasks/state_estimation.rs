@@ -29,7 +29,7 @@ use embassy_time::{Duration, Instant};
 use crate::calibration;
 use crate::sensors::{IMU_COUNT, ImuId};
 use crate::signals;
-use crate::tasks::readout::imu::{ACCEL_RANGE_G, GYRO_RANGE_DPS};
+use crate::tasks::readout::imu::{ACCEL_RANGE_G, GYRO_SATURATION_DPS};
 use crate::tasks::readout::mag;
 use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, SefLogSample};
 
@@ -170,7 +170,8 @@ impl Processor {
         .with_dynamic_pressure_fraction(2.0)?;
         let attitude = ImuAttitudeConfig::new(
             2.0, // AHRS feedback gain
-            GYRO_RANGE_DPS,
+            // A reading beyond this resets the attitude.
+            0.99 * GYRO_SATURATION_DPS,
             10.0, // accelerometer rejection angle, degrees
             300,  // rejected samples before acceleration recovery
         )?
