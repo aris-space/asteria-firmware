@@ -29,6 +29,9 @@ pub struct ImuAttitudeConfig {
     acceleration_rejection_deg: f32,
     /// Magnetometer rejection threshold in degrees. Zero disables rejection.
     magnetic_rejection_deg: f32,
+    /// Oldest magnetometer sample still used for attitude, in microseconds. Zero disables
+    /// magnetometer aiding.
+    maximum_magnetometer_age_us: u64,
     /// Consecutive rejected samples before acceleration recovery.
     ///
     /// In `fusion-ahrs`, zero disables both acceleration rejection and recovery.
@@ -62,17 +65,34 @@ impl ImuAttitudeConfig {
             gyroscope_range_deg_s,
             acceleration_rejection_deg,
             magnetic_rejection_deg: 0.0,
+            maximum_magnetometer_age_us: 0,
             recovery_trigger_period,
         })
     }
 
-    /// Enables magnetic disturbance rejection when a calibrated magnetometer is supplied.
-    pub fn with_magnetic_rejection(mut self, threshold_deg: f32) -> Result<Self, EstimatorError> {
-        validate_finite(&[threshold_deg])?;
-        if !(0.0..=90.0).contains(&threshold_deg) {
+    /// Enables calibrated magnetometer aiding.
+    ///
+    /// Each magnetometer sample is held and used for every IMU sample until a newer one arrives
+    /// or it is older than `maximum_age_us`, after which attitude continues without it. If your
+    /// magnetometer runs at a lower rate, you can raise `maximum_age_us` to a few of its sample
+    /// periods. `rejection_deg` is the magnetic disturbance rejection threshold; zero disables
+    /// rejection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a non-finite threshold, a threshold outside `0..=90` degrees, or a
+    /// zero maximum age.
+    pub fn with_magnetometer(
+        mut self,
+        rejection_deg: f32,
+        maximum_age_us: u64,
+    ) -> Result<Self, EstimatorError> {
+        validate_finite(&[rejection_deg])?;
+        if !(0.0..=90.0).contains(&rejection_deg) || maximum_age_us == 0 {
             return Err(EstimatorError::OutOfRangeInput);
         }
-        self.magnetic_rejection_deg = threshold_deg;
+        self.magnetic_rejection_deg = rejection_deg;
+        self.maximum_magnetometer_age_us = maximum_age_us;
         Ok(self)
     }
 }
@@ -136,6 +156,7 @@ impl ImuAttitudeStatus {
 /// The adapter uses the project's north-east-down Earth frame. Inputs must already be calibrated.
 pub struct ImuVerticalizer {
     ahrs: Ahrs,
+    maximum_magnetometer_age_us: u64,
 }
 
 impl ImuVerticalizer {
@@ -151,7 +172,14 @@ impl ImuVerticalizer {
                 magnetic_rejection: config.magnetic_rejection_deg,
                 recovery_trigger_period: config.recovery_trigger_period,
             }),
+            maximum_magnetometer_age_us: config.maximum_magnetometer_age_us,
         }
+    }
+
+    /// Returns the oldest magnetometer sample age still used for attitude, in microseconds.
+    #[must_use]
+    pub const fn maximum_magnetometer_age_us(&self) -> u64 {
+        self.maximum_magnetometer_age_us
     }
 
     /// Sets the attitude from the gravity in one stationary sample, with zero heading. Without

@@ -10,6 +10,8 @@ use asteria_state_estimation::{
     MagnetometerInput, StateEstimator, UpdateError,
 };
 
+const MAGNETOMETER_AGE_US: u64 = 250_000;
+
 const STATIONARY_IMU: ImuMeasurement = ImuMeasurement {
     acceleration_body_mps2: [0.0, 0.0, -asteria_sef_light::STANDARD_GRAVITY_MPS2],
     angular_rate_body_rad_s: [0.0, 0.0, 0.0],
@@ -23,7 +25,8 @@ fn filter_config() -> VerticalFilterConfig {
 fn estimator<const HISTORY: usize>(
     maximum_aiding_delay_us: u64,
 ) -> Result<DualVerticalEstimator<HISTORY>, EstimatorError> {
-    let attitude = ImuAttitudeConfig::new(0.5, 2_000.0, 20.0, 100)?;
+    let attitude = ImuAttitudeConfig::new(0.5, 2_000.0, 20.0, 100)?
+        .with_magnetometer(0.0, MAGNETOMETER_AGE_US)?;
     let selection = SelectorConfig::new(1.0, 0).ok_or(EstimatorError::OutOfRangeInput)?;
     let selector = VerticalEstimatorSelectorConfig::new(0.9, 25.0, 10.0, 20_000, selection)?;
     DualVerticalEstimator::new(
@@ -272,15 +275,41 @@ fn calibrated_magnetic_aiding_reaches_only_its_imu_and_expires() {
     assert!(!estimator.imu_status(IMU_0).magnetometer_ignored);
     assert!(estimator.imu_status(IMU_1).magnetometer_ignored);
 
-    update_both(&mut estimator, 300_001);
+    update_both(&mut estimator, 15_000 + MAGNETOMETER_AGE_US + 1);
     assert!(estimator.imu_status(IMU_0).magnetometer_ignored);
+}
+
+#[test]
+fn magnetometer_aiding_is_off_without_magnetometer_config() {
+    let attitude = ImuAttitudeConfig::new(0.5, 2_000.0, 20.0, 100).unwrap();
+    let selection = SelectorConfig::new(1.0, 0).unwrap();
+    let selector =
+        VerticalEstimatorSelectorConfig::new(0.9, 25.0, 10.0, 20_000, selection).unwrap();
+    let mut estimator =
+        DualVerticalEstimator::<32>::new(filter_config(), [attitude, attitude], selector, 100_000)
+            .unwrap();
+    update_both(&mut estimator, 10_000);
+    estimator
+        .update_magnetometer(IMU_0, 20_000, [25_000.0, 0.0, 15_000.0])
+        .unwrap();
+    update_both(&mut estimator, 20_000);
+    assert!(estimator.imu_status(IMU_0).magnetometer_ignored);
+}
+
+#[test]
+fn magnetometer_config_rejects_zero_age() {
+    let attitude = ImuAttitudeConfig::new(0.5, 2_000.0, 20.0, 100).unwrap();
+    assert!(matches!(
+        attitude.with_magnetometer(20.0, 0),
+        Err(EstimatorError::OutOfRangeInput)
+    ));
 }
 
 #[test]
 fn magnetic_aiding_limits_stationary_yaw_drift() {
     let config = ImuAttitudeConfig::new(0.5, 2_000.0, 20.0, 100)
         .unwrap()
-        .with_magnetic_rejection(20.0)
+        .with_magnetometer(20.0, MAGNETOMETER_AGE_US)
         .unwrap();
     let mut aided = ImuVerticalizer::new(config);
     let mut unaided = ImuVerticalizer::new(config);

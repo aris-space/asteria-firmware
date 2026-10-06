@@ -20,7 +20,7 @@ const SAMPLE_HZ: u32 = match MAG_ODR {
     MagOutputDataRate::Hz50 => 50,
     MagOutputDataRate::Hz100 => 100,
 };
-const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
+pub const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 type BusDevice = I2cDevice<'static, CriticalSectionRawMutex, SharedI2c>;
 pub type Sensor =

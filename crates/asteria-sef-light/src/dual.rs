@@ -12,8 +12,6 @@ use asteria_state_estimation::{
 };
 use heapless::Deque;
 
-const MAX_MAGNETOMETER_AGE_US: u64 = 250_000;
-
 #[derive(Clone, Copy)]
 struct ImuSample {
     time_us: u64,
@@ -312,10 +310,14 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
             .filter(|elapsed_us| *elapsed_us > 0)
             .ok_or(EstimatorError::NonMonotonicImuTimestamp)?;
         let dt_s = core::time::Duration::from_micros(elapsed_us).as_secs_f32();
+        let maximum_magnetometer_age_us =
+            self.imu_verticalizers[index].maximum_magnetometer_age_us();
         let magnetic_field = self.magnetic_field[index].and_then(|(time_us, field)| {
             sample_time_us
                 .checked_sub(time_us)
-                .filter(|age| *age <= MAX_MAGNETOMETER_AGE_US)
+                .filter(|age| {
+                    maximum_magnetometer_age_us > 0 && *age <= maximum_magnetometer_age_us
+                })
                 .map(|_| field)
         });
         let acceleration_up_mps2 = self.imu_verticalizers[index].update_with_magnetometer(
@@ -343,7 +345,8 @@ impl<const FILTER_HISTORY_CAPACITY: usize> DualVerticalEstimator<FILTER_HISTORY_
     }
 
     /// Supplies a calibrated body-frame magnetic field to one IMU attitude chain.
-    /// The field is held for at most 250 ms, then AHRS continues without it.
+    /// The field is held for at most the chain's configured maximum magnetometer age, then AHRS
+    /// continues without it.
     /// Magnetic input changes attitude only; it does not insert a vertical-filter event.
     pub fn update_magnetometer(
         &mut self,

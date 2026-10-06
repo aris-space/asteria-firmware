@@ -41,6 +41,7 @@ FIRMWARE = dict(
     acceleration_rejection_deg=10.0,
     recovery_trigger_period=300,
     magnetic_rejection_deg=20.0,
+    maximum_magnetometer_age_us=250_000,
     switch_hysteresis=0.0025,
     switch_dwell_us=5_000_000,
     score_memory=0.95,
