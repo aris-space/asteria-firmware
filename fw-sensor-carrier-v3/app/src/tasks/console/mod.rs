@@ -26,7 +26,7 @@ use core::str::SplitAsciiWhitespace;
 use embassy_executor::Spawner;
 use embassy_time::Instant;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
-use embassy_usb::{Builder, UsbDevice};
+use embassy_usb::{Builder, Handler, UsbDevice};
 use heapless::String;
 use noline::builder::EditorBuilder;
 use static_cell::StaticCell;
@@ -38,6 +38,42 @@ use crate::storage::Storage;
 use crate::types::Mark;
 
 type Class = CdcAcmClass<'static, UsbDriver>;
+
+#[derive(Default)]
+struct UsbSoundHandler {
+    configured: bool,
+    active: bool,
+}
+
+impl UsbSoundHandler {
+    fn set_active(&mut self, active: bool) {
+        if self.active != active {
+            self.active = active;
+            signals::USB_LINK_SIGNAL.signal(active);
+        }
+    }
+}
+
+impl Handler for UsbSoundHandler {
+    fn reset(&mut self) {
+        self.configured = false;
+    }
+
+    fn configured(&mut self, configured: bool) {
+        self.configured = configured;
+        if configured {
+            self.set_active(true);
+        }
+    }
+
+    fn suspended(&mut self, suspended: bool) {
+        if suspended {
+            self.set_active(false);
+        } else if self.configured {
+            self.set_active(true);
+        }
+    }
+}
 
 const DESCRIPTOR_LEN: usize = 256;
 // Endpoint 0's packet size.
@@ -67,6 +103,7 @@ pub fn spawn(driver: UsbDriver, storage: &'static Storage, spawner: Spawner) {
     static MSOS_DESC: StaticCell<[u8; 0]> = StaticCell::new();
     static CONTROL_BUF: StaticCell<[u8; CONTROL_BUF_LEN]> = StaticCell::new();
     static STATE: StaticCell<State> = StaticCell::new();
+    static USB_SOUND_HANDLER: StaticCell<UsbSoundHandler> = StaticCell::new();
 
     let mut config = embassy_usb::Config::new(0xc0de, 0xca10);
     config.manufacturer = Some("Asteria");
@@ -81,6 +118,7 @@ pub fn spawn(driver: UsbDriver, storage: &'static Storage, spawner: Spawner) {
         MSOS_DESC.init([]),
         CONTROL_BUF.init([0; CONTROL_BUF_LEN]),
     );
+    builder.handler(USB_SOUND_HANDLER.init(UsbSoundHandler::default()));
     let class = CdcAcmClass::new(&mut builder, STATE.init(State::new()), PACKET_SIZE as u16);
     let usb = builder.build();
 

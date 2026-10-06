@@ -1,6 +1,5 @@
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::exti::ExtiInput;
-use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
 
@@ -11,10 +10,10 @@ use crate::sensors::{
     MAG_BUS_2,
 };
 
-use crate::{calibration, resources, storage, tasks};
+use crate::{calibration, resources, signals, storage, tasks};
 
 pub struct PreparedBoard {
-    pub yellow_led: Output<'static>,
+    pub buzzer: resources::buzzer::BuzzerPwm,
     pub sensors: SensorResources,
     pub can: embassy_stm32::can::Can<'static>,
     pub storage: &'static storage::Storage,
@@ -31,7 +30,17 @@ pub struct SensorResources {
     pub bus2: SharedI2cBus,
 }
 
-pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
+pub async fn prepare(
+    resources: resources::AssignedResources,
+    level_1_spawner: SendSpawner,
+) -> PreparedBoard {
+    let leds = resources::leds::BoardLeds::setup(
+        resources.green_led,
+        resources.yellow_led,
+        resources.red_led,
+    );
+    level_1_spawner.spawn(tasks::leds::task(leds).expect("Failed to spawn LED task"));
+
     let flash = resources.flash.setup();
     let storage = storage::Storage::init(flash);
     calibration::load(storage).await;
@@ -42,7 +51,7 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let imu1 = resources.imu1.setup();
     let imu2 = resources.imu2.setup();
 
-    let yellow_led = resources.yellow_led.setup();
+    let buzzer = resources.buzzer.setup();
 
     let bus1 = resources.bus1.setup();
     let bus2 = resources.bus2.setup();
@@ -56,7 +65,7 @@ pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
         storage,
         usb,
         sd_card: resources.sd_card,
-        yellow_led,
+        buzzer,
         sensors: SensorResources {
             gps1_rx,
             gps2_rx,
@@ -74,8 +83,7 @@ pub async fn spawn_tasks(
     level_0_spawner: SendSpawner,
     level_1_spawner: SendSpawner,
 ) {
-    level_0_spawner
-        .spawn(tasks::blinky::task(board.yellow_led).expect("Failed to spawn blinky task"));
+    level_1_spawner.spawn(tasks::buzzer::task(board.buzzer).expect("Failed to spawn buzzer task"));
 
     let (sd, detect, power) = board.sd_card.setup();
     thread_spawner.spawn(
@@ -140,4 +148,5 @@ pub async fn spawn_tasks(
 
     thread_spawner.spawn(tasks::state_report::task().expect("Failed to spawn state report task"));
     tasks::console::spawn(board.usb, board.storage, thread_spawner);
+    signals::STARTUP_COMPLETE.signal(());
 }
