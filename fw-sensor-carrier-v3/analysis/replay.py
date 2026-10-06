@@ -31,7 +31,7 @@ import sdlog
 FIRMWARE = dict(
     acceleration_noise_std_mps2=10.0,
     degraded_acceleration_noise_std_mps2=20.0,
-    barometer_bias_walk_std_m_per_sqrt_s=[0.02, 0.02],
+    barometer_bias_walk_std_m_per_sqrt_s=[1.0, 1.0],
     initial_height_std_m=1_000.0,
     initial_velocity_std_mps=3.0,
     initial_barometer_bias_std_m=[200.0, 200.0],

@@ -155,7 +155,7 @@ impl Processor {
         let filter = VerticalFilterConfig::new(
             10.0,       // healthy acceleration noise, m/s² per sample
             20.0,       // degraded acceleration noise, m/s² per sample
-            [0.02; 2],  // barometer-bias random walk, m/√s
+            [1.0; 2],   // barometer-bias random walk, m/√s
             1_000.0,    // initial height uncertainty, m; GNSS references it to MSL
             3.0,        // initial vertical-velocity uncertainty, m/s
             [200.0; 2], // initial pressure-altitude bias uncertainty, m
