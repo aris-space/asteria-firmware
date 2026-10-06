@@ -5,7 +5,7 @@
 //! its history, and IMU samples arrive in FIFO batches that are already up to
 //! ~15 ms old.
 //! Every processed sample publishes the estimator's
-//! [`NavigationState`](asteria_state_estimation::NavigationState) to
+//! [`NavigationState`](asteria_sef_core::NavigationState) to
 //! [`signals::STATE_ESTIMATE_WATCH`]; every [`LOG_PERIOD`] each SEF-light chain
 //! is also logged to SD.
 //!
@@ -15,14 +15,14 @@
 
 use core::cmp::Ordering;
 
-use asteria_sef_light::{
-    DualVerticalEstimator, EstimatorError, ImuAttitudeConfig, STANDARD_GRAVITY_MPS2,
-    VerticalEstimatorSelectorConfig, VerticalFilterConfig,
-};
-use asteria_state_estimation::{
+use asteria_sef_core::{
     BarometerAided, BarometerInput, DualGnssSelector, GeodeticPosition, GeodeticReference,
     GnssAided, GnssInput, GnssSelectorConfig, GnssSolution, ImuAided, ImuInput, MagnetometerAided,
     MagnetometerInput, SelectorConfig, StateEstimator, UpdateError,
+};
+use asteria_sef_light::{
+    DualVerticalEstimator, EstimatorError, ImuAttitudeConfig, STANDARD_GRAVITY_MPS2,
+    VerticalEstimatorSelectorConfig, VerticalFilterConfig,
 };
 use defmt::{Debug2Format, warn};
 use embassy_futures::select::{Either, Either4, select, select4};
@@ -368,7 +368,7 @@ impl Processor {
     /// accuracy, if the receiver selector picks it.
     fn update_gnss(&mut self, sample: GnssSample) -> Result<(), UpdateError> {
         let mut candidates = [None; GNSS_COUNT];
-        candidates[sample.src.index()] = Some(asteria_state_estimation::GnssSample {
+        candidates[sample.src.index()] = Some(asteria_sef_core::GnssSample {
             measurement: sample,
             // 3 is a usable 3D fix; the selector ignores tiers below.
             fix_tier: match sample.pvt.fix_type {

@@ -174,7 +174,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "scipy" },
-    { name = "sef-light", directory = "../../asteria-state-estimation/crates/sef-light-py" },
+    { name = "sef-light", directory = "../../asteria-state-estimation/sef-light-py" },
 ]
 
 [[package]]
@@ -658,7 +658,7 @@ wheels = [
 [[package]]
 name = "sef-light"
 version = "0.1.0"
-source = { directory = "../../asteria-state-estimation/crates/sef-light-py" }
+source = { directory = "../../asteria-state-estimation/sef-light-py" }
 
 [[package]]
 name = "six"

@@ -9,8 +9,9 @@ dependencies = ["matplotlib", "numpy", "pandas", "scipy", "sef-light"]
 package = false
 
 [tool.uv.sources]
-# The bindings live with SEF-light in the asteria-state-estimation submodule.
-sef-light = { path = "../../asteria-state-estimation/crates/sef-light-py" }
+# The bindings sit next to SEF-light in the asteria-state-estimation
+# submodule, untracked there and not published.
+sef-light = { path = "../../asteria-state-estimation/sef-light-py" }
 
 [tool.ruff]
 line-length = 120
