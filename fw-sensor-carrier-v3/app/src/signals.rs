@@ -1,4 +1,4 @@
-use asteria_state_estimation::NavigationState;
+use asteria_sef_core::NavigationState;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::signal::Signal;

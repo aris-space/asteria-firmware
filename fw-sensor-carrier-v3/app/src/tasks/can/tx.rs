@@ -6,7 +6,7 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use asteria_state_estimation::NavigationState;
+use asteria_sef_core::NavigationState;
 use can_utils::rxtx::{TxError, TypedCanSender};
 use datatypes::status::{SensorStatus as CanSensorStatus, StatusCommonMessage};
 use datatypes::units::{Celsius, HPa};
