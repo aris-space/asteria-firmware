@@ -20,7 +20,7 @@ pub async fn recover(bus: SharedI2cBus) {
 
 fn config() -> i2c::Config {
     let mut config = i2c::Config::default();
-    config.frequency = embassy_stm32::time::khz(100);
+    config.frequency = embassy_stm32::time::khz(400);
     // embassy's async I2C busy-spins (no yield) while waiting for the bus to go
     // idle, so a stuck/shorted bus blocks the shared executor for the full timeout.
     // Keep this just above a real transaction (well under 1 ms at 100 kHz) so one
