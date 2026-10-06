@@ -1,14 +1,13 @@
 //! Feeds the calibrated sensor streams into SEF-light and publishes its estimate.
 //!
-//! IMU samples arrive in FIFO batches up to ~15 ms old, so readings wait in a
-//! [`BufferedTimeHorizon`] and reach SEF-light in time order; anything out of
-//! order makes SEF-light replay its history. Positions are NED metres from
-//! [`launch_site`].
+//! SEF-light fuses every reading [`FUSION_DELAY_US`] behind the newest IMU
+//! sample, in time order, and carries the state forward to it with the IMU.
+//! Positions are NED metres from [`launch_site`].
 
 use asteria_sef_core::{
-    BarometerAided, BarometerInput, BufferedTimeHorizon, GeodeticPosition, GeodeticReference,
-    GnssAided, GnssInput, ImuAided, ImuInput, MagnetometerAided, MagnetometerInput, SelectorConfig,
-    StateEstimator, TimeHorizonConfig, UpdateError,
+    BarometerAided, BarometerInput, GeodeticPosition, GeodeticReference, GnssAided, GnssInput,
+    ImuAided, ImuInput, MagnetometerAided, MagnetometerInput, SelectorConfig, StateEstimator,
+    UpdateError,
 };
 use asteria_sef_light::{
     DualVerticalEstimator, EstimatorError, ImuAttitudeConfig, STANDARD_GRAVITY_MPS2,
@@ -30,11 +29,9 @@ use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, SefLogSample};
 const LAUNCH_SITE_LATITUDE_DEG: f64 = 47.405_336;
 const LAUNCH_SITE_LONGITUDE_DEG: f64 = 8.631_050;
 
-const HOLDBACK_US: u64 = 35_000;
-const PENDING_CAPACITY: usize = 128; // ~60 IMU samples per holdback
-const MAX_AIDING_DELAY_US: u64 = 400_000;
-const HISTORY_CAPACITY: usize = 768; // ~667 IMU samples per aiding delay
-// Each publish runs a copy of the estimator through the held readings.
+// GNSS fixes reach the estimator up to ~145 ms after their time of validity.
+const FUSION_DELAY_US: u64 = 200_000;
+const PENDING_CAPACITY: usize = 512; // ~350 readings per fusion delay
 const PUBLISH_PERIOD: Duration = Duration::from_millis(50);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const WARNING_PERIOD: Duration = Duration::from_secs(1);
@@ -91,7 +88,7 @@ pub fn height_msl_referenced(height_std_m: f32) -> bool {
     height_std_m < MSL_REFERENCED_HEIGHT_STD_M
 }
 
-type Estimator = BufferedTimeHorizon<DualVerticalEstimator<HISTORY_CAPACITY>, PENDING_CAPACITY>;
+type Estimator = DualVerticalEstimator<PENDING_CAPACITY>;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
@@ -198,18 +195,13 @@ impl Processor {
             velocity_std_mps: 0.05,
         };
         Ok(Self {
-            estimator: BufferedTimeHorizon::new(
-                DualVerticalEstimator::new(
-                    filter,
-                    [attitude; IMU_COUNT],
-                    selector,
-                    stationary,
-                    MAX_AIDING_DELAY_US,
-                )?,
-                TimeHorizonConfig {
-                    max_span_us: HOLDBACK_US,
-                },
-            ),
+            estimator: DualVerticalEstimator::new(
+                filter,
+                [attitude; IMU_COUNT],
+                selector,
+                stationary,
+                FUSION_DELAY_US,
+            )?,
             reference: launch_site(),
             last_publish: None,
             last_warning: None,
@@ -218,14 +210,17 @@ impl Processor {
 
     fn update_imu(&mut self, sample: ImuSample) -> Result<(), UpdateError> {
         const DEG_TO_RAD: f32 = core::f32::consts::PI / 180.0;
-        self.estimator.update_imu(ImuInput {
-            timestamp_us: sample.ts.as_micros(),
-            sensor_index: sample.src.index(),
-            acceleration_body_mps2: [sample.accel.x, sample.accel.y, sample.accel.z]
-                .map(|g| g * STANDARD_GRAVITY_MPS2),
-            angular_rate_body_rad_s: [sample.gyro.x, sample.gyro.y, sample.gyro.z]
-                .map(|dps| dps * DEG_TO_RAD),
-        })
+        ImuAided::update_imu(
+            &mut self.estimator,
+            ImuInput {
+                timestamp_us: sample.ts.as_micros(),
+                sensor_index: sample.src.index(),
+                acceleration_body_mps2: [sample.accel.x, sample.accel.y, sample.accel.z]
+                    .map(|g| g * STANDARD_GRAVITY_MPS2),
+                angular_rate_body_rad_s: [sample.gyro.x, sample.gyro.y, sample.gyro.z]
+                    .map(|dps| dps * DEG_TO_RAD),
+            },
+        )
     }
 
     fn update_mag(&mut self, sample: MagSample) -> Result<(), UpdateError> {
@@ -239,13 +234,16 @@ impl Processor {
             return Ok(());
         }
         // Each magnetometer aids the attitude chain of the IMU with the same index.
-        self.estimator.update_magnetometer(MagnetometerInput {
-            timestamp_us: sample.ts.as_micros(),
-            sensor_index: sample.src.index(),
-            field_body: field,
-            reference_field_ned: LOCAL_MAGNETIC_FIELD_NED_NT,
-            direction_noise_std: MAG_DIRECTION_STD,
-        })
+        MagnetometerAided::update_magnetometer(
+            &mut self.estimator,
+            MagnetometerInput {
+                timestamp_us: sample.ts.as_micros(),
+                sensor_index: sample.src.index(),
+                field_body: field,
+                reference_field_ned: LOCAL_MAGNETIC_FIELD_NED_NT,
+                direction_noise_std: MAG_DIRECTION_STD,
+            },
+        )
     }
 
     fn update_baro(&mut self, sample: BaroSample) -> Result<(), UpdateError> {
@@ -322,9 +320,8 @@ impl Processor {
         }
         signals::STATE_ESTIMATE_WATCH.sender().send(state);
 
-        // The chains as fused, without the held readings.
-        let sef = self.estimator.inner();
-        let ts = Instant::from_micros(sef.navigation_state().time_us);
+        let sef = &self.estimator;
+        let ts = Instant::from_micros(state.time_us);
         let selected = sef.selected_imu();
         let scores = sef.consistency_scores();
         for id in ImuId::ALL {

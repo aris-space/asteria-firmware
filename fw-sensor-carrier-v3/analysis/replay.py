@@ -1,6 +1,6 @@
 """Runs a log through SEF-light with the firmware's settings, to tune the
-estimator offline. Readings go in time order, so unlike on the board nothing
-arrives late.
+estimator offline. Readings go in time order; the board fuses them in time
+order too, so the replay matches it.
 
     states = replay.replay(sdlog.read("/Volumes/SD"), acceleration_noise_std_mps2=5.0)
     uv run replay.py /Volumes/SD [--set acceleration_noise_std_mps2=5.0 ...] [--cal cal.txt]
@@ -49,7 +49,7 @@ FIRMWARE = dict(
     stationary_minimum_duration_us=500_000,
     stationary_update_interval_us=50_000,
     stationary_velocity_std_mps=0.05,
-    maximum_aiding_delay_us=400_000,
+    fusion_delay_us=200_000,
     baro_height_std_m=1.5,
     gnss_height_std_scale=10.0,
     gnss_speed_std_scale=10.0,
