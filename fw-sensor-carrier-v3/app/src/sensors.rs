@@ -91,7 +91,7 @@ define_sensor_family! {
 define_sensor_family! {
     pub struct GnssId;
     count: GNSS_COUNT;
-    ids: [GNSS_0 = 0, GNSS_1 = 1];
+    ids: [GNSS_1 = 0, GNSS_2 = 1];
 }
 
 define_sensor_family! {

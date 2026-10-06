@@ -23,8 +23,8 @@ SENSORS = {
     "MAG_BUS_2": ("mag", 1),
     "BARO_BUS_1": ("baro", 0),
     "BARO_BUS_2": ("baro", 1),
-    "GNSS_0": ("gnss", 0),
-    "GNSS_1": ("gnss", 1),
+    "GNSS_1": ("gnss", 0),
+    "GNSS_2": ("gnss", 1),
 }
 LINE = re.compile(r"^\s*cal set (\S+)((?:\s+\S+=\S+)+)\s*$")
 

@@ -234,7 +234,7 @@ def vertical(log: Log) -> Model | None:
             blocks.append(Rows(*spline.basis(t, 1), -gnss.velocity_down_mps.to_numpy(), velocity_sigma))
         return blocks
 
-    names = [f"BARO_BUS_{i + 1}" for i, *_ in baros] + [f"GNSS_{i}" for i, _ in gnsss]
+    names = [f"BARO_BUS_{i + 1}" for i, *_ in baros] + [f"GNSS_{i + 1}" for i, _ in gnsss]
     return Model(names, spline.count + 1 + len(baros) - first_free, rows)
 
 

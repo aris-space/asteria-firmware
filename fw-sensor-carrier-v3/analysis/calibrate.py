@@ -239,7 +239,7 @@ def print_lines(name: str, gyros, accels, mags, estimates) -> None:
             print(
                 f"cal set {fit.sensor} name={name} latency_us={us} hard_nt={floats(fit.hard_iron * sdlog.MAG_NT_PER_LSB, 1)} soft={floats(fit.soft_iron, 5)} field_nt={fit.field_strength * sdlog.MAG_NT_PER_LSB:.0f}"
             )
-    for sensor in ["BARO_BUS_1", "BARO_BUS_2", "GNSS_0", "GNSS_1"]:
+    for sensor in ["BARO_BUS_1", "BARO_BUS_2", "GNSS_1", "GNSS_2"]:
         if sensor in latency_us:
             print(f"cal set {sensor} name={name} latency_us={latency_us[sensor]}")
         else:
