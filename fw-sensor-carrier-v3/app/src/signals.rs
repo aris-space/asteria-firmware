@@ -1,10 +1,11 @@
+use asteria_state_estimation::NavigationState;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 
 use crate::types::{
-    BaroReading, DhtReading, GnssReading, ImuReading, MagReading, Mark, SefLogSample, StateEstimate,
+    BaroReading, DhtReading, GnssReading, ImuReading, MagReading, Mark, SefLogSample,
 };
 
 macro_rules! define_sample_channel {
@@ -26,7 +27,7 @@ define_sample_channel!(DHT_CHANNEL, submit_dht: DhtReading, cap = 8, subs = 1);
 define_sample_channel!(STATE_CHANNEL, submit_state: SefLogSample, cap = 64, subs = 1);
 define_sample_channel!(MARK_CHANNEL, submit_mark: Mark, cap = 4, subs = 1);
 
-pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, StateEstimate, 3> = Watch::new();
+pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, NavigationState, 3> = Watch::new();
 
 /// Sent once all startup tasks have been spawned.
 pub static STARTUP_COMPLETE: Signal<CriticalSectionRawMutex, ()> = Signal::new();

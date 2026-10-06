@@ -106,18 +106,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "840ad5d907de7448d88a3f22b4a7b5d326c6eb3deeb9f94cfaaec7354a80b305"
 
 [[package]]
-name = "asteria-estimator-selector"
-version = "0.1.0"
-
-[[package]]
 name = "asteria-sef-light"
 version = "0.1.0"
 dependencies = [
- "asteria-estimator-selector",
+ "asteria-state-estimation",
  "fusion-ahrs",
  "heapless 0.9.3",
  "libm",
  "nalgebra 0.35.0",
+]
+
+[[package]]
+name = "asteria-state-estimation"
+version = "0.1.0"
+dependencies = [
+ "heapless 0.9.3",
+ "libm",
 ]
 
 [[package]]
@@ -1010,6 +1014,7 @@ version = "0.1.0"
 dependencies = [
  "assign-resources",
  "asteria-sef-light",
+ "asteria-state-estimation",
  "atomic_enum",
  "block-device-adapters",
  "built",

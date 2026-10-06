@@ -18,10 +18,10 @@ pub async fn task() -> ! {
         if let Some(estimate) = rx.try_changed() {
             info!(
                 "height {=f32} ± {=f32} m, velocity up {=f32} ± {=f32} m/s",
-                estimate.height_msl_m,
-                estimate.height_std_m,
-                estimate.velocity_mps,
-                estimate.velocity_std_mps
+                -estimate.position_ned_m[2],
+                estimate.position_std_ned_m[2],
+                -estimate.velocity_ned_mps[2],
+                estimate.velocity_std_ned_mps[2]
             );
         }
     }

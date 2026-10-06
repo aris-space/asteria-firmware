@@ -192,6 +192,8 @@ fn read_pvt(id: GnssId, pvt: &ublox::NavPvtRef<'_>) -> GnssSample {
             latitude_deg: pvt.lat_degrees(),
             longitude_deg: pvt.lon_degrees(),
             height_msl_m: pvt.height_msl() as f32,
+            velocity_north_mps: pvt.vel_north() as f32,
+            velocity_east_mps: pvt.vel_east() as f32,
             velocity_down_mps: pvt.vel_down() as f32,
             pdop_centi: pvt.pdop(),
             horizontal_accuracy_mm: pvt.horiz_accuracy(),

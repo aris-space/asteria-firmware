@@ -128,7 +128,7 @@ pub struct DhtSample {
     pub humidity_rh: f32,
 }
 
-/// GNSS vertical position and velocity used by SEF-light.
+/// GNSS position and velocity fused by the state estimator.
 #[derive(Clone, Copy, Debug)]
 pub struct Pvt {
     /// GPS time of week of the navigation epoch.
@@ -139,6 +139,8 @@ pub struct Pvt {
     pub latitude_deg: f64,
     pub longitude_deg: f64,
     pub height_msl_m: f32,
+    pub velocity_north_mps: f32,
+    pub velocity_east_mps: f32,
     pub velocity_down_mps: f32,
     pub pdop_centi: u16,
     pub horizontal_accuracy_mm: u32,
@@ -166,20 +168,6 @@ pub struct Mark {
 
 impl Mark {
     pub const LABEL_LEN: usize = 16;
-}
-
-/// Selected SEF-light state, including MSL height and body-to-NED attitude.
-#[derive(Clone, Copy, Debug)]
-pub struct StateEstimate {
-    /// Height and vertical velocity may be sent as MSL telemetry once true.
-    pub msl_ready: bool,
-    pub height_msl_m: f32,
-    pub velocity_mps: f32,
-    pub height_std_m: f32,
-    pub velocity_std_mps: f32,
-    pub orientation_body_to_ned_wxyz: [f32; 4],
-    pub selected_imu: ImuId,
-    pub redundancy_ready: bool,
 }
 
 /// One SEF chain's state at the output cadence, before selecting an IMU.
