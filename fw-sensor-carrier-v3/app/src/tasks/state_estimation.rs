@@ -1,10 +1,9 @@
 //! State estimation from the calibrated sensor streams.
 //!
-//! Samples are held for [`HOLDBACK`] in a min-heap and handed to the estimator
-//! in timestamp order. The estimator accepts late samples, but each one replays
-//! its history, and IMU samples arrive in FIFO batches that are already up to
-//! ~15 ms old.
-//! Every processed sample publishes the estimator's
+//! Readings go through a [`BufferedTimeHorizon`], which hands them to SEF-light
+//! in time order: IMU samples arrive in FIFO batches up to ~15 ms old, and a
+//! late sample would make SEF-light replay its history.
+//! Every reading publishes the estimator's
 //! [`NavigationState`](asteria_sef_core::NavigationState) to
 //! [`signals::STATE_ESTIMATE_WATCH`]; every [`LOG_PERIOD`] each SEF-light chain
 //! is also logged to SD.
@@ -13,32 +12,27 @@
 //! the negated MSL height. GNSS fixes are converted into that frame before
 //! fusion.
 
-use core::cmp::Ordering;
-
 use asteria_sef_core::{
-    BarometerAided, BarometerInput, DualGnssSelector, GeodeticPosition, GeodeticReference,
-    GnssAided, GnssInput, GnssSelectorConfig, GnssSolution, ImuAided, ImuInput, MagnetometerAided,
-    MagnetometerInput, SelectorConfig, StateEstimator, UpdateError,
+    BarometerAided, BarometerInput, BufferedTimeHorizon, DualGnssSelector, GeodeticPosition,
+    GeodeticReference, GnssAided, GnssInput, GnssSelectorConfig, GnssSolution, ImuAided, ImuInput,
+    MagnetometerAided, MagnetometerInput, SelectorConfig, StateEstimator, TimeHorizonConfig,
+    UpdateError,
 };
 use asteria_sef_light::{
     DualVerticalEstimator, EstimatorError, ImuAttitudeConfig, STANDARD_GRAVITY_MPS2,
     VerticalEstimatorSelectorConfig, VerticalFilterConfig,
 };
 use defmt::{Debug2Format, warn};
-use embassy_futures::select::{Either, Either4, select, select4};
+use embassy_futures::select::{Either4, select4};
 use embassy_sync::pubsub::WaitResult;
-use embassy_time::{Duration, Instant, Timer};
-use heapless::binary_heap::{BinaryHeap, Min};
+use embassy_time::{Duration, Instant};
 
 use crate::calibration;
 use crate::sensors::{GNSS_COUNT, IMU_COUNT, ImuId};
 use crate::signals;
 use crate::tasks::readout::imu::GYRO_RANGE_DPS;
 use crate::tasks::readout::mag;
-use crate::types::{
-    BaroReading, BaroSample, GnssReading, GnssSample, ImuReading, ImuSample, MagReading, MagSample,
-    SefLogSample,
-};
+use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, SefLogSample};
 
 // Origin of the estimator's north-east-down frame. It only has to be within a
 // few hundred metres of the flight.
@@ -61,9 +55,9 @@ pub fn height_msl_referenced(height_std_m: f32) -> bool {
     height_std_m < MSL_REFERENCED_HEIGHT_STD_M
 }
 
-type Estimator = DualVerticalEstimator<HISTORY_CAPACITY>;
+type Estimator = BufferedTimeHorizon<DualVerticalEstimator<HISTORY_CAPACITY>, PENDING_CAPACITY>;
 
-const HOLDBACK: Duration = Duration::from_millis(35);
+const HOLDBACK_US: u64 = 35_000;
 // Two IMUs at 833 Hz fill about 60 slots during the holdback.
 const PENDING_CAPACITY: usize = 128;
 // Rows per second of the per-chain state in the SD log.
@@ -110,137 +104,44 @@ pub async fn task() -> ! {
         .subscriber()
         .expect("SEF: subscriber slot");
     let mut processor = Processor::new().expect("SEF-light configuration must be valid");
-    let mut held = BinaryHeap::<Held, Min, PENDING_CAPACITY>::new();
     loop {
-        // Take every reading already waiting, so the timer below is armed once
-        // per batch rather than once per reading.
-        while let Some(m) = imu.try_next_message() {
-            hold(&mut held, received(m, "IMU"));
-        }
-        while let Some(m) = mag.try_next_message() {
-            hold(&mut held, received(m, "mag"));
-        }
-        while let Some(m) = gnss.try_next_message() {
-            hold(&mut held, received(m, "GNSS"));
-        }
-        while let Some(m) = baro.try_next_message() {
-            hold(&mut held, received(m, "baro"));
-        }
-        let now = Instant::now();
-        while held.peek().is_some_and(|held| held.due() <= now) {
-            let Held(event) = held.pop().expect("a sample is due");
-            processor.handle(event);
-        }
-
-        let due = held.peek().map_or(Instant::MAX, Held::due);
-        let next = select4(
+        let result = match select4(
             imu.next_message(),
             mag.next_message(),
             gnss.next_message(),
             baro.next_message(),
-        );
-        let event = match select(Timer::at(due), next).await {
-            Either::First(()) => continue,
-            Either::Second(Either4::First(m)) => received(m, "IMU"),
-            Either::Second(Either4::Second(m)) => received(m, "mag"),
-            Either::Second(Either4::Third(m)) => received(m, "GNSS"),
-            Either::Second(Either4::Fourth(m)) => received(m, "baro"),
+        )
+        .await
+        {
+            Either4::First(m) => {
+                received(m, "IMU").map(|reading| processor.update_imu(reading.cal))
+            }
+            Either4::Second(m) => {
+                received(m, "mag").map(|reading| processor.update_mag(reading.cal))
+            }
+            Either4::Third(m) => {
+                received(m, "GNSS").map(|reading| processor.update_gnss(reading.cal))
+            }
+            Either4::Fourth(m) => {
+                received(m, "baro").map(|reading| processor.update_baro(reading.cal))
+            }
         };
-        hold(&mut held, event);
+        if let Some(result) = result {
+            processor.report(result);
+            processor.publish();
+        }
     }
 }
 
-fn hold(held: &mut BinaryHeap<Held, Min, PENDING_CAPACITY>, event: Option<Event>) {
-    if let Some(event) = event
-        && held.push(Held(event)).is_err()
-    {
-        warn!("SEF: input buffer full, dropped a sample");
-    }
-}
-
-/// The event for a received reading, or `None` after reporting lost ones.
-fn received<T: Into<Event>>(message: WaitResult<T>, kind: &str) -> Option<Event> {
+fn received<T>(message: WaitResult<T>, kind: &str) -> Option<T> {
     match message {
-        WaitResult::Message(reading) => Some(reading.into()),
+        WaitResult::Message(reading) => Some(reading),
         WaitResult::Lagged(lost) => {
             warn!("SEF: fell behind and lost {} {} readings", lost, kind);
             None
         }
     }
 }
-
-#[derive(Clone, Copy)]
-enum Event {
-    Imu(ImuSample),
-    Mag(MagSample),
-    Gnss(GnssSample),
-    Baro(BaroSample),
-}
-
-impl Event {
-    fn ts(self) -> Instant {
-        match self {
-            Self::Imu(sample) => sample.ts,
-            Self::Mag(sample) => sample.ts,
-            Self::Gnss(sample) => sample.ts,
-            Self::Baro(sample) => sample.ts,
-        }
-    }
-}
-
-impl From<ImuReading> for Event {
-    fn from(reading: ImuReading) -> Self {
-        Self::Imu(reading.cal)
-    }
-}
-
-impl From<MagReading> for Event {
-    fn from(reading: MagReading) -> Self {
-        Self::Mag(reading.cal)
-    }
-}
-
-impl From<GnssReading> for Event {
-    fn from(reading: GnssReading) -> Self {
-        Self::Gnss(reading.cal)
-    }
-}
-
-impl From<BaroReading> for Event {
-    fn from(reading: BaroReading) -> Self {
-        Self::Baro(reading.cal)
-    }
-}
-
-/// A held-back sample, ordered by measurement time.
-#[derive(Clone, Copy)]
-struct Held(Event);
-
-impl Held {
-    fn due(&self) -> Instant {
-        self.0.ts() + HOLDBACK
-    }
-}
-
-impl Ord for Held {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.ts().cmp(&other.0.ts())
-    }
-}
-
-impl PartialOrd for Held {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for Held {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.ts() == other.0.ts()
-    }
-}
-
-impl Eq for Held {}
 
 struct Processor {
     estimator: Estimator,
@@ -288,12 +189,17 @@ impl Processor {
             500_000, // minimum time between receiver handovers, µs
         );
         Ok(Self {
-            estimator: DualVerticalEstimator::new(
-                filter,
-                [attitude; IMU_COUNT],
-                selector,
-                MAX_AIDING_DELAY_US,
-            )?,
+            estimator: BufferedTimeHorizon::new(
+                DualVerticalEstimator::new(
+                    filter,
+                    [attitude; IMU_COUNT],
+                    selector,
+                    MAX_AIDING_DELAY_US,
+                )?,
+                TimeHorizonConfig {
+                    max_span_us: HOLDBACK_US,
+                },
+            ),
             gnss: DualGnssSelector::new(gnss),
             reference: launch_site(),
             last_log: None,
@@ -301,56 +207,51 @@ impl Processor {
         })
     }
 
-    fn handle(&mut self, event: Event) {
-        let result = match event {
-            Event::Imu(sample) => {
-                const DEG_TO_RAD: f32 = core::f32::consts::PI / 180.0;
-                ImuAided::update_imu(
-                    &mut self.estimator,
-                    ImuInput {
-                        timestamp_us: sample.ts.as_micros(),
-                        sensor_index: sample.src.index(),
-                        acceleration_body_mps2: [sample.accel.x, sample.accel.y, sample.accel.z]
-                            .map(|g| g * STANDARD_GRAVITY_MPS2),
-                        angular_rate_body_rad_s: [sample.gyro.x, sample.gyro.y, sample.gyro.z]
-                            .map(|dps| dps * DEG_TO_RAD),
-                    },
-                )
-            }
-            Event::Mag(sample) => {
-                let field = [sample.x, sample.y, sample.z];
-                let field_nt = libm::sqrtf(field.iter().map(|value| value * value).sum());
-                let calibration = calibration::mag::CAL.applied(sample.src);
-                if calibration.correction.accepts_field(field_nt) {
-                    // Each magnetometer aids the attitude chain of the IMU with the same index.
-                    MagnetometerAided::update_magnetometer(
-                        &mut self.estimator,
-                        MagnetometerInput {
-                            timestamp_us: sample.ts.as_micros(),
-                            sensor_index: sample.src.index(),
-                            field_body: field,
-                            reference_field_ned: LOCAL_MAGNETIC_FIELD_NED_NT,
-                            direction_noise_std: MAG_DIRECTION_STD,
-                        },
-                    )
-                } else {
-                    Ok(())
-                }
-            }
-            Event::Gnss(sample) => self.update_gnss(sample),
-            Event::Baro(sample) => BarometerAided::update_barometer(
-                &mut self.estimator,
-                BarometerInput {
-                    timestamp_us: sample.ts.as_micros(),
-                    sensor_index: sample.src.index(),
-                    height_m: sample.pressure_altitude_m(),
-                    height_std_m: BARO_HEIGHT_STD_M,
-                    pressure_hpa: sample.pressure_mbar,
-                    reference_pressure_hpa: BARO_REFERENCE_PRESSURE_HPA,
-                    pressure_std_hpa: BARO_PRESSURE_STD_HPA,
-                },
-            ),
-        };
+    fn update_imu(&mut self, sample: ImuSample) -> Result<(), UpdateError> {
+        const DEG_TO_RAD: f32 = core::f32::consts::PI / 180.0;
+        self.estimator.update_imu(ImuInput {
+            timestamp_us: sample.ts.as_micros(),
+            sensor_index: sample.src.index(),
+            acceleration_body_mps2: [sample.accel.x, sample.accel.y, sample.accel.z]
+                .map(|g| g * STANDARD_GRAVITY_MPS2),
+            angular_rate_body_rad_s: [sample.gyro.x, sample.gyro.y, sample.gyro.z]
+                .map(|dps| dps * DEG_TO_RAD),
+        })
+    }
+
+    fn update_mag(&mut self, sample: MagSample) -> Result<(), UpdateError> {
+        let field = [sample.x, sample.y, sample.z];
+        let field_nt = libm::sqrtf(field.iter().map(|value| value * value).sum());
+        if !calibration::mag::CAL
+            .applied(sample.src)
+            .correction
+            .accepts_field(field_nt)
+        {
+            return Ok(());
+        }
+        // Each magnetometer aids the attitude chain of the IMU with the same index.
+        self.estimator.update_magnetometer(MagnetometerInput {
+            timestamp_us: sample.ts.as_micros(),
+            sensor_index: sample.src.index(),
+            field_body: field,
+            reference_field_ned: LOCAL_MAGNETIC_FIELD_NED_NT,
+            direction_noise_std: MAG_DIRECTION_STD,
+        })
+    }
+
+    fn update_baro(&mut self, sample: BaroSample) -> Result<(), UpdateError> {
+        self.estimator.update_barometer(BarometerInput {
+            timestamp_us: sample.ts.as_micros(),
+            sensor_index: sample.src.index(),
+            height_m: sample.pressure_altitude_m(),
+            height_std_m: BARO_HEIGHT_STD_M,
+            pressure_hpa: sample.pressure_mbar,
+            reference_pressure_hpa: BARO_REFERENCE_PRESSURE_HPA,
+            pressure_std_hpa: BARO_PRESSURE_STD_HPA,
+        })
+    }
+
+    fn report(&mut self, result: Result<(), UpdateError>) {
         if let Err(error) = result {
             let now = Instant::now();
             if self
@@ -361,7 +262,6 @@ impl Processor {
                 self.last_warning = Some(now);
             }
         }
-        self.publish();
     }
 
     /// Fuses one receiver's solution on its own, weighted by its reported
@@ -394,25 +294,22 @@ impl Processor {
         let speed_std_mps = fix.pvt.speed_accuracy_mps.max(GNSS_MIN_STD);
         let vertical_speed_std_mps =
             (fix.pvt.speed_accuracy_mps * GNSS_SPEED_STD_SCALE).max(GNSS_MIN_STD);
-        GnssAided::update_gnss(
-            &mut self.estimator,
-            GnssInput {
-                timestamp_us: fix.ts.as_micros(),
-                sensor_index: fix.src.index(),
-                height_m: -position_ned_m[2],
-                vertical_velocity_mps: -fix.pvt.velocity_down_mps,
-                height_std_m,
-                vertical_velocity_std_mps: vertical_speed_std_mps,
-                position_ned_m,
-                velocity_ned_mps: [
-                    fix.pvt.velocity_north_mps,
-                    fix.pvt.velocity_east_mps,
-                    fix.pvt.velocity_down_mps,
-                ],
-                position_std_m: [horizontal_std_m, horizontal_std_m, height_std_m],
-                velocity_std_mps: [speed_std_mps, speed_std_mps, vertical_speed_std_mps],
-            },
-        )
+        self.estimator.update_gnss(GnssInput {
+            timestamp_us: fix.ts.as_micros(),
+            sensor_index: fix.src.index(),
+            height_m: -position_ned_m[2],
+            vertical_velocity_mps: -fix.pvt.velocity_down_mps,
+            height_std_m,
+            vertical_velocity_std_mps: vertical_speed_std_mps,
+            position_ned_m,
+            velocity_ned_mps: [
+                fix.pvt.velocity_north_mps,
+                fix.pvt.velocity_east_mps,
+                fix.pvt.velocity_down_mps,
+            ],
+            position_std_m: [horizontal_std_m, horizontal_std_m, height_std_m],
+            velocity_std_mps: [speed_std_mps, speed_std_mps, vertical_speed_std_mps],
+        })
     }
 
     fn publish(&mut self) {
@@ -430,18 +327,19 @@ impl Processor {
         {
             return;
         }
-        let selected = self.estimator.selected_imu().index();
-        let scores = self.estimator.consistency_scores();
+        let sef = self.estimator.inner();
+        let selected = sef.selected_imu().index();
+        let scores = sef.consistency_scores();
         for (id, imu) in ImuId::ALL.into_iter().zip(asteria_sef_light::ImuId::ALL) {
-            let state = self.estimator.state(imu);
-            let uncertainty = self.estimator.uncertainty(imu);
+            let state = sef.state(imu);
+            let uncertainty = sef.uncertainty(imu);
             let height_std_m = libm::sqrtf(uncertainty.height_variance_m2);
             signals::submit_state(SefLogSample {
                 ts,
                 imu: id,
                 selected: imu.index() == selected,
                 msl_ready: height_msl_referenced(height_std_m),
-                redundancy_ready: self.estimator.redundancy_ready(),
+                redundancy_ready: sef.redundancy_ready(),
                 height_msl_m: state.height_m,
                 velocity_mps: state.velocity_mps,
                 barometer_bias_m: state.barometer_bias_m,
@@ -449,7 +347,7 @@ impl Processor {
                 velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
                 barometer_bias_std_m: uncertainty.barometer_bias_variance_m2.map(libm::sqrtf),
                 consistency_score: scores[imu.index()],
-                orientation_body_to_ned_wxyz: self.estimator.orientation_body_to_ned_wxyz(imu),
+                orientation_body_to_ned_wxyz: sef.orientation_body_to_ned_wxyz(imu),
             });
         }
         self.last_log = Some(now);
