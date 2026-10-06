@@ -15,7 +15,6 @@ pub async fn task(can: BufferedFdCanReceiver) -> ! {
                 continue;
             }
         };
-        // The hardware filter passes only standard IDs of `ReceivedMessage`.
         let Id::Standard(id) = frame.id() else {
             continue;
         };

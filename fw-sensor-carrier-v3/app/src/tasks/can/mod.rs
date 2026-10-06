@@ -16,7 +16,6 @@ pub const THIS_BOARD_ID: BoardId = BoardId::SensorCarrier;
 const TX_BUFFER_LEN: usize = 16;
 const RX_BUFFER_LEN: usize = 4;
 
-// The only messages the Sensor Carrier receives.
 data_core::can::sparse_decodable_can_message! {
     enum ReceivedMessage {
         ResetAll(dp_system_management::Message::ResetAll),

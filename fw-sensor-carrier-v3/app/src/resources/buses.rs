@@ -25,7 +25,7 @@ fn config() -> i2c::Config {
     // idle, so a stuck/shorted bus blocks the shared executor for the full timeout.
     // Keep this just above a real transaction (well under 1 ms at 400 kHz) so one
     // dead bus can't starve the others.
-    config.timeout = embassy_time::Duration::from_millis(5);
+    config.timeout = embassy_time::Duration::from_millis(10);
     config
 }
 
