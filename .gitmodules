@@ -4,3 +4,6 @@
 [submodule "data-definitions"]
 	path = data-definitions
 	url = ../asteria-data-definitions
+[submodule "asteria-state-estimation"]
+	path = asteria-state-estimation
+	url = ../asteria-state-estimation
