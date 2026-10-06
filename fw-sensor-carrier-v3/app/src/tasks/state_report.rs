@@ -5,8 +5,6 @@ use embassy_time::{Duration, Ticker};
 
 use crate::signals;
 
-// defmt blocks while the probe drains RTT, so printing every estimate would
-// stall the whole board.
 const PERIOD: Duration = Duration::from_millis(50);
 
 #[embassy_executor::task]

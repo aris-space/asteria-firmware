@@ -52,10 +52,10 @@ async fn main(thread_spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
     // Sensor readouts, highest priority so sampling and timestamps never wait.
     let level_0_spawner = interrupt_executor!(TIM2, P6);
-    // Estimation and CAN, above the thread-mode tasks (SD card, console),
+    // Estimation, CAN, and LEDs, above the thread-mode tasks (SD card, console),
     // whose SD card writes busy-wait while the card programs.
     let level_1_spawner = interrupt_executor!(TIM3, P7);
-    let board = startup::prepare(resources::split(p), level_0_spawner).await;
+    let board = startup::prepare(resources::split(p), level_1_spawner).await;
 
     startup::spawn_tasks(board, thread_spawner, level_0_spawner, level_1_spawner).await;
 
