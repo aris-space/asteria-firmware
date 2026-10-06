@@ -1,16 +1,9 @@
-//! State estimation from the calibrated sensor streams.
+//! Feeds the calibrated sensor streams into SEF-light and publishes its estimate.
 //!
-//! Readings go through a [`BufferedTimeHorizon`], which hands them to SEF-light
-//! in time order: IMU samples arrive in FIFO batches up to ~15 ms old, and a
-//! late sample would make SEF-light replay its history.
-//! Every [`PUBLISH_PERIOD`] the estimator's
-//! [`NavigationState`](asteria_sef_core::NavigationState), run forward through
-//! the held readings, goes to [`signals::STATE_ESTIMATE_WATCH`], and each
-//! SEF-light chain is logged to SD.
-//!
-//! Positions are north-east-down metres from [`launch_site`], whose down is
-//! the negated MSL height. GNSS fixes are converted into that frame before
-//! fusion.
+//! IMU samples arrive in FIFO batches up to ~15 ms old, so readings wait in a
+//! [`BufferedTimeHorizon`] and reach SEF-light in time order; anything out of
+//! order makes SEF-light replay its history. Positions are NED metres from
+//! [`launch_site`].
 
 use asteria_sef_core::{
     BarometerAided, BarometerInput, BufferedTimeHorizon, GeodeticPosition, GeodeticReference,
@@ -33,10 +26,59 @@ use crate::tasks::readout::imu::{ACCEL_RANGE_G, GYRO_SATURATION_DPS};
 use crate::tasks::readout::mag;
 use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, SefLogSample};
 
-// Origin of the estimator's north-east-down frame. It only has to be within a
-// few hundred metres of the flight.
+// Only has to be within a few hundred metres of the flight.
 const LAUNCH_SITE_LATITUDE_DEG: f64 = 47.405_336;
 const LAUNCH_SITE_LONGITUDE_DEG: f64 = 8.631_050;
+
+const HOLDBACK_US: u64 = 35_000;
+const PENDING_CAPACITY: usize = 128; // ~60 IMU samples per holdback
+const MAX_AIDING_DELAY_US: u64 = 400_000;
+const HISTORY_CAPACITY: usize = 768; // ~667 IMU samples per aiding delay
+// Each publish runs a copy of the estimator through the held readings.
+const PUBLISH_PERIOD: Duration = Duration::from_millis(50);
+const IMU_FRESH: Duration = Duration::from_millis(100);
+const WARNING_PERIOD: Duration = Duration::from_secs(1);
+
+// Accelerations are m/s² per sample. The IMU noise is far above the sensor's own,
+// mostly for attitude errors, and the barometer's is 5x its measured 0.3 m to match.
+const ACCELERATION_NOISE: f32 = 10.0;
+const DEGRADED_ACCELERATION_NOISE: f32 = 20.0;
+const SATURATED_ACCELERATION_NOISE: f32 = 1_000.0; // a clipped sample hides how much
+const FREE_FALL_ACCELERATION_NOISE: f32 = 1.0; // falling, up is -g whatever the attitude
+const BARO_HEIGHT_STD_M: f32 = 1.5;
+const BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.02;
+const INITIAL_HEIGHT_STD_M: f32 = 1_000.0; // until GNSS references it to MSL
+const INITIAL_VELOCITY_STD_MPS: f32 = 3.0;
+const INITIAL_BARO_BIAS_STD_M: f32 = 200.0;
+const INNOVATION_GATE_SIGMA: f32 = 5.0;
+
+// GNSS errors last a minute or more, so 20 Hz epochs aren't independent: at rest
+// the height spread 9 m against a reported 3 m, and walking it reported vertical
+// speed the barometers didn't see.
+const GNSS_HEIGHT_STD_SCALE: f32 = 10.0;
+const GNSS_SPEED_STD_SCALE: f32 = 10.0;
+const GNSS_MIN_STD: f32 = 0.1; // receivers can report zero
+
+const AHRS_GAIN: f32 = 2.0;
+const ACCEL_REJECTION_DEG: f32 = 10.0;
+const ACCEL_RECOVERY_SAMPLES: u32 = 300;
+const MAG_REJECTION_DEG: f32 = 20.0;
+// One late or rejected sample shouldn't drop magnetometer aiding.
+const MAG_MAX_AGE_US: u64 = mag::SAMPLE_INTERVAL.as_micros() * 5 / 2;
+// The AHRS resets its attitude past this, so only when the gyro really clips.
+const GYRO_RESET_DPS: f32 = 0.99 * GYRO_SATURATION_DPS;
+// Calibration scales a clipped reading by a few percent either way.
+const ACCEL_SATURATION_MPS2: f32 = 0.97 * ACCEL_RANGE_G * STANDARD_GRAVITY_MPS2;
+
+// Only for estimators that model them, not SEF-light.
+const LOCAL_MAGNETIC_FIELD_NED_NT: [f32; 3] = [21_300.0, 1_200.0, 43_000.0];
+const MAG_DIRECTION_STD: f32 = 0.05;
+const BARO_REFERENCE_PRESSURE_HPA: f32 = 1_013.25;
+const BARO_PRESSURE_STD_HPA: f32 = 0.18; // BARO_HEIGHT_STD_M at ~0.12 hPa/m
+
+// Barometers alone settle near 140 m (their bias prior); the first GNSS height
+// brings it under 30 m.
+const MSL_REFERENCED_HEIGHT_STD_M: f32 = 100.0;
 
 /// The launch site at MSL height zero, so down is the negated MSL height.
 pub fn launch_site() -> GeodeticReference {
@@ -44,50 +86,12 @@ pub fn launch_site() -> GeodeticReference {
         .expect("launch site must be a valid geodetic reference")
 }
 
-// With barometers only, the height standard deviation settles near 140 m, the
-// barometer bias prior. The first GNSS height update brings it under 30 m.
-const MSL_REFERENCED_HEIGHT_STD_M: f32 = 100.0;
-
-/// Whether a height this uncertain has been referenced to MSL by GNSS, not just
-/// carried by the barometers.
+/// Whether GNSS has referenced the height to MSL, rather than only the barometers.
 pub fn height_msl_referenced(height_std_m: f32) -> bool {
     height_std_m < MSL_REFERENCED_HEIGHT_STD_M
 }
 
 type Estimator = BufferedTimeHorizon<DualVerticalEstimator<HISTORY_CAPACITY>, PENDING_CAPACITY>;
-
-const HOLDBACK_US: u64 = 35_000;
-// Two IMUs at 833 Hz fill about 60 slots during the holdback.
-const PENDING_CAPACITY: usize = 128;
-// The CAN rate. Each publish runs a copy of the estimator through the held
-// readings, so publishing every reading would cost far more than estimating.
-const PUBLISH_PERIOD: Duration = Duration::from_millis(50);
-const IMU_FRESH: Duration = Duration::from_millis(100);
-const WARNING_PERIOD: Duration = Duration::from_secs(1);
-// Two 833 Hz IMUs produce about 667 events in 400 ms. The remaining capacity
-// covers barometers, GNSS, and interrupt scheduling jitter.
-const HISTORY_CAPACITY: usize = 768;
-const MAX_AIDING_DELAY_US: u64 = 400_000;
-const BARO_HEIGHT_STD_M: f32 = 1.5;
-// A magnetometer sample keeps aiding attitude for two and a half sample
-// periods, so one late or rejected sample does not drop magnetometer aiding.
-const MAG_MAX_AGE_US: u64 = mag::SAMPLE_INTERVAL.as_micros() * 5 / 2;
-// Smallest GNSS standard deviation passed on, for receivers reporting zero.
-const GNSS_MIN_STD: f32 = 0.1;
-// GNSS height errors persist for a minute or more, so 20 Hz epochs are not
-// independent: at rest the height spread 9 m while the receiver reported 3 m.
-const GNSS_HEIGHT_STD_SCALE: f32 = 10.0;
-// Walking with the board, the receiver reported up to 0.75 m/s of vertical
-// speed the barometers did not see, which bent the height by up to 1 m.
-const GNSS_SPEED_STD_SCALE: f32 = 10.0;
-// Read only by estimators that model them, not by SEF-light: the launch site's
-// magnetic field direction (declination about 3°, inclination about 64°), the
-// noise of its normalized components, and the pressure counterpart of
-// BARO_HEIGHT_STD_M at about 0.12 hPa per metre.
-const LOCAL_MAGNETIC_FIELD_NED_NT: [f32; 3] = [21_300.0, 1_200.0, 43_000.0];
-const MAG_DIRECTION_STD: f32 = 0.05;
-const BARO_REFERENCE_PRESSURE_HPA: f32 = 1_013.25;
-const BARO_PRESSURE_STD_HPA: f32 = 0.18;
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
@@ -153,31 +157,24 @@ struct Processor {
 impl Processor {
     fn new() -> Result<Self, EstimatorError> {
         let filter = VerticalFilterConfig::new(
-            10.0,       // healthy acceleration noise, m/s² per sample
-            20.0,       // degraded acceleration noise, m/s² per sample
-            [0.02; 2],  // barometer-bias random walk, m/√s
-            1_000.0,    // initial height uncertainty, m; GNSS references it to MSL
-            3.0,        // initial vertical-velocity uncertainty, m/s
-            [200.0; 2], // initial pressure-altitude bias uncertainty, m
-            5.0,        // measurement innovation gate, standard deviations
+            ACCELERATION_NOISE,
+            DEGRADED_ACCELERATION_NOISE,
+            [BARO_BIAS_WALK_M_PER_SQRT_S; 2],
+            INITIAL_HEIGHT_STD_M,
+            INITIAL_VELOCITY_STD_MPS,
+            [INITIAL_BARO_BIAS_STD_M; 2],
+            INNOVATION_GATE_SIGMA,
         )?
-        // A clipped sample hides an unknown part of the acceleration.
-        .with_saturated_acceleration_noise(1_000.0)?
-        // In free fall the vertical acceleration is -g whatever the attitude.
-        .with_free_fall_acceleration_noise(1.0)?;
+        .with_saturated_acceleration_noise(SATURATED_ACCELERATION_NOISE)?
+        .with_free_fall_acceleration_noise(FREE_FALL_ACCELERATION_NOISE)?;
         let attitude = ImuAttitudeConfig::new(
-            2.0, // AHRS feedback gain
-            // A reading beyond this resets the attitude.
-            0.99 * GYRO_SATURATION_DPS,
-            10.0, // accelerometer rejection angle, degrees
-            300,  // rejected samples before acceleration recovery
+            AHRS_GAIN,
+            GYRO_RESET_DPS,
+            ACCEL_REJECTION_DEG,
+            ACCEL_RECOVERY_SAMPLES,
         )?
-        .with_magnetometer(
-            20.0, // magnetic rejection angle, degrees
-            MAG_MAX_AGE_US,
-        )?
-        // Calibration scales a clipped reading by a few percent either way.
-        .with_accelerometer_saturation(0.97 * ACCEL_RANGE_G * STANDARD_GRAVITY_MPS2)?;
+        .with_magnetometer(MAG_REJECTION_DEG, MAG_MAX_AGE_US)?
+        .with_accelerometer_saturation(ACCEL_SATURATION_MPS2)?;
         let selector = VerticalEstimatorSelectorConfig {
             score_memory: 0.95,
             maximum_nis_contribution: 25.0,
@@ -276,7 +273,7 @@ impl Processor {
         }
     }
 
-    /// The estimator picks which receiver to fuse.
+    /// Every 3D fix goes in; SEF-light picks the receiver.
     fn update_gnss(&mut self, fix: GnssSample) -> Result<(), UpdateError> {
         if !fix.pvt.has_3d_fix() {
             return Ok(());
