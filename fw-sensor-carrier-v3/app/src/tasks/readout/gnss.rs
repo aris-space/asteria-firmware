@@ -38,7 +38,7 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
     type Next = Active<'a, RX>;
 
     async fn run(mut self) -> Active<'a, RX> {
-        debug!("{}: initializing", self.id);
+        debug!("{}: waiting for UBX data", self.id);
 
         let mut consecutive_errors: u8 = 0;
         let mut recv_buf = [0u8; PROBE_LEN];
@@ -50,8 +50,13 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                 consecutive_errors = 0;
                 link_active = false;
                 GNSS_STATUS[self.id.index()].store(SensorStatus::Inactive, Ordering::Relaxed);
-                debug!("{}: re-initializing", self.id);
-                Timer::after(backoff(self.attempt)).await;
+                let wait = backoff(self.attempt);
+                debug!(
+                    "{}: no usable UBX data, listening again in {} ms",
+                    self.id,
+                    wait.as_millis()
+                );
+                Timer::after(wait).await;
             }
 
             let n = match with_timeout(LINK_SILENCE_TIMEOUT, self.rx.read(&mut recv_buf)).await {
