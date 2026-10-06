@@ -118,8 +118,8 @@ name = "asteria-sef-light"
 version = "0.1.0"
 dependencies = [
  "asteria-sef-core",
- "fusion-ahrs",
  "heapless 0.9.3",
+ "imu-fusion",
  "libm",
  "nalgebra 0.35.0",
 ]
@@ -1095,15 +1095,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
-name = "fusion-ahrs"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf587d61645ec9b18002b229c2364394c0fb2fea5db4505b8f5d9a6396b30921"
-dependencies = [
- "nalgebra 0.35.0",
-]
-
-[[package]]
 name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1478,6 +1469,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "imu-fusion"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14ae8d5bd266417f14b4d2f9dac3db1832c75442d66cc6b846e97dbe4fd5e291"
+dependencies = [
+ "libm",
+ "nalgebra 0.32.6",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1676,6 +1677,20 @@ dependencies = [
  "defmt 0.3.100",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+]
+
+[[package]]
+name = "nalgebra"
+version = "0.32.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5c17de023a86f59ed79891b2e5d5a94c705dbe904a5b5c9c952ea6221b03e4"
+dependencies = [
+ "approx",
+ "num-complex",
+ "num-rational",
+ "num-traits",
+ "simba 0.8.1",
+ "typenum",
 ]
 
 [[package]]
@@ -2236,6 +2251,19 @@ dependencies = [
  "embedded-hal-async",
  "fixed",
  "sensirion-i2c",
+]
+
+[[package]]
+name = "simba"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "061507c94fc6ab4ba1c9a0305018408e312e17c041eb63bef8aa726fa33aceae"
+dependencies = [
+ "approx",
+ "libm",
+ "num-complex",
+ "num-traits",
+ "paste",
 ]
 
 [[package]]
