@@ -17,8 +17,7 @@ impl Usb {
 
         let ep_out_buffer = EP_OUT_BUFFER.init([0u8; EP_OUT_BUFFER_LEN]);
         let mut config = usb::Config::default();
-        // Bus-powered; vbus_detection requires the pin wired, which this board
-        // doesn't, so leave it off.
+        // vbus_detection requires the pin wired. TODO: unsure if actually wired
         config.vbus_detection = false;
 
         Driver::new_fs(

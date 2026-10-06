@@ -1,5 +1,6 @@
-//! Receive-only GNSS UARTs. Both receivers are configured ahead of time to
-//! send UBX NAV-PVT at 921600 baud, so the firmware never transmits to them.
+//! Receive-only GNSS UARTs, both receivers are configured ahead of time to send
+//! UBX packets at 921600 baud. This is done so that we can save DMA channels and use them
+//! where they are actually needed.
 
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{self, UartRx};

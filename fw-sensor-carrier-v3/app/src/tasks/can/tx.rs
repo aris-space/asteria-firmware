@@ -36,7 +36,7 @@ const VELOCITY_PERIOD: Duration = Duration::from_hz(20);
 const STATUS_PERIOD: Duration = Duration::from_secs(1);
 const BUILD_INFO_PERIOD: Duration = Duration::from_secs(5);
 
-// The estimator publishes with every IMU sample, so an older state means it stopped.
+// The estimator publishes with every IMU sample. Older state means it stopped.
 const STATE_MAX_AGE: Duration = Duration::from_millis(100);
 
 /// Encodes `msg` and hands it to the CAN peripheral; a full TX buffer means

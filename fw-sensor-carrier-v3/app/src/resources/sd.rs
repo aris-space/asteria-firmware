@@ -12,9 +12,8 @@ impl SdCard {
             SDMMC1 => sdmmc::InterruptHandler<peripherals::SDMMC1>;
         });
 
-        // SD_VDD is switched by PD6 and must remain enabled while the card is in use.
+        // SD_VDD is switched by PD6; must remain enabled while the card is in use.
         let power = Output::new(self.power, Level::High, Speed::Low);
-        // The board's detect polarity is not yet established, so report it only.
         let detect = Input::new(self.detect, Pull::Up);
         let sdmmc = Sdmmc::new_4bit(
             self.periph,
