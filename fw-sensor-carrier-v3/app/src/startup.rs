@@ -6,7 +6,7 @@ use embassy_stm32::usart::UartRx;
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
-    BARO_BUS_1, BARO_BUS_2, DHT_BUS_1, DHT_BUS_2, GNSS_0, GNSS_1, IMU_0, IMU_1, MAG_BUS_1,
+    BARO_BUS_1, BARO_BUS_2, DHT_BUS_1, DHT_BUS_2, GNSS_1, GNSS_2, IMU_0, IMU_1, MAG_BUS_1,
     MAG_BUS_2,
 };
 
@@ -131,12 +131,12 @@ pub async fn spawn_tasks(
             .expect("Failed to spawn DHT 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_0)
-            .expect("Failed to spawn GNSS 0 task"),
+        tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_1)
+            .expect("Failed to spawn GNSS 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_1)
-            .expect("Failed to spawn GNSS 1 task"),
+        tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_2)
+            .expect("Failed to spawn GNSS 2 task"),
     );
 
     level_1_spawner
