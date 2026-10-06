@@ -171,25 +171,21 @@ impl Processor {
             20.0, // magnetic rejection angle, degrees
             MAG_MAX_AGE_US,
         )?;
-        let selection = SelectorConfig::new(
-            0.0025,    // IMU score improvement required for a handover
-            5_000_000, // required improvement duration and minimum time between handovers, µs
-            100_000,   // maximum IMU sample age, µs
-        )
-        .ok_or(EstimatorError::OutOfRangeInput)?;
-        let gnss_selection = SelectorConfig::new(
-            0.0,     // height accuracy improvement required for a handover, m
-            500_000, // required improvement duration and minimum time between handovers, µs
-            250_000, // maximum fix age, µs
-        )
-        .ok_or(EstimatorError::OutOfRangeInput)?;
-        let selector = VerticalEstimatorSelectorConfig::new(
-            0.95, // previous score weight
-            25.0, // maximum contribution from one innovation
-            10.0, // degraded acceleration penalty
-            selection,
-            gnss_selection,
-        )?;
+        let selector = VerticalEstimatorSelectorConfig {
+            score_memory: 0.95,
+            maximum_nis_contribution: 25.0,
+            degraded_score_penalty: 10.0,
+            imu_selection: SelectorConfig {
+                switch_hysteresis: 0.0025,
+                minimum_dwell_time_us: 5_000_000,
+                maximum_age_us: 100_000,
+            },
+            gnss_selection: SelectorConfig {
+                minimum_dwell_time_us: 500_000,
+                maximum_age_us: 250_000,
+                ..SelectorConfig::default()
+            },
+        };
         Ok(Self {
             estimator: BufferedTimeHorizon::new(
                 DualVerticalEstimator::new(
