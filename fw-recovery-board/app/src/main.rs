@@ -250,7 +250,7 @@ async fn main(spawner: Spawner) -> ! {
     // LED1 is on PB0, is green
     // LED2 is on PB1, is yellow
     // LED3 is on PB2, is red
-    let _led_green = Output::new(p.PB0, Level::Low, Speed::Low);
+    let led_green = Output::new(p.PB0, Level::Low, Speed::Low);
     let mut led_yellow = Output::new(p.PB1, Level::Low, Speed::Low);
     let led_red = Output::new(p.PB2, Level::Low, Speed::Low);
     /* END LEDS */
@@ -261,6 +261,7 @@ async fn main(spawner: Spawner) -> ! {
         .sender()
         .send(crate::build_info::BUILD_INFO.get().clone());
 
+    spawner.spawn(heartbeat(led_green).unwrap());
     spawner.spawn(build_info::build_status_blinky(led_red).unwrap());
     spawner.spawn(actuator_control::steering_task(steering, steer_pwr, steering_watchdog).unwrap());
     spawner.spawn(actuator_control::separation_task(separation).unwrap());
@@ -323,10 +324,20 @@ async fn main(spawner: Spawner) -> ! {
             }
             Err(e) => {
                 error!("HELP! THERE IS A CAN ERROR!!!! {}", e);
-                error!("AAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHHHHHH");
                 led_yellow.set_high();
                 Timer::after_millis(10).await;
             }
         }
+    }
+}
+
+/// Green LED heartbeat, 1 Hz at 50% duty cycle
+#[embassy_executor::task]
+async fn heartbeat(mut led: Output<'static>) {
+    loop {
+        led.set_high();
+        Timer::after_millis(500).await;
+        led.set_low();
+        Timer::after_millis(500).await;
     }
 }
