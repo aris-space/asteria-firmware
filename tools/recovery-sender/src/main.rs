@@ -301,6 +301,12 @@ fn pair<T: std::fmt::Debug>(a: Option<T>, b: Option<T>) -> String {
     format!("{} / {}", show(a), show(b))
 }
 
+/// Formats microseconds as h:mm:ss.
+fn uptime(micros: u64) -> String {
+    let secs = micros / 1_000_000;
+    format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
+}
+
 fn render(out: &mut impl Write, form: &Form, shared: &Shared, interface: &str) -> IoResult<()> {
     out.queue(Clear(ClearType::All))?;
     put(
@@ -355,7 +361,7 @@ fn render(out: &mut impl Write, form: &Form, shared: &Shared, interface: &str) -
         ("SEND deployment trigger".into(), false),
         ("SEND reset recovery board".into(), false),
     ];
-    draw_box(out, 0, 1, 42, 12, " Send ")?;
+    draw_box(out, 0, 1, 42, 13, " Send ")?;
     for (i, (line, pending)) in lines.iter().enumerate() {
         if i == form.selected {
             out.queue(SetAttribute(Attribute::Reverse))?;
@@ -369,7 +375,7 @@ fn render(out: &mut impl Write, form: &Form, shared: &Shared, interface: &str) -
     }
 
     let x = 46;
-    draw_box(out, 44, 1, 44, 12, " Received ")?;
+    draw_box(out, 44, 1, 44, 13, " Received ")?;
     let s = shared.board_status.as_ref();
     let rows = [
         format!("CATS separation  {}", show(shared.cats_separation)),
@@ -403,6 +409,10 @@ fn render(out: &mut impl Write, form: &Form, shared: &Shared, interface: &str) -
             show(s.map(|s| s.steering_watchdog_status))
         ),
         format!("Arming           {}", show(s.map(|s| s.arming_state))),
+        format!(
+            "Uptime           {}",
+            s.map_or("-".to_string(), |s| uptime(s.common.micros_since_restart))
+        ),
     ];
     for (i, row) in rows.iter().enumerate() {
         put(out, x, 2 + i as u16, row)?;
