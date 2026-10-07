@@ -109,6 +109,10 @@ async fn main(spawner: Spawner) -> ! {
 
     /* ARMING DETECTION */
     let arming_detect_pin = Input::new(p.PB11, Pull::None);
+    /* CATS backup flight computer, pulled up and driven low once it triggered */
+    let cats_separation = Input::new(p.PA8, Pull::Up); // CATS IO 1
+    let cats_deployment = Input::new(p.PA9, Pull::Up); // CATS IO 2
+
     /* BEGIN SEPARATION */
     // separation power trigger
     let sep_pwr = Output::new(p.PC0, Level::Low, Speed::Low);
