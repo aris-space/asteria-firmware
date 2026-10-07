@@ -1,8 +1,7 @@
 //! Module to talk to the steering, deployment and separation motors.
 
-use crate::actuator_control::SteeringStatus::{Responsive, Unpowered};
 use crate::can_io::{INPUTS, OUTPUTS};
-use crate::rsbl_servo::{LEFT, RIGHT};
+use crate::rsbl_servo::Side;
 use crate::servo::RecoveryActuator;
 use crate::{
     DEPLOYMENT_INITIAL_ANGLE, DEPLOYMENT_SERVO_ANGLE, SAFETY_SPIRAL_POS_LEFT,
@@ -12,7 +11,7 @@ use crate::{
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
 use datatypes::status::ArmingState;
-use dp_recovery_board::{ActuatorStatus, SteeringPositions, WatchdogState};
+use dp_recovery_board::{ActuatorStatus, SteeringPositions, SteeringStatus, WatchdogState};
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
@@ -30,19 +29,15 @@ use {defmt_rtt as _, panic_probe as _};
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
 
+/// Status of both steering motors.
 #[derive(Clone, Copy, Default)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum SteeringStatus {
-    #[default]
-    /// steering is unpowered, so the motors cannot be detected
-    Unpowered,
-
-    /// Indicates if data from the motors could be read or not for [left, right].
-    Responsive([bool; 2]),
+pub struct SteeringStatuses {
+    pub left: SteeringStatus,
+    pub right: SteeringStatus,
 }
 
 /// status that of the motors
-pub static STEERING_STATUS: Watch<CriticalSectionRawMutex, SteeringStatus, 2> = Watch::new();
+pub static STEERING_STATUS: Watch<CriticalSectionRawMutex, SteeringStatuses, 2> = Watch::new();
 
 /// indicator for power for steering (setting target positions etc. just won't do anything if this is not true)
 /// This is also purely internal for this file only
@@ -50,6 +45,22 @@ static STEERING_POWER_STATUS: AtomicBool = AtomicBool::new(false);
 
 /// indicator for steering watchdog state
 pub static WATCHDOG_STATE: Watch<CriticalSectionRawMutex, WatchdogState, 1> = Watch::new();
+
+/// Read one steering motor. The position is in the `SteeringPositions` convention, which is
+/// flipped from what the driver outputs.
+async fn read_side(
+    steering: &mut rsbl_servo::RsblServo<'static>,
+    side: Side,
+) -> (i32, SteeringStatus) {
+    match steering.read_steering_data(side).await {
+        Ok(Some(data)) => (-data.angle, SteeringStatus::Responsive),
+        Ok(None) => (0, SteeringStatus::Unresponsive),
+        Err(e) => {
+            error!("Error in reading steering data: {:?}", e);
+            (0, SteeringStatus::Unresponsive)
+        }
+    }
+}
 
 #[embassy_executor::task]
 pub async fn steering_task(
@@ -146,37 +157,19 @@ pub async fn steering_task(
                     }
                 }
 
-                let mut positions = SteeringPositions::default();
-                let mut connectedness = [false; 2];
                 // read out position data for both servos roughly every 100 ms
                 if Instant::now() - last >= Duration::from_millis(100) {
                     last = Instant::now();
-                    match steering.read_steering_data(LEFT).await {
-                        Ok(left_val) => {
-                            // SteeringPositions is flipped from what the driver outputs.
-                            positions.left_pos = -left_val.map(|d| d.angle).unwrap_or_default();
-                            connectedness[0] = left_val.is_some();
-                        }
-                        Err(e) => {
-                            error!("Error in reading left steering data: {:?}", e)
-                        }
-                    }
-                    match steering.read_steering_data(RIGHT).await {
-                        Ok(right_val) => {
-                            // SteeringPositions is flipped from what the driver outputs.
-                            positions.right_pos = -right_val.map(|d| d.angle).unwrap_or_default();
-                            connectedness[1] = right_val.is_some();
-                        }
-                        Err(e) => {
-                            error!("Error in reading right steering data: {:?}", e)
-                        }
-                    }
-                    steering_positions.send(if connectedness[0] && connectedness[1] {
-                        Some(positions)
-                    } else {
-                        None
-                    });
-                    steering_status.send(Responsive(connectedness));
+                    let (left_pos, left) = read_side(&mut steering, Side::Left).await;
+                    let (right_pos, right) = read_side(&mut steering, Side::Right).await;
+                    steering_positions.send(
+                        (left == SteeringStatus::Responsive && right == SteeringStatus::Responsive)
+                            .then_some(SteeringPositions {
+                                left_pos,
+                                right_pos,
+                            }),
+                    );
+                    steering_status.send(SteeringStatuses { left, right });
                 }
             } else {
                 // deactivate steering, make sure to wait a bit...
@@ -185,7 +178,7 @@ pub async fn steering_task(
                 watchdog_active = false;
 
                 // without power the motors cannot be detected
-                steering_status.send(Unpowered);
+                steering_status.send(SteeringStatuses::default());
             }
             // delay a bit before next iteration through this loop
             Timer::after_millis(10).await;
