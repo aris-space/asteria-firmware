@@ -350,9 +350,13 @@ pub async fn deployment_task(mut deployment: RecoveryActuator<TIM16, TIM17>) {
     }
 }
 
-pub static ARMING_STATE: Watch<CriticalSectionRawMutex, ArmingState, 1> = Watch::new();
+pub static ARMING_STATE: Watch<CriticalSectionRawMutex, ArmingState, 2> = Watch::new();
+
+/// Poll interval for the Arming pin (10 Hz)
+const ARMING_POLL_MS: u64 = 100;
+
 #[embassy_executor::task]
-pub async fn arming_detection(arming_detect: Input<'static>) {
+pub async fn arming_detection_task(arming_detect: Input<'static>) {
     let arming_sender = ARMING_STATE.sender();
     loop {
         // arming is high if safed, and low if armed
@@ -362,6 +366,6 @@ pub async fn arming_detection(arming_detect: Input<'static>) {
             arming_sender.send(ArmingState::Safe);
         }
 
-        Timer::after_millis(1000).await;
+        Timer::after_millis(ARMING_POLL_MS).await;
     }
 }
