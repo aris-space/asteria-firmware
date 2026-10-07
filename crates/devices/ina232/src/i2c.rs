@@ -1,6 +1,6 @@
 use embedded_hal::i2c::SevenBitAddress;
 
-/// I2C interface for the LTC2945
+/// I2C interface for the INA232
 pub struct I2cInterface<I2C> {
     /// I2c peripheral used for communication
     pub i2c: I2C,
@@ -29,7 +29,6 @@ const MAX_DATA: usize = BUF_LEN - 1;
 /// Build i2c frame for writing to a register and return the length of the frame.
 #[inline(always)]
 fn build_frame(buf: &mut [u8; BUF_LEN], reg: u8, chunk: &[u8]) -> usize {
-    // SAFETY: caller guarantees `chunk.len() ≤ MAX_DATA`
     buf[0] = reg;
     buf[1..1 + chunk.len()].copy_from_slice(chunk);
     chunk.len() + 1

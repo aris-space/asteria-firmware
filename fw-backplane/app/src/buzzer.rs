@@ -1,4 +1,4 @@
-use crate::sensor_readout::RAIL_24V_LAST;
+use crate::can::OUTPUTS;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::GeneralInstance4Channel;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
@@ -11,26 +11,25 @@ pub async fn buzzer_task(pwm: SimplePwm<'static, embassy_stm32::peripherals::TIM
     buzzer.set_volume(100.0);
     buzzer.play_sequence(scripts::STARTUP, 1).await;
 
-    let mut rail_24v = RAIL_24V_LAST
+    let mut rail_24v = OUTPUTS
+        .rail_24v
         .receiver()
         .expect("Failed to get 24V rail receiver");
 
     const EXTERNAL_POWER_CONNECT_VOLTAGE: f32 = 25.5;
     const EXTERNAL_POWER_DISCONNECT_VOLTAGE: f32 = 25.1;
-    const THRESHOLD_LOW: f32 = 22.7;
     const THRESHOLD_WARNING: f32 = 22.2;
     const THRESHOLD_EXTREME: f32 = 21.0;
 
     // wait for initial measurement
     let initial_readout = rail_24v.get().await;
-    let mut prev_voltage = initial_readout.data.voltage;
+    let mut prev_voltage = initial_readout.voltage;
 
     let mut initialisation = true;
     loop {
         let voltage = rail_24v
             .try_get()
             .expect("This should never fail, since we wait on initial readout")
-            .data
             .voltage;
 
         if voltage >= EXTERNAL_POWER_CONNECT_VOLTAGE
@@ -49,8 +48,6 @@ pub async fn buzzer_task(pwm: SimplePwm<'static, embassy_stm32::peripherals::TIM
             buzzer.play_sequence(scripts::EXTREME_WARNING, 1).await;
         } else if voltage < THRESHOLD_WARNING {
             buzzer.play_sequence(scripts::WARNING, 1).await;
-        } else if voltage < THRESHOLD_LOW {
-            buzzer.play_sequence(scripts::SLOW_BEEP, 1).await;
         } else {
             Timer::after(Duration::from_millis(100)).await;
         }
@@ -94,13 +91,24 @@ impl<Tim: GeneralInstance4Channel> Buzzer<Tim> {
     }
 
     pub fn set_volume(&mut self, vol: f32) {
-        self.volume = vol.min(100.0);
+        // Clamp to a valid percentage and guard against NaN/inf input.
+        self.volume = if vol.is_finite() {
+            vol.clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
         let duty = (self.max_duty as f32 * (self.volume / 100.0)).round() as u32;
-        self.duty = duty;
+        self.duty = duty.min(self.max_duty);
+    }
+
+    fn duty_for_current_frequency(&mut self) -> u32 {
+        let max = self.pwm.ch3().max_duty_cycle();
+        self.duty.min(max)
     }
     pub fn set_tone(&mut self, f: Hertz) {
         self.pwm.set_frequency(f);
-        self.pwm.ch3().set_duty_cycle(self.duty);
+        let duty = self.duty_for_current_frequency();
+        self.pwm.ch3().set_duty_cycle(duty);
         self.pwm.ch3().enable();
     }
 
@@ -109,7 +117,8 @@ impl<Tim: GeneralInstance4Channel> Buzzer<Tim> {
     }
     pub async fn play_tone(&mut self, f: Hertz, d: Duration) {
         self.pwm.set_frequency(f);
-        self.pwm.ch3().set_duty_cycle(self.duty);
+        let duty = self.duty_for_current_frequency();
+        self.pwm.ch3().set_duty_cycle(duty);
         self.pwm.ch3().enable();
         Timer::after(d).await;
         self.pwm.ch3().disable();
@@ -134,12 +143,6 @@ pub mod scripts {
 
     // ----------- WARNING SOUNDS ----------- //
     // ordered by increasing urgency
-
-    /// Slow beep sound, played in a loop
-    pub const SLOW_BEEP: &[Step] = &[
-        Step::Tone(Hertz(1000), Duration::from_millis(500)),
-        Step::Wait(Duration::from_millis(500)),
-    ];
 
     /// Caution sound, best when played in a loop
     pub const CAUTION: &[Step] = &[
@@ -207,7 +210,7 @@ pub mod scripts {
         Step::Wait(Duration::from_millis(50)),
     ];
 
-    /// Urgent notification sound, sound good when played 3 times in sequence
+    /// Urgent notification sound, sounds good when played 3 times in sequence
     pub const URGENT: &[Step] = &[
         Step::Tone(Hertz(700), Duration::from_millis(80)),
         Step::Tone(Hertz(1000), Duration::from_millis(80)),
@@ -230,7 +233,7 @@ pub mod scripts {
         Step::Tone(Hertz(880), Duration::from_millis(400)),
     ];
 
-    /// Connect external power sound, meant to be played once.
+    /// Disconnect external power sound, meant to be played once.
     pub const DISCONNECT_EXTERNAL_POWER: &[Step] = &[
         Step::Tone(Hertz(880), Duration::from_millis(60)),
         Step::Wait(Duration::from_millis(40)),
