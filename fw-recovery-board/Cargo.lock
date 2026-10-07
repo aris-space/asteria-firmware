@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "dp-recovery-board"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "data-core",
