@@ -109,7 +109,8 @@ run *args:
     fi
 
 
-# Build the firmware, upload its ELF artifact to B2, and flash it to the device with probe-rs download (no attach).
+# Build the firmware, upload its ELF artifact to B2, and flash it to the device without attaching,
+# either with probe-rs (if use_probe_rs=true) or with the STM32 Programmer utility otherwise.
 flash *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -145,9 +146,14 @@ flash *args:
     ) >"$upload_log" 2>&1 &
     upload_pid="$!"
 
-    probe-rs download --chip {{chip}} --chip-erase "$elf"
-    # download leaves the core halted in its flash loader; start the new firmware.
-    probe-rs reset --chip {{chip}}
+    if [[ "{{use_probe_rs}}" == "true" ]]; then
+        probe-rs download --chip {{chip}} --chip-erase "$elf"
+        # download leaves the core halted in its flash loader; start the new firmware.
+        probe-rs reset --chip {{chip}}
+    else
+        arm-none-eabi-objcopy -O binary "$elf" "${elf}.bin"
+        STM32_Programmer_CLI -c port=SWD -d "${elf}.bin" 0x08000000 -rst
+    fi
 
     if wait "$upload_pid"; then
       cat "$upload_log"
