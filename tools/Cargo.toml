@@ -1,4 +1,4 @@
 # Host-side tooling for interacting with Asteria boards over USB (asteria-tool).
 [workspace]
 resolver = "2"
-members = ["asteria-tool"]
+members = ["asteria-tool", "recovery-sender"]
