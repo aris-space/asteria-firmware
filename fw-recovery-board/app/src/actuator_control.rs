@@ -1,7 +1,7 @@
 //! Module to talk to the steering, deployment and separation motors.
 
 use crate::actuator_control::SteeringStatus::{Responsive, Unpowered};
-use crate::can_io::ReceivedMessage;
+use crate::can_io::{INPUTS, OUTPUTS};
 use crate::rsbl_servo::{LEFT, RIGHT};
 use crate::servo::RecoveryActuator;
 use crate::{
@@ -9,16 +9,14 @@ use crate::{
     SAFETY_SPIRAL_POS_RIGHT, SEPARATION_INITIAL_ANGLE, SEPARATION_SERVO_ANGLE, rsbl_servo,
     watchdog,
 };
-use can_utils::broadcast::Broadcast;
-use can_utils::collector::Collector;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
-use datatypes::status::{ArmingState, BuildInformationCommon};
+use datatypes::status::ArmingState;
 use dp_recovery_board::{ActuatorStatus, SteeringPositions, WatchdogState};
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant};
 use embassy_time::{Timer, with_timeout};
@@ -42,48 +40,6 @@ pub enum SteeringStatus {
     /// Indicates if data from the motors could be read or not for [left, right].
     Responsive([bool; 2]),
 }
-
-#[derive(Collector)]
-#[collector(
-    message_type = "ReceivedMessage",
-    update_expr = "#field.sender().send(#value);"
-)]
-pub struct Inputs {
-    /// watch for giving steering target positions to steering_task
-    #[collector(pattern = "ReceivedMessage::SteeringTargetPositions(#value)")]
-    pub steering_target_positions: Watch<CriticalSectionRawMutex, SteeringPositions, 3>,
-
-    /// watch for setting steering power
-    pub steering_power: Watch<CriticalSectionRawMutex, bool, 1>,
-}
-
-pub static INPUTS: Inputs = Inputs {
-    steering_target_positions: Watch::new(),
-    steering_power: Watch::new(),
-};
-
-#[derive(Broadcast)]
-#[broadcast(loop_type = "can_utils::broadcast::ResponsiveLoop")]
-pub struct Outputs {
-    /// Position data read from the motors
-    #[broadcast(
-        filter_map = "#value.map(dp_recovery_board::Message::SteeringActualPositions)",
-        min_freq_hz = 0.1,
-        max_freq_hz = 15.
-    )]
-    pub steering_actual_positions: Watch<ThreadModeRawMutex, Option<SteeringPositions>, 2>,
-    #[broadcast(
-        map = "dp_recovery_board::Message::BuildInfo(#value)",
-        min_freq_hz = 0.2,
-        max_freq_hz = 0.2
-    )]
-    pub build_info: Watch<ThreadModeRawMutex, BuildInformationCommon, 1>,
-}
-
-pub static OUTPUTS: Outputs = Outputs {
-    steering_actual_positions: Watch::new(),
-    build_info: Watch::new(),
-};
 
 /// status that of the motors
 pub static STEERING_STATUS: Watch<CriticalSectionRawMutex, SteeringStatus, 2> = Watch::new();
