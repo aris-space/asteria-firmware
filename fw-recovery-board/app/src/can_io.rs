@@ -39,7 +39,7 @@ fn sanity_check() {
 
     assert!(matches!(
         sparse_msg,
-        ReceivedMessage::SteeringTarget(dp_recovery_board::SteeringPositions {
+        ReceivedMessage::SteeringTargetPositions(dp_recovery_board::SteeringPositions {
             left_pos: -132,
             right_pos: 32,
         })

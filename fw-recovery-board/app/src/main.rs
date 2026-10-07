@@ -70,8 +70,6 @@ const SEP_DEPL_FREQ: Hertz = Hertz(333);
 
 /* BEGIN TIMER CONSTANTS */
 const CAN_TX_TIMEOUT: Duration = Duration::from_millis(50);
-#[allow(dead_code)]
-const CAN_RX_TIMEOUT: Duration = Duration::from_millis(50);
 const AUTOMATIC_SAFETY_SPIRAL_TIMER: Duration = Duration::from_millis(10000);
 const STATUS_CREATION_INTERVAL: Duration = Duration::from_millis(1000);
 
@@ -306,23 +304,11 @@ async fn main(spawner: Spawner) -> ! {
                     ReceivedMessage::RecoveryPowerConfig(x) => {
                         info!("RecoveryPowerConfig: {}", x);
 
-                        if x.steering_enabled {
-                            steering_pwr_tx.send(true);
-                        } else {
-                            steering_pwr_tx.send(false);
-                        }
-
-                        if x.separation_enabled {
-                            separation_target_state_tx.send(ServoTargetState::PoweredOn);
-                        } else {
-                            separation_target_state_tx.send(ServoTargetState::PoweredOff);
-                        }
-
-                        if x.deployment_enabled {
-                            deployment_target_state_tx.send(ServoTargetState::PoweredOn);
-                        } else {
-                            deployment_target_state_tx.send(ServoTargetState::PoweredOff);
-                        }
+                        steering_pwr_tx.send(x.steering_enabled);
+                        separation_target_state_tx
+                            .send(ServoTargetState::powered(x.separation_enabled));
+                        deployment_target_state_tx
+                            .send(ServoTargetState::powered(x.deployment_enabled));
                     }
 
                     ReceivedMessage::SeparationTrigger(_) => {
@@ -367,6 +353,19 @@ async fn build_status_blinky(mut led: Output<'static>) {
         Timer::after_millis(on_ms).await;
         led.set_high();
         Timer::after_millis(off_ms).await;
+    }
+}
+
+/// Send a message on CAN, bounded by [`CAN_TX_TIMEOUT`], and log the outcome.
+async fn transmit_logged(
+    can_tx: &Mutex<CriticalSectionRawMutex, CanTx<'static>>,
+    msg: dp_recovery_board::Message,
+) {
+    let mut tx = can_tx.lock().await;
+    match with_timeout(CAN_TX_TIMEOUT, tx.transmit(msg)).await {
+        Ok(Ok(_)) => trace!("sent CAN message"),
+        Ok(Err(err)) => error!("CAN TX error: {:?}", err),
+        Err(_) => error!("CAN TX timed out after {} ms", CAN_TX_TIMEOUT),
     }
 }
 
@@ -444,24 +443,7 @@ async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'stat
                     arming_state,
                 };
                 info!("status: {}", msg);
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    CAN_TX_TIMEOUT,
-                    tx.transmit(dp_recovery_board::Message::BoardStatus(msg)),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("sent REC Board status message");
-                    }
-                    Ok(Err(err)) => {
-                        error!("CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("CAN TX timed out after {} ms", CAN_TX_TIMEOUT);
-                    }
-                }
-                drop(tx);
+                transmit_logged(can_tx, dp_recovery_board::Message::BoardStatus(msg)).await;
             } else {
                 Timer::after_millis(25).await;
             }
@@ -473,24 +455,7 @@ async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'stat
         loop {
             let rx = separation_triggered_rx.changed().await;
             if rx {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    CAN_TX_TIMEOUT,
-                    tx.transmit(dp_recovery_board::Message::SeparationOccurred),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("sent Separation Occurred");
-                    }
-                    Ok(Err(err)) => {
-                        error!("CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("CAN TX timed out after {} ms", CAN_TX_TIMEOUT);
-                    }
-                }
-                drop(tx);
+                transmit_logged(can_tx, dp_recovery_board::Message::SeparationOccurred).await;
             }
         }
     };
@@ -500,24 +465,7 @@ async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'stat
         loop {
             let rx = deployment_triggered_rx.changed().await;
             if rx {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    CAN_TX_TIMEOUT,
-                    tx.transmit(dp_recovery_board::Message::DeploymentOccurred),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("sent Deployment Occurred");
-                    }
-                    Ok(Err(err)) => {
-                        error!("CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("CAN TX timed out after {} ms", CAN_TX_TIMEOUT);
-                    }
-                }
-                drop(tx);
+                transmit_logged(can_tx, dp_recovery_board::Message::DeploymentOccurred).await;
             }
         }
     };
