@@ -1,10 +1,20 @@
-#![allow(clippy::single_match)]
-#![allow(clippy::collapsible_else_if)]
+//! Module to talk to the steering, deployment and separation motors.
+
+use crate::actuator_control::SteeringStatus::{Responsive, Unpowered};
+use crate::can_io::ReceivedMessage;
+use crate::rsbl_servo::{LEFT, RIGHT};
+use crate::servo::RecoveryActuator;
+use crate::{
+    DEPLOYMENT_INITIAL_ANGLE, DEPLOYMENT_SERVO_ANGLE, SAFETY_SPIRAL_POS_LEFT,
+    SAFETY_SPIRAL_POS_RIGHT, SEPARATION_INITIAL_ANGLE, SEPARATION_SERVO_ANGLE, rsbl_servo,
+    watchdog,
+};
 use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
 use datatypes::status::{ArmingState, BuildInformationCommon};
+use dp_recovery_board::{ActuatorStatus, SteeringPositions, WatchdogState};
 use embassy_futures::join::join;
 use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
@@ -13,17 +23,6 @@ use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant};
 use embassy_time::{Timer, with_timeout};
 use embedded_utils::fmt::*;
-// this is maybe not nice, think about using another enum?
-use crate::can_io::ReceivedMessage;
-use crate::recovery_actuator_control::SteeringStatus::{Responsive, Unpowered};
-use crate::rsbl_servo::{LEFT, RIGHT};
-use crate::servo::RecoveryActuator;
-use crate::{
-    DEPLOYMENT_INITIAL_ANGLE, DEPLOYMENT_SERVO_ANGLE, SAFETY_SPIRAL_POS_LEFT,
-    SAFETY_SPIRAL_POS_RIGHT, SEPARATION_INITIAL_ANGLE, SEPARATION_SERVO_ANGLE, rsbl_servo,
-    watchdog,
-};
-use dp_recovery_board::{ActuatorStatus, SteeringPositions, WatchdogState};
 
 #[allow(unused_imports)]
 #[cfg(feature = "defmt")]
@@ -149,31 +148,28 @@ pub async fn steering_task(
                 // check that the watchdog is still active
                 if watchdog.check() {
                     // check if new values are available
-                    match motor_targets_rx.try_changed() {
-                        Some(target_positions) => {
-                            //on first value reception, activate watchdog
-                            if !watchdog_active {
-                                watchdog.start();
-                                watchdog_active = true;
-                                watchdog_state_tx.send(WatchdogState::Active);
-                            }
-                            // pet the watchdog
-                            watchdog.update();
-                            // set target positions to steering (flip as motors are counting revolutions the other way around)
-                            match steering
-                                .steer_parachutes(
-                                    -target_positions.left_pos,
-                                    -target_positions.right_pos,
-                                )
-                                .await
-                            {
-                                Ok(()) => {}
-                                Err(e) => {
-                                    error!("Error in steering parachutes: {:?}", e)
-                                }
+                    if let Some(target_positions) = motor_targets_rx.try_changed() {
+                        //on first value reception, activate watchdog
+                        if !watchdog_active {
+                            watchdog.start();
+                            watchdog_active = true;
+                            watchdog_state_tx.send(WatchdogState::Active);
+                        }
+                        // pet the watchdog
+                        watchdog.update();
+                        // set target positions to steering (flip as motors are counting revolutions the other way around)
+                        match steering
+                            .steer_parachutes(
+                                -target_positions.left_pos,
+                                -target_positions.right_pos,
+                            )
+                            .await
+                        {
+                            Ok(()) => {}
+                            Err(e) => {
+                                error!("Error in steering parachutes: {:?}", e)
                             }
                         }
-                        None => {}
                     }
                 } else {
                     if !safety_spiral_active {
@@ -252,6 +248,17 @@ pub enum ServoTargetState {
     Actuated,
 }
 
+impl ServoTargetState {
+    /// the resting state for a power-enable flag from the power config message
+    pub fn powered(enabled: bool) -> Self {
+        if enabled {
+            Self::PoweredOn
+        } else {
+            Self::PoweredOff
+        }
+    }
+}
+
 /// receive target states for separation Actuators
 pub static SEPARATION_TARGET_STATE: Watch<CriticalSectionRawMutex, ServoTargetState, 1> =
     Watch::new();
@@ -273,26 +280,23 @@ pub async fn separation_task(mut separation: RecoveryActuator<TIM3, TIM2>) {
 
     loop {
         // wait for TargetState to be provided by CAN message
-        match with_timeout(Duration::from_millis(1000), target_rx.changed()).await {
-            Ok(data) => {
-                match data {
-                    ServoTargetState::PoweredOff => {
-                        separation.deactivate_servo();
-                    }
-                    ServoTargetState::PoweredOn => {
-                        separation.activate_servo();
-                        let _ = separation.set_angle(SEPARATION_INITIAL_ANGLE);
-                    }
-                    ServoTargetState::Actuated => {
-                        separation.activate_servo();
-                        // we might want to change this to a wiggle function
-                        let _ = separation.set_angle(SEPARATION_SERVO_ANGLE);
-                        // still needs to send separation occurred when this is done
-                        separation_flag_tx.send(true);
-                    }
+        if let Ok(data) = with_timeout(Duration::from_millis(1000), target_rx.changed()).await {
+            match data {
+                ServoTargetState::PoweredOff => {
+                    separation.deactivate_servo();
+                }
+                ServoTargetState::PoweredOn => {
+                    separation.activate_servo();
+                    let _ = separation.set_angle(SEPARATION_INITIAL_ANGLE);
+                }
+                ServoTargetState::Actuated => {
+                    separation.activate_servo();
+                    // we might want to change this to a wiggle function
+                    let _ = separation.set_angle(SEPARATION_SERVO_ANGLE);
+                    // still needs to send separation occurred when this is done
+                    separation_flag_tx.send(true);
                 }
             }
-            Err(_) => {}
         }
         // update actuator connection thingy
         status_tx.send(separation.get_actuator_status());
