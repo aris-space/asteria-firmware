@@ -6,7 +6,7 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::SeqCst;
 use datatypes::status::{ArmingState, BuildInformationCommon};
 use embassy_futures::join::join;
-use embassy_stm32::gpio::{Input, Level, Output};
+use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::watch::Watch;
@@ -15,7 +15,7 @@ use embassy_time::{Timer, with_timeout};
 use embedded_utils::fmt::*;
 // this is maybe not nice, think about using another enum?
 use crate::can_io::ReceivedMessage;
-use crate::recovery_actuator_control::SteeringStatus::{Connected, NotConnected, Responsive};
+use crate::recovery_actuator_control::SteeringStatus::{Responsive, Unpowered};
 use crate::rsbl_servo::{LEFT, RIGHT};
 use crate::servo::RecoveryActuator;
 use crate::{
@@ -37,10 +37,8 @@ use panic_reset as _;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum SteeringStatus {
     #[default]
-    /// no current sink is detected at the actuators
-    NotConnected,
-    /// This state is only possible before power is on
-    Connected,
+    /// steering is unpowered, so the motors cannot be detected
+    Unpowered,
 
     /// Indicates if data from the motors could be read or not for [left, right].
     Responsive([bool; 2]),
@@ -102,7 +100,6 @@ pub static WATCHDOG_STATE: Watch<CriticalSectionRawMutex, WatchdogState, 1> = Wa
 pub async fn steering_task(
     mut steering: rsbl_servo::RsblServo<'static>,
     mut pwr: Output<'static>,
-    steering_actuator_detect: Input<'static>,
     mut watchdog: watchdog::Watchdog,
 ) {
     let mut motor_targets_rx = INPUTS.steering_target_positions.receiver().unwrap();
@@ -235,11 +232,8 @@ pub async fn steering_task(
                 safety_spiral_active = false;
                 watchdog_active = false;
 
-                // get the current state of the steering motor connection
-                steering_status.send(match steering_actuator_detect.get_level() {
-                    Level::High => Connected,
-                    Level::Low => NotConnected,
-                });
+                // without power the motors cannot be detected
+                steering_status.send(Unpowered);
             }
             // delay a bit before next iteration through this loop
             Timer::after_millis(10).await;

@@ -219,7 +219,6 @@ async fn main(spawner: Spawner) -> ! {
 
     let steering = rsbl_servo::RsblServo::new(steering_uart, steering_buffer);
     let steering_watchdog = Watchdog::new(AUTOMATIC_SAFETY_SPIRAL_TIMER);
-    let steering_detect = Input::new(p.PA8, Pull::None);
     /* END STEERING MOTORS */
 
     /* BEGIN SPI FLASH */
@@ -274,7 +273,7 @@ async fn main(spawner: Spawner) -> ! {
 
     //indication that async is working correctly, hopefully
     spawner.spawn(build_status_blinky(led_red).unwrap());
-    spawner.spawn(steering_task(steering, steer_pwr, steering_detect, steering_watchdog).unwrap());
+    spawner.spawn(steering_task(steering, steer_pwr, steering_watchdog).unwrap());
     spawner.spawn(separation_task(separation).unwrap());
     spawner.spawn(deployment_task(deployment).unwrap());
     spawner.spawn(can_tx_task(can_tx).unwrap());
@@ -408,13 +407,8 @@ async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'stat
                 //try to update steering status
                 if let Some(data) = steering_status_rx.try_changed() {
                     match data {
-                        SteeringStatus::NotConnected => {
+                        SteeringStatus::Unpowered => {
                             steering_general = ActuatorStatus::NotConnected;
-                            steering_left_connected = false;
-                            steering_right_connected = false;
-                        }
-                        SteeringStatus::Connected => {
-                            steering_general = ActuatorStatus::Connected;
                             steering_left_connected = false;
                             steering_right_connected = false;
                         }
