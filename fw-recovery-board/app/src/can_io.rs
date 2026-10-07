@@ -11,8 +11,6 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::watch::Watch;
 use embassy_time::Instant;
 
-#[cfg(not(feature = "defmt"))]
-use crate::CAN_TX_TIMEOUT;
 use crate::actuator_control::{
     ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS, SEPARATION_OCCURRED,
     SEPARATION_SERVO_STATUS, STEERING_STATUS, SteeringStatuses, WATCHDOG_STATE,
