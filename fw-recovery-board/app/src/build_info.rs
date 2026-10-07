@@ -56,8 +56,7 @@ pub(crate) static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|
     }
 });
 
-/// indication that async is working correctly, hopefully.
-/// 4 Hz if something is or 0.5Hz with high duty cycle otherwise.
+/// Blink at 4 Hz if something is not built correctly or 0.5Hz with high duty cycle otherwise.
 #[embassy_executor::task]
 pub async fn build_status_blinky(mut led: Output<'static>) {
     let build_info = crate::build_info::BUILD_INFO.get();
