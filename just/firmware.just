@@ -146,6 +146,8 @@ flash *args:
     upload_pid="$!"
 
     probe-rs download --chip {{chip}} --chip-erase "$elf"
+    # download leaves the core halted in its flash loader; start the new firmware.
+    probe-rs reset --chip {{chip}}
 
     if wait "$upload_pid"; then
       cat "$upload_log"
