@@ -13,7 +13,7 @@ use embassy_time::Instant;
 use crate::CAN_TX_TIMEOUT;
 use crate::actuator_control::{
     ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS, SEPARATION_OCCURRED,
-    SEPARATION_SERVO_STATUS, STEERING_STATUS, SteeringStatus, WATCHDOG_STATE,
+    SEPARATION_SERVO_STATUS, STEERING_STATUS, SteeringStatuses, WATCHDOG_STATE,
 };
 use crate::{CAN_TX_TIMEOUT, STATUS_CREATION_INTERVAL};
 use can_utils::rxtx::TypedCanTransmit;
@@ -119,9 +119,7 @@ pub async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'
         let mut sep2_status = ActuatorStatus::default();
         let mut depl1_status = ActuatorStatus::default();
         let mut depl2_status = ActuatorStatus::default();
-        let mut steering_general = ActuatorStatus::default();
-        let mut steering_left_connected = false;
-        let mut steering_right_connected = false;
+        let mut steering = SteeringStatuses::default();
         let mut steering_watchdog_status = WatchdogState::default();
         let mut arming_state = ArmingState::default();
         let mut common = StatusCommonMessage::default();
@@ -139,20 +137,7 @@ pub async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'
                 }
                 //try to update steering status
                 if let Some(data) = steering_status_rx.try_changed() {
-                    match data {
-                        SteeringStatus::Unpowered => {
-                            steering_general = ActuatorStatus::NotConnected;
-                            steering_left_connected = false;
-                            steering_right_connected = false;
-                        }
-                        SteeringStatus::Responsive(values) => {
-                            steering_general = ActuatorStatus::PowerOn;
-                            // update left response bool by reading if it has responded with data
-                            steering_left_connected = values[0];
-                            // update right response bool by reading if it has responded with data
-                            steering_right_connected = values[1];
-                        }
-                    }
+                    steering = data;
                 }
                 //try to update watchdog status
                 if let Some(data) = steering_watchdog_status_rx.try_changed() {
@@ -172,9 +157,8 @@ pub async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'
                     sep2_status,
                     depl1_status,
                     depl2_status,
-                    steering_general,
-                    steering_left_connected,
-                    steering_right_connected,
+                    steering_left_status: steering.left,
+                    steering_right_status: steering.right,
                     steering_watchdog_status,
                     arming_state,
                 };

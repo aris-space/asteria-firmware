@@ -20,8 +20,33 @@ use {defmt_rtt as _, panic_probe as _};
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
 
-pub const LEFT: u8 = 2;
-pub const RIGHT: u8 = 3;
+const LEFT: u8 = 2;
+const RIGHT: u8 = 3;
+
+/// One of the two steering motors. Only these two bus IDs are used in flight.
+#[derive(Clone, Copy)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+impl Side {
+    pub const BOTH: [Side; 2] = [Side::Left, Side::Right];
+
+    fn id(self) -> u8 {
+        match self {
+            Side::Left => LEFT,
+            Side::Right => RIGHT,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Side::Left => "left",
+            Side::Right => "right",
+        }
+    }
+}
 pub const RSBL_TIMEOUT: embassy_time::Duration = embassy_time::Duration::from_millis(5);
 
 /// I currently believe that the consts in here are the Register map.
@@ -303,7 +328,6 @@ pub enum RsblError {
     InternalError,
     WrongChecksum,
     WrongFormat,
-    InvalidID,
     TimeoutError,
 }
 
@@ -343,6 +367,7 @@ impl RsblData {
 pub struct RsblServo<'d> {
     tx: UartTx<'d, Async>,
     rx: RingBufferedUartRx<'d>,
+    /// tracked position of each motor in steps from the startup position
     left_pos: i32,
     right_pos: i32,
 }
@@ -396,21 +421,11 @@ impl<'d> RsblServo<'d> {
         }
         self.reset();
 
-        match self.move_steps(LEFT, 0, 0xFFFE).await {
-            Ok(_) => {}
-            Err(e) => {
+        for side in Side::BOTH {
+            if let Err(e) = self.move_steps(side.id(), 0, 0xFFFE).await {
                 error!(
-                    "Error while locking left steering motors in startup sequence: {}",
-                    e
-                );
-                error = Some(e);
-            }
-        }
-        match self.move_steps(RIGHT, 0, 0xFFFE).await {
-            Ok(_) => {}
-            Err(e) => {
-                error!(
-                    "Error while locking right steering motors in startup sequence: {}",
+                    "Error while locking {} steering motor in startup sequence: {}",
+                    side.name(),
                     e
                 );
                 error = Some(e);
@@ -461,8 +476,9 @@ impl<'d> RsblServo<'d> {
         left_target_position: i32,
         right_target_position: i32,
     ) -> Result<(), RsblError> {
-        self.move_absolute(LEFT, left_target_position).await?;
-        self.move_absolute(RIGHT, right_target_position).await?;
+        self.move_absolute(Side::Left, left_target_position).await?;
+        self.move_absolute(Side::Right, right_target_position)
+            .await?;
         Ok(())
     }
 
@@ -470,39 +486,30 @@ impl<'d> RsblServo<'d> {
     /// This function is a helper function that expands on the functionality of read_sensor_data.
     /// It computes the actual servo positions, as in the current operating mode (step servo mode) the servo only returns the amount of steps which it has to
     /// do until it reaches the previously provided step count.
-    pub async fn read_steering_data(&mut self, id: u8) -> Result<Option<RsblData>, RsblError> {
-        let data = self.read_sensor_data(id).await?;
+    pub async fn read_steering_data(&mut self, side: Side) -> Result<Option<RsblData>, RsblError> {
+        let tracked_pos = *self.pos_mut(side);
+        Ok(self.read_sensor_data(side.id()).await?.map(|mut data| {
+            data.angle = tracked_pos - data.angle;
+            data
+        }))
+    }
 
-        match id {
-            LEFT => {
-                if let Some(mut data) = data {
-                    data.angle = self.left_pos - data.angle;
-                    Ok(Some(data))
-                } else {
-                    Ok(None)
-                }
-            }
-            RIGHT => {
-                if let Some(mut data) = data {
-                    data.angle = self.right_pos - data.angle;
-                    Ok(Some(data))
-                } else {
-                    Ok(None)
-                }
-            }
-            _ => Err(RsblError::InvalidID),
+    fn pos_mut(&mut self, side: Side) -> &mut i32 {
+        match side {
+            Side::Left => &mut self.left_pos,
+            Side::Right => &mut self.right_pos,
         }
     }
 
     /// moves the servo to a step count relative to the zero-position (zero position is startup position) and tracks that movement
     /// currently, if there is a power loss, we will still lose accuracy but not entire position data
-    /// only accepts IDs LEFT and RIGHT, as those are the only ones we will use
-    pub async fn move_absolute(&mut self, id: u8, absolute_position: i32) -> Result<(), RsblError> {
-        let curr_pos = match id {
-            LEFT => self.left_pos,
-            RIGHT => self.right_pos,
-            _ => return Err(RsblError::InvalidID),
-        };
+    pub async fn move_absolute(
+        &mut self,
+        side: Side,
+        absolute_position: i32,
+    ) -> Result<(), RsblError> {
+        let id = side.id();
+        let curr_pos = *self.pos_mut(side);
         let mut error: Option<RsblError> = None;
 
         let mut steps = absolute_position - curr_pos;
@@ -534,15 +541,7 @@ impl<'d> RsblServo<'d> {
             }
         }
 
-        match id {
-            LEFT => {
-                self.left_pos = absolute_position;
-            }
-            RIGHT => {
-                self.right_pos = absolute_position;
-            }
-            _ => return Err(RsblError::InvalidID),
-        }
+        *self.pos_mut(side) = absolute_position;
         if let Some(e) = error {
             return Err(e);
         }
@@ -654,6 +653,7 @@ impl<'d> RsblServo<'d> {
 
     /* ===== Low Level Function Implementations ===== */
     /// ping RSBL Servo id
+    #[allow(dead_code)]
     pub async fn ping(&mut self, id: u8) -> Result<(), RsblError> {
         self.write_to_servo(id, PING, None, None).await?;
 
