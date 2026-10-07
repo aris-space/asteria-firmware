@@ -90,7 +90,7 @@ use panic_reset as _;
 
 // bind interrupts for UART and CAN
 bind_interrupts!(struct Irqs {
-    USART1 => usart::InterruptHandler<peripherals::USART1>; // data Steering Motors
+    USART2 => usart::InterruptHandler<peripherals::USART2>; // steering motors (RS-485)
 
     FDCAN1_IT0 => can::IT0InterruptHandler<FDCAN1>; // can bus
     FDCAN1_IT1 => can::IT1InterruptHandler<FDCAN1>; // can bus
@@ -112,8 +112,8 @@ async fn main(spawner: Spawner) -> ! {
     /* ARMING DETECTION */
     let arming_detect_pin = Input::new(p.PB11, Pull::None);
     /* BEGIN SEPARATION */
-    //general power
-    let sep_pwr = Output::new(p.PA1, Level::Low, Speed::Low);
+    // separation power trigger
+    let sep_pwr = Output::new(p.PC0, Level::Low, Speed::Low);
 
     // Separation 1 control
     // setup PWM for SEP1
@@ -149,8 +149,8 @@ async fn main(spawner: Spawner) -> ! {
     /* END SEPARATION */
 
     /* BEGIN DEPLOYMENT */
-    //general power deployment
-    let depl_pwr = Output::new(p.PA2, Level::Low, Speed::Low);
+    // deployment power trigger
+    let depl_pwr = Output::new(p.PC1, Level::Low, Speed::Low);
 
     //Deployment 1 control
     let depl1_ch1_pin = PwmPin::new(p.PA6, OutputType::PushPull);
@@ -186,18 +186,14 @@ async fn main(spawner: Spawner) -> ! {
     /* END DEPLOYMENT */
 
     /* BEGIN STEERING MOTORS */
-    //steering power
-    let steer_pwr = Output::new(p.PA3, Level::Low, Speed::Low);
-    //steer_pwr.set_high();
-    //Timer::after_millis(200).await;
+    // steering power trigger
+    let steer_pwr = Output::new(p.PC2, Level::Low, Speed::Low);
 
-    //UART for steering motors
-    //USART 1
-    //UART RX: PC5
-    //UART TX: PC4
-    //DE Pin: PC3
+    // RS-485 on USART2 with hardware driver enable
+    // USART2.DE on PA1
+    // USART2.TX on PA2
+    // USART2.RX on PA3
     let usart_config = rsbl_servo::uart_config();
-    let steering_dir = Output::new(p.PC3, Level::Low, Speed::VeryHigh);
 
     // SAFETY:
     // The main function is only called once, thus
@@ -209,10 +205,11 @@ async fn main(spawner: Spawner) -> ! {
         &mut BUFFER_TEMP
     };
 
-    let steering_temp: Uart<Async> = Uart::new(
-        p.USART1,
-        p.PC5,
-        p.PC4,
+    let steering_uart: Uart<Async> = Uart::new_with_de(
+        p.USART2,
+        p.PA3,
+        p.PA2,
+        p.PA1,
         p.DMA1_CH1,
         p.DMA1_CH2,
         Irqs,
@@ -220,7 +217,7 @@ async fn main(spawner: Spawner) -> ! {
     )
     .unwrap();
 
-    let steering = rsbl_servo::RsblServo::new(steering_temp, steering_dir, steering_buffer);
+    let steering = rsbl_servo::RsblServo::new(steering_uart, steering_buffer);
     let steering_watchdog = Watchdog::new(AUTOMATIC_SAFETY_SPIRAL_TIMER);
     let steering_detect = Input::new(p.PA8, Pull::None);
     /* END STEERING MOTORS */

@@ -13,7 +13,6 @@
     for testing purposes.
 
 */
-use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart;
 use embassy_stm32::usart::{RingBufferedUartRx, UartTx};
@@ -347,7 +346,6 @@ impl RsblData {
 pub struct RsblServo<'d> {
     tx: UartTx<'d, Async>,
     rx: RingBufferedUartRx<'d>,
-    dir: Output<'static>,
     left_pos: i32,
     right_pos: i32,
 }
@@ -372,7 +370,6 @@ impl<'d> RsblServo<'d> {
     ///generate new RsblServo instance
     pub fn new(
         handle: usart::Uart<'d, Async>,
-        dir: Output<'static>,
         rx_dma_buf: &'static mut [u8],
     ) -> Self {
         let (tx, rx) = handle.split();
@@ -383,7 +380,6 @@ impl<'d> RsblServo<'d> {
         Self {
             tx,
             rx,
-            dir,
             left_pos,
             right_pos,
         }
@@ -735,7 +731,6 @@ impl<'d> RsblServo<'d> {
                 checksum = self.calc_checksum(id, length, instruction, Some(register), Some(data));
 
                 //actually write stuff to the servo
-                self.dir.set_high();
                 self.tx
                     .write(&header)
                     .await
@@ -753,7 +748,6 @@ impl<'d> RsblServo<'d> {
                     .await
                     .map_err(|_| RsblError::FailedWrite)?;
                 self.tx.flush().await.map_err(|_| RsblError::FailedWrite)?;
-                self.dir.set_low();
                 Ok(())
             }
             //if we do not have a register to write to, then we also do not have data. handle that here
@@ -775,13 +769,11 @@ impl<'d> RsblServo<'d> {
 
                 //actually write stuff to the servo
                 //written in a blocking way because async takes too much time, but for sending it still needs to be tested
-                self.dir.set_high();
                 self.tx
                     .write(&buf)
                     .await
                     .map_err(|_| RsblError::FailedWrite)?;
                 self.tx.flush().await.map_err(|_| RsblError::FailedWrite)?;
-                self.dir.set_low();
 
                 Ok(())
             }
@@ -798,8 +790,6 @@ impl<'d> RsblServo<'d> {
         let mut data = [0u8];
         let buf = buf.unwrap_or(&mut []);
 
-        //ensure that transceiver can read
-        self.dir.set_low();
 
         //generate header arrays, only needed for some checks
         let mut header: [u8; 5] = [0; 5];
