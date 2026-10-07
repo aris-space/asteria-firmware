@@ -20,6 +20,8 @@ use {defmt_rtt as _, panic_probe as _};
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
 
+// IN THE FINAL VERSION; MAKE SURE THAT SERVO ID 2 IS LEFT, AND SERVO ID 3 IS RIGHT POSITION!!!
+
 const LEFT: u8 = 2;
 const RIGHT: u8 = 3;
 
@@ -364,6 +366,10 @@ impl RsblData {
     }
 }
 
+/// Driver for *two* motors on a single bus.
+///
+/// Unified into a struct such that they can own the uart
+/// FIXME: but should probably be changed to separate concerns.
 pub struct RsblServo<'d> {
     tx: UartTx<'d, Async>,
     rx: RingBufferedUartRx<'d>,

@@ -1,6 +1,8 @@
 // Copyright 2026 ARIS
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+//! Firmware for the ASTERIA Recovery Board
+
 #![no_std]
 #![no_main]
 
@@ -11,8 +13,6 @@ mod cats;
 mod rsbl_servo;
 mod servo;
 mod watchdog;
-
-// IN THE FINAL VERSION; MAKE SURE THAT SERVO ID 2 IS LEFT, AND SERVO ID 3 IS RIGHT POSITION!!!
 
 use crate::actuator_control::{DEPLOYMENT_TARGET_STATE, SEPARATION_TARGET_STATE, ServoTargetState};
 use crate::can_io::{INPUTS, OUTPUTS, ReceivedMessage};

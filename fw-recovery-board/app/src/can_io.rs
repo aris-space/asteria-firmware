@@ -1,3 +1,5 @@
+//! CAN message sending and storage.
+
 use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
 use data_core::can::{hal::CanDecode, sparse_decodable_can_message};
