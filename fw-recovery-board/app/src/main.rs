@@ -199,13 +199,15 @@ async fn main(spawner: Spawner) -> ! {
     let usart_config = rsbl_servo::uart_config();
     let steering_dir = Output::new(p.PC3, Level::Low, Speed::VeryHigh);
 
-    // this is a necessary thing: To pass the UART instance to an embassy task, the buffer here
-    // needs to have static lifetime.
-    static mut BUFFER_TEMP: [u8; 128] = [0; 128];
-    // This unsafe block is safe because the BUFFER_TEMP array never goes out of scope (declared here in main and main never ends), is never used within the main function after declaration
-    // and will be integrated into the UART only once. This assures that only a single mutable reference to the Buffer exists.
-    #[allow(static_mut_refs)]
-    let steering_buffer = unsafe { &mut BUFFER_TEMP };
+    // SAFETY:
+    // The main function is only called once, thus
+    // the static is narrowly scoped and will be integrated into the UART only once.
+    // This assures that only a single mutable reference to the Buffer exists.
+    let steering_buffer = unsafe {
+        static mut BUFFER_TEMP: [u8; 128] = [0; 128];
+        #[allow(static_mut_refs)]
+        &mut BUFFER_TEMP
+    };
 
     let steering_temp: Uart<Async> = Uart::new(
         p.USART1,
