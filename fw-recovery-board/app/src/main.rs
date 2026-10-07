@@ -9,9 +9,9 @@ mod can_io;
 mod recovery_actuator_control;
 mod rsbl_servo;
 mod servo;
-
-/// IN THE FINAL VERSION; MAKE SURE THAT SERVO ID 2 IS LEFT, AND SERVO ID 3 IS RIGHT POSITION!!!
 mod watchdog;
+
+// IN THE FINAL VERSION; MAKE SURE THAT SERVO ID 2 IS LEFT, AND SERVO ID 3 IS RIGHT POSITION!!!
 
 use crate::can_io::ReceivedMessage;
 use crate::recovery_actuator_control::{
@@ -117,7 +117,6 @@ async fn main(spawner: Spawner) -> ! {
 
     // Separation 1 control
     // setup PWM for SEP1
-    // idk if this works as in the datasheet PA4 is on timer channel 2, but embassy wants it on channel 1
     let sep1_ch2_pin = PwmPin::new(p.PA4, OutputType::PushPull);
     let sep1_pwm_temp = SimplePwm::new(
         p.TIM3,
@@ -253,7 +252,6 @@ async fn main(spawner: Spawner) -> ! {
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (can_tx, mut can_rx, _prop) = can.split();
     let can_tx = make_multiplexable(can_tx);
-
     /* END CAN BUS */
 
     /* BEGIN LEDS */
@@ -271,7 +269,6 @@ async fn main(spawner: Spawner) -> ! {
         .sender()
         .send(crate::build_info::BUILD_INFO.get().clone());
 
-    //indication that async is working correctly, hopefully
     spawner.spawn(build_status_blinky(led_red).unwrap());
     spawner.spawn(steering_task(steering, steer_pwr, steering_watchdog).unwrap());
     spawner.spawn(separation_task(separation).unwrap());
@@ -353,6 +350,7 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
+/// indication that async is working correctly, hopefully
 #[embassy_executor::task]
 async fn build_status_blinky(mut led: Output<'static>) {
     let build_info = crate::build_info::BUILD_INFO.get();
