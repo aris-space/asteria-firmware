@@ -10,9 +10,10 @@ filters = { path = "../../crates/filters" }
 dpr = { path = "../../crates/devices/dpr", features = ["defmt"] }
 embedded-utils = { path = "../../crates/embedded-utils" }
 analog-pressure = { path = "../../crates/devices/analog-pressure" }
+stm32-temp = { path = "../../crates/devices/stm32-temp" }
 can-utils = { path = "../../crates/can-utils" }
 data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
-dp-oxidizer-control-board = { path = "../../data-definitions/datapoints/dp-oxidizer-control-board", version = "=0.5", features = [
+dp-oxidizer-control-board = { path = "../../data-definitions/datapoints/dp-oxidizer-control-board", version = "=0.6", features = [
     "can",
 ] }
 dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [

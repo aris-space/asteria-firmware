@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "dp-oxidizer-control-board"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "data-core",
@@ -833,6 +833,7 @@ dependencies = [
  "nb 1.1.0",
  "panic-probe",
  "panic-reset",
+ "stm32-temp",
 ]
 
 [[package]]
@@ -1409,6 +1410,14 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt 0.3.100",
+]
+
+[[package]]
+name = "stm32-temp"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "embassy-stm32",
 ]
 
 [[package]]

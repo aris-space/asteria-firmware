@@ -47,7 +47,6 @@ use crate::drivers::solenoid_detection::solenoid_detection_task;
 use crate::globals::STATE;
 use crate::sensors::keller_analog_p::{OxidizerPressureHandles, oxidizer_pressure_acquisition};
 use crate::sensors::solenoid_current::solenoid_current_task;
-use analog_pressure::config_vref_buf;
 use can_utils::broadcast::Broadcast as _;
 use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode as _;
@@ -69,6 +68,7 @@ bind_interrupts!(struct Irqs {
     DMA1_CHANNEL6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
     DMA1_CHANNEL7 => dma::InterruptHandler<peripherals::DMA1_CH7>;
     DMA2_CHANNEL3 => dma::InterruptHandler<peripherals::DMA2_CH3>;
+    DMA2_CHANNEL4 => dma::InterruptHandler<peripherals::DMA2_CH4>;
 });
 
 #[embassy_executor::main]
@@ -115,7 +115,10 @@ async fn main(spawner: Spawner) -> ! {
         Default::default(),
     );
 
-    config_vref_buf();
+    // Initialize the ADC and enable the internal temperature sensor channel
+    // SAFETY: this board has an unconnected VREF+ and no other system sets the VREFBUF.
+    let vrefbuf_cfg = unsafe { stm32_temp::setup_internal_vref_buffer() };
+    let mcu_temp = stm32_temp::MCUTemperature::new(p.ADC5, p.DMA2_CH4, vrefbuf_cfg);
 
     // Trafag analog pressure sensors
     let pressure_handles = OxidizerPressureHandles {
@@ -163,7 +166,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(valve_task(oxidizer_vent_valve).expect("valve task failed"));
 
     spawner.spawn(can_rx_task(rx).unwrap());
-    spawner.spawn(board_status_update_task().expect("board status task failed"));
+    spawner.spawn(board_status_update_task(mcu_temp).expect("board status task failed"));
 
     spawner.spawn(build_status_blinky(red).expect("build status blinky task failed"));
 
