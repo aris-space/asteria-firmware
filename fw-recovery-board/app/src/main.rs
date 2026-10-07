@@ -4,22 +4,22 @@
 #![no_std]
 #![no_main]
 
+mod actuator_control;
 mod build_info;
 mod can_io;
-mod recovery_actuator_control;
 mod rsbl_servo;
 mod servo;
 mod watchdog;
 
 // IN THE FINAL VERSION; MAKE SURE THAT SERVO ID 2 IS LEFT, AND SERVO ID 3 IS RIGHT POSITION!!!
 
-use crate::can_io::ReceivedMessage;
-use crate::recovery_actuator_control::{
+use crate::actuator_control::{
     ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS, DEPLOYMENT_TARGET_STATE, INPUTS,
     OUTPUTS, SEPARATION_OCCURRED, SEPARATION_SERVO_STATUS, SEPARATION_TARGET_STATE,
     STEERING_STATUS, ServoTargetState, SteeringStatus, WATCHDOG_STATE, arming_detection,
     deployment_task, separation_task, steering_task,
 };
+use crate::can_io::ReceivedMessage;
 use crate::servo::{RecoveryActuator, Servo};
 use crate::watchdog::Watchdog;
 use can_utils::broadcast::Broadcast;
