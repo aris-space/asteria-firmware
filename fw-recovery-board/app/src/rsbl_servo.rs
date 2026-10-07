@@ -1,18 +1,11 @@
-#![allow(dead_code)]
-#![allow(clippy::needless_range_loop)]
-/*
-    This is the implementation for the RSBL85-24 servos. Thanks to Domenic Nebiker for helping me build this thing
-    Those Servos are controlled using Half-Duplex RS-485. I currently believe that the following is the
-    Register map: This is stolen from the Arduino implementation of the Servo driver hat they use
-    I believe we need to use the SMS type Registers / Protocols, as I can find SCS servos that use potentiometers
-    and are not connected via RS-485 but instead half-duplex UART over a single wire.
-    (Also M kinda corresponds to magnetic, and as we are using servos with magnetic encoders instead of potentiometers this is appropriate)
-    The SCS Servo registers only differ slightly, and it should be possible to use the RSBL Servos with either implementation.
+//! This is the implementation for the RSBL85-24 servos.
+//!
+//! Those Servos are controlled using Half-Duplex RS-485.
+//! I believe we need to use the SMS type Registers / Protocols, as I can find SCS servos that use potentiometers
+//! and are not connected via RS-485 but instead half-duplex UART over a single wire.
+//! (Also M kinda corresponds to magnetic, and as we are using servos with magnetic encoders instead of potentiometers this is appropriate)
+//! The SCS Servo registers only differ slightly, and it should be possible to use the RSBL Servos with either implementation.
 
-    This here is a first approximation of the program that will be ultimately used to control these servos and is currently only intended
-    for testing purposes.
-
-*/
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart;
 use embassy_stm32::usart::{RingBufferedUartRx, UartTx};
@@ -27,276 +20,280 @@ use {defmt_rtt as _, panic_probe as _};
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
 
-// ADDRESSING STUFF
-const HEADER: u8 = 0xFF; //must be duplicated at the beginning of every message;
-const BROADCAST: u8 = 0xFE;
 pub const LEFT: u8 = 2;
 pub const RIGHT: u8 = 3;
 pub const RSBL_TIMEOUT: embassy_time::Duration = embassy_time::Duration::from_millis(5);
 
-//<editor-fold desc="Declarations for Servo Registers">
-// EEPROM (read only) //
+/// I currently believe that the consts in here are the Register map.
+/// Mostly stolen from the Arduino implementation of the Servo driver hat they use.
+#[allow(dead_code)]
+mod registers {
+    // ADDRESSING STUFF
+    pub const HEADER: u8 = 0xFF; //must be duplicated at the beginning of every message;
+    pub const BROADCAST: u8 = 0xFE;
 
-/// Firmware major version number
-/// initial value = 3
-const FIRMWARE_MAJOR: u8 = 0x00;
+    // ======== Declarations for Servo Registers
+    // EEPROM (read only) //
 
-/// Firmware sub version number
-/// initial value = 6
-const FIRMWARE_MINOR: u8 = 0x01;
+    /// Firmware major version number
+    /// initial value = 3
+    pub const FIRMWARE_MAJOR: u8 = 0x00;
 
-/// Servo main version number
-/// initial value = 9
-const SERVO_MAIN_VERSION: u8 = 0x03;
+    /// Firmware sub version number
+    /// initial value = 6
+    pub const FIRMWARE_MINOR: u8 = 0x01;
 
-/// Servo sub version number
-/// initial value = 3
-const SERVO_MINOR_VERSION: u8 = 0x04;
+    /// Servo main version number
+    /// initial value = 9
+    pub const SERVO_MAIN_VERSION: u8 = 0x03;
 
-// EEPROM (read and write) //
+    /// Servo sub version number
+    /// initial value = 3
+    pub const SERVO_MINOR_VERSION: u8 = 0x04;
 
-/// ID
-/// Unique identification code on the bus. Duplicate ID number is not allowed on the same bus, 254 (0xFE) is the broadcast ID, broadcast does not return a reply packet.
-/// initial value = 1
-const ID: u8 = 0x05;
+    // EEPROM (read and write) //
 
-/// Baud rate
-/// 0-7 represents baud rate as follows: 1000000, 500000, 250000, 128000, 115200, 76800, 57600, 38400
-/// initial value = 0
-const BAUD_RATE: u8 = 0x06;
+    /// ID
+    /// Unique identification code on the bus. Duplicate ID number is not allowed on the same bus, 254 (0xFE) is the broadcast ID, broadcast does not return a reply packet.
+    /// initial value = 1
+    pub const ID: u8 = 0x05;
 
-/// Return delay
-/// The minimum unit is 2µs, and the maximum set return delay is 254 * 2 = 508µs.
-/// initial value = 0
-const RETURN_DELAY: u8 = 0x07;
+    /// Baud rate
+    /// 0-7 represents baud rate as follows: 1000000, 500000, 250000, 128000, 115200, 76800, 57600, 38400
+    /// initial value = 0
+    pub const BAUD_RATE: u8 = 0x06;
 
-/// Response status level
-/// 0: except for read instruction and Ping instruction, other instructions do not return a reply packet;
-/// 1: Returns a reply packet for all instructions.
-/// initial value = 1
-const RESPONSE_STATUS_LEVEL: u8 = 0x08;
+    /// Return delay
+    /// The minimum unit is 2µs, and the maximum set return delay is 254 * 2 = 508µs.
+    /// initial value = 0
+    pub const RETURN_DELAY: u8 = 0x07;
 
-/// Minimum Angle Limitation
-/// Set the minimum limit of motion stroke, the value is less than the maximum angle limit, and this value is 0 when the multi-cycle absolute position control is carried out.
-/// initial value = 0
-const MIN_ANGLE_LIMIT_H: u8 = 0x09;
-const MIN_ANGLE_LIMIT_L: u8 = 0x0A;
+    /// Response status level
+    /// 0: except for read instruction and Ping instruction, other instructions do not return a reply packet;
+    /// 1: Returns a reply packet for all instructions.
+    /// initial value = 1
+    pub const RESPONSE_STATUS_LEVEL: u8 = 0x08;
 
-/// Maximum Angle Limitation
-/// Set the maximum limit of motion stroke, which is greater than the minimum angle limit, and the value is 0 when the multi-turn absolute position control is adopted.
-/// initial value = 4095
-const MAX_ANGLE_LIMIT_H: u8 = 0x0B;
-const MAX_ANGLE_LIMIT_L: u8 = 0x0C;
+    /// Minimum Angle Limitation
+    /// Set the minimum limit of motion stroke, the value is less than the maximum angle limit, and this value is 0 when the multi-cycle absolute position control is carried out.
+    /// initial value = 0
+    pub const MIN_ANGLE_LIMIT_H: u8 = 0x09;
+    pub const MIN_ANGLE_LIMIT_L: u8 = 0x0A;
 
-/// Maximum Temperature Limit
-/// The maximum operating temperature limit, if set to 70, the maximum temperature is 70°C, and the setting accuracy is 1°C.
-/// initial value = 70
-const MAX_TEMPERATURE: u8 = 0x0D;
+    /// Maximum Angle Limitation
+    /// Set the maximum limit of motion stroke, which is greater than the minimum angle limit, and the value is 0 when the multi-turn absolute position control is adopted.
+    /// initial value = 4095
+    pub const MAX_ANGLE_LIMIT_H: u8 = 0x0B;
+    pub const MAX_ANGLE_LIMIT_L: u8 = 0x0C;
 
-/// Maximum input voltage
-/// If the maximum input voltage is set to 80, the maximum working voltage is limited to 8.0V and the setting accuracy is 0.1V.
-/// initial value = 80
-const MAX_INPUT_VOLTAGE: u8 = 0x0E;
+    /// Maximum Temperature Limit
+    /// The maximum operating temperature limit, if set to 70, the maximum temperature is 70°C, and the setting accuracy is 1°C.
+    /// initial value = 70
+    pub const MAX_TEMPERATURE: u8 = 0x0D;
 
-/// Minimum input voltage
-/// If the minimum input voltage is set to 40, the minimum working voltage is limited to 4.0V and the setting accuracy is 0.1V.
-/// initial value = 40
-const MIN_INPUT_VOLTAGE: u8 = 0x0F;
+    /// Maximum input voltage
+    /// If the maximum input voltage is set to 80, the maximum working voltage is limited to 8.0V and the setting accuracy is 0.1V.
+    /// initial value = 80
+    pub const MAX_INPUT_VOLTAGE: u8 = 0x0E;
 
-/// Maximum torque
-/// Set the maximum output torque limit of the servo, and set 1000 = 100% * locked torque.
-/// Power on assigned to address 48 torque limit.
-/// initial value = 1000
-const MAX_TORQUE_H: u8 = 0x10;
-const MAX_TORQUE_L: u8 = 0x11;
+    /// Minimum input voltage
+    /// If the minimum input voltage is set to 40, the minimum working voltage is limited to 4.0V and the setting accuracy is 0.1V.
+    /// initial value = 40
+    pub const MIN_INPUT_VOLTAGE: u8 = 0x0F;
 
-/// Phase
-/// Special function byte, which cannot be modified without special requirements.
-/// initial value = 12
-const PHASE: u8 = 0x12;
+    /// Maximum torque
+    /// Set the maximum output torque limit of the servo, and set 1000 = 100% * locked torque.
+    /// Power on assigned to address 48 torque limit.
+    /// initial value = 1000
+    pub const MAX_TORQUE_H: u8 = 0x10;
+    pub const MAX_TORQUE_L: u8 = 0x11;
 
-/// Unloading condition
-/// Bit0-Bit5 corresponding bits are set to enable corresponding protection.
-/// initial value = 44
-const UNLOADING_CONDITION: u8 = 0x13;
+    /// Phase
+    /// Special function byte, which cannot be modified without special requirements.
+    /// initial value = 12
+    pub const PHASE: u8 = 0x12;
 
-/// LED Alarm condition
-/// The corresponding bit of temperature, current, angle, overload, or voltage sensor is set to 0 to disable the alarm.
-/// initial value = 47
-const LED_ALARM_CONDITION: u8 = 0x14;
+    /// Unloading condition
+    /// Bit0-Bit5 corresponding bits are set to enable corresponding protection.
+    /// initial value = 44
+    pub const UNLOADING_CONDITION: u8 = 0x13;
 
-/// P Proportionality coefficient
-/// Proportional factor of control motor.
-/// initial value = 32
-const P_PROPORTIONALITY_COEFFICIENT: u8 = 0x15;
+    /// LED Alarm condition
+    /// The corresponding bit of temperature, current, angle, overload, or voltage sensor is set to 0 to disable the alarm.
+    /// initial value = 47
+    pub const LED_ALARM_CONDITION: u8 = 0x14;
 
-/// D Differential coefficient
-/// Differential coefficient of control motor.
-/// initial value = 32
-const D_DIFFERENTIAL_COEFFICIENT: u8 = 0x16;
+    /// P Proportionality coefficient
+    /// Proportional factor of control motor.
+    /// initial value = 32
+    pub const P_PROPORTIONALITY_COEFFICIENT: u8 = 0x15;
 
-/// I Integral coefficient
-/// Integral coefficient of control motor.
-/// initial value = 0
-const I_INTEGRAL_COEFFICIENT: u8 = 0x17;
+    /// D Differential coefficient
+    /// Differential coefficient of control motor.
+    /// initial value = 32
+    pub const D_DIFFERENTIAL_COEFFICIENT: u8 = 0x16;
 
-/// Minimum startup force
-/// Set the minimum output starting torque of the servo. 1000 = 100% * locked torque.
-/// initial value = 16
-const MIN_STARTUP_FORCE_H: u8 = 0x18;
-const MIN_STARTUP_FORCE_L: u8 = 0x19;
+    /// I Integral coefficient
+    /// Integral coefficient of control motor.
+    /// initial value = 0
+    pub const I_INTEGRAL_COEFFICIENT: u8 = 0x17;
 
-/// Clockwise insensitive area
-/// The minimum unit is a minimum resolution angle.
-/// initial value = 1
-const CW_INSENSITIVE_AREA: u8 = 0x1A;
+    /// Minimum startup force
+    /// Set the minimum output starting torque of the servo. 1000 = 100% * locked torque.
+    /// initial value = 16
+    pub const MIN_STARTUP_FORCE_H: u8 = 0x18;
+    pub const MIN_STARTUP_FORCE_L: u8 = 0x19;
 
-/// Counterclockwise insensitive region
-/// The minimum unit is a minimum resolution angle.
-/// initial value = 1
-const CCW_INSENSITIVE_REGION: u8 = 0x1B;
+    /// Clockwise insensitive area
+    /// The minimum unit is a minimum resolution angle.
+    /// initial value = 1
+    pub const CW_INSENSITIVE_AREA: u8 = 0x1A;
 
-/// Protection current
-/// The maximum current can be set at 3255mA.
-/// initial value = 500
-const PROTECTION_CURRENT_H: u8 = 0x1C;
-const PROTECTION_CURRENT_L: u8 = 0x1D;
+    /// Counterclockwise insensitive region
+    /// The minimum unit is a minimum resolution angle.
+    /// initial value = 1
+    pub const CCW_INSENSITIVE_REGION: u8 = 0x1B;
 
-/// Angular resolution
-/// The amplification factor of the minimum resolution angle (degree/step).
-/// initial value = 1
-const ANGULAR_RESOLUTION: u8 = 0x1E;
+    /// Protection current
+    /// The maximum current can be set at 3255mA.
+    /// initial value = 500
+    pub const PROTECTION_CURRENT_H: u8 = 0x1C;
+    pub const PROTECTION_CURRENT_L: u8 = 0x1D;
 
-/// Position correction
-/// Bit11 is the direction bit, indicating positive and negative directions.
-/// initial value = 0
-const POSITION_CORRECTION_H: u8 = 0x1F;
-const POSITION_CORRECTION_L: u8 = 0x20;
+    /// Angular resolution
+    /// The amplification factor of the minimum resolution angle (degree/step).
+    /// initial value = 1
+    pub const ANGULAR_RESOLUTION: u8 = 0x1E;
 
-/// Operation mode
-/// 0: Position servo mode
-/// 1: Constant speed mode (controlled by parameter 0x2E, bit 15 is direction bit)
-/// 2: PWM open-loop speed regulation mode
-/// 3: Step servo mode (step progress by parameter 0x2A, bit 15 is direction bit)
-/// initial value = 0
-const OPERATION_MODE: u8 = 0x21;
+    /// Position correction
+    /// Bit11 is the direction bit, indicating positive and negative directions.
+    /// initial value = 0
+    pub const POSITION_CORRECTION_H: u8 = 0x1F;
+    pub const POSITION_CORRECTION_L: u8 = 0x20;
 
-/// Protective torque
-/// After entering overload protection, if set to 20, means 20% of max torque.
-/// initial value = 20
-const PROTECTIVE_TORQUE: u8 = 0x22;
+    /// Operation mode
+    /// 0: Position servo mode
+    /// 1: Constant speed mode (controlled by parameter 0x2E, bit 15 is direction bit)
+    /// 2: PWM open-loop speed regulation mode
+    /// 3: Step servo mode (step progress by parameter 0x2A, bit 15 is direction bit)
+    /// initial value = 0
+    pub const OPERATION_MODE: u8 = 0x21;
 
-/// Protection time
-/// Timing time when current load exceeds overload torque and remains.
-/// initial value = 200
-const PROTECTION_TIME: u8 = 0x23;
+    /// Protective torque
+    /// After entering overload protection, if set to 20, means 20% of max torque.
+    /// initial value = 20
+    pub const PROTECTIVE_TORQUE: u8 = 0x22;
 
-/// Overload torque
-/// Max torque threshold for starting overload protection.
-/// initial value = 80
-const OVERLOAD_TORQUE: u8 = 0x24;
+    /// Protection time
+    /// Timing time when current load exceeds overload torque and remains.
+    /// initial value = 200
+    pub const PROTECTION_TIME: u8 = 0x23;
 
-/// Speed closed loop P proportional coefficient
-/// In motor constant speed mode (mode 1), the speed loop proportional coefficient.
-/// initial value = 10
-const SPEED_CLOSED_LOOP_P: u8 = 0x25;
+    /// Overload torque
+    /// Max torque threshold for starting overload protection.
+    /// initial value = 80
+    pub const OVERLOAD_TORQUE: u8 = 0x24;
 
-/// Overcurrent protection time
-/// Max setting is 254 * 10ms = 2540ms.
-/// initial value = 200
-const OVER_CURRENT_PROTECTION_TIME: u8 = 0x26;
+    /// Speed closed loop P proportional coefficient
+    /// In motor constant speed mode (mode 1), the speed loop proportional coefficient.
+    /// initial value = 10
+    pub const SPEED_CLOSED_LOOP_P: u8 = 0x25;
 
-/// Velocity closed loop I integral coefficient
-/// initial value = 10
-const VELOCITY_CLOSED_LOOP_I: u8 = 0x27;
+    /// Overcurrent protection time
+    /// Max setting is 254 * 10ms = 2540ms.
+    /// initial value = 200
+    pub const OVER_CURRENT_PROTECTION_TIME: u8 = 0x26;
 
-// SRAM (read and write) //
+    /// Velocity closed loop I integral coefficient
+    /// initial value = 10
+    pub const VELOCITY_CLOSED_LOOP_I: u8 = 0x27;
 
-/// Torque switch
-/// initial value = 0
-const TORQUE_SWITCH: u8 = 0x28;
+    // SRAM (read and write) //
 
-/// Acceleration
-/// initial value = 0
-const ACCELERATION: u8 = 0x29;
+    /// Torque switch
+    /// initial value = 0
+    pub const TORQUE_SWITCH: u8 = 0x28;
 
-/// Target location
-/// initial value = 0
-const TARGET_LOCATION_H: u8 = 0x2A;
-const TARGET_LOCATION_L: u8 = 0x2B;
+    /// Acceleration
+    /// initial value = 0
+    pub const ACCELERATION: u8 = 0x29;
 
-/// Running time
-/// initial value = 0
-const RUNNING_TIME_H: u8 = 0x2C;
-const RUNNING_TIME_L: u8 = 0x2D;
+    /// Target location
+    /// initial value = 0
+    pub const TARGET_LOCATION_H: u8 = 0x2A;
+    pub const TARGET_LOCATION_L: u8 = 0x2B;
 
-/// Running speed
-/// initial value = 0
-const RUNNING_SPEED_H: u8 = 0x2E;
-const RUNNING_SPEED_L: u8 = 0x2F;
+    /// Running time
+    /// initial value = 0
+    pub const RUNNING_TIME_H: u8 = 0x2C;
+    pub const RUNNING_TIME_L: u8 = 0x2D;
 
-/// Torque limit
-/// initial value = 1000
-const TORQUE_LIMIT_H: u8 = 0x30;
-const TORQUE_LIMIT_L: u8 = 0x31;
+    /// Running speed
+    /// initial value = 0
+    pub const RUNNING_SPEED_H: u8 = 0x2E;
+    pub const RUNNING_SPEED_L: u8 = 0x2F;
 
-/// Lock mark
-/// initial value = 0
-const LOCK_MARK: u8 = 0x37;
+    /// Torque limit
+    /// initial value = 1000
+    pub const TORQUE_LIMIT_H: u8 = 0x30;
+    pub const TORQUE_LIMIT_L: u8 = 0x31;
 
-/// Current location
-/// initial value = 0
-const CURRENT_LOCATION_H: u8 = 0x38;
-const CURRENT_LOCATION_L: u8 = 0x39;
+    /// Lock mark
+    /// initial value = 0
+    pub const LOCK_MARK: u8 = 0x37;
 
-/// Current speed
-/// initial value = 0
-const CURRENT_SPEED_H: u8 = 0x3A;
-const CURRENT_SPEED_L: u8 = 0x3B;
+    /// Current location
+    /// initial value = 0
+    pub const CURRENT_LOCATION_H: u8 = 0x38;
+    pub const CURRENT_LOCATION_L: u8 = 0x39;
 
-/// Current load
-/// initial value = 0
-const CURRENT_LOAD_H: u8 = 0x3C;
-const CURRENT_LOAD_L: u8 = 0x3D;
+    /// Current speed
+    /// initial value = 0
+    pub const CURRENT_SPEED_H: u8 = 0x3A;
+    pub const CURRENT_SPEED_L: u8 = 0x3B;
 
-/// Current voltage
-/// initial value = 0
-const CURRENT_VOLTAGE: u8 = 0x3E;
+    /// Current load
+    /// initial value = 0
+    pub const CURRENT_LOAD_H: u8 = 0x3C;
+    pub const CURRENT_LOAD_L: u8 = 0x3D;
 
-/// Current temperature
-/// initial value = 0
-const CURRENT_TEMPERATURE: u8 = 0x3F;
+    /// Current voltage
+    /// initial value = 0
+    pub const CURRENT_VOLTAGE: u8 = 0x3E;
 
-/// Asynchronous write flag
-/// initial value = 0
-const ASYNC_WRITE_FLAG: u8 = 0x40;
+    /// Current temperature
+    /// initial value = 0
+    pub const CURRENT_TEMPERATURE: u8 = 0x3F;
 
-/// Servo status
-/// initial value = 0
-const SERVO_STATUS: u8 = 0x41;
+    /// Asynchronous write flag
+    /// initial value = 0
+    pub const ASYNC_WRITE_FLAG: u8 = 0x40;
 
-/// Mobile sign
-/// initial value = 0
-const MOBILE_SIGN: u8 = 0x42;
+    /// Servo status
+    /// initial value = 0
+    pub const SERVO_STATUS: u8 = 0x41;
 
-/// Current current
-/// initial value = 0
-const CURRENT_CURRENT_H: u8 = 0x45;
-const CURRENT_CURRENT_L: u8 = 0x46;
-//</editor-fold>
+    /// Mobile sign
+    /// initial value = 0
+    pub const MOBILE_SIGN: u8 = 0x42;
 
-//<editor-fold desc="Servo Command List">
-//INSTRUCTIONS FOR SERVO
-const PING: u8 = 0x01; // Query working status | Parameter length = 0
-const READ_DATA: u8 = 0x02; //Query the character in the control table | Parameter length = 2
-const WRITE_DATA: u8 = 0x03; //Write the character into the control table | Parameter length >= 1
-const REGWRITE_DATA: u8 = 0x04; //Similar to WRITE DATA, but the control character does not act immediately after writing until ACTION. | Parameter length >= 2
-const ACTION: u8 = 0x05; //Triggering the action of REG WRITE operation | Parameter length = 0, suitable for broadcast
-const SYNCREAD_DATA: u8 = 0x82; // Query multiple servos at the same time. | Parameter length >= 3
-const SYNCWRITE_DATA: u8 = 0x83; //Controlling multiple servos at the same time | Parameter length >= 2
-const RESET: u8 = 0x06; //Reset the control table to the factory value | Parameter length = 0
+    /// Current current
+    /// initial value = 0
+    pub const CURRENT_CURRENT_H: u8 = 0x45;
+    pub const CURRENT_CURRENT_L: u8 = 0x46;
 
-//</editor-fold>
+    // ======== Servo Command List
+    //INSTRUCTIONS FOR SERVO
+    pub const PING: u8 = 0x01; // Query working status | Parameter length = 0
+    pub const READ_DATA: u8 = 0x02; //Query the character in the control table | Parameter length = 2
+    pub const WRITE_DATA: u8 = 0x03; //Write the character into the control table | Parameter length >= 1
+    pub const REGWRITE_DATA: u8 = 0x04; //Similar to WRITE DATA, but the control character does not act immediately after writing until ACTION. | Parameter length >= 2
+    pub const ACTION: u8 = 0x05; //Triggering the action of REG WRITE operation | Parameter length = 0, suitable for broadcast
+    pub const SYNCREAD_DATA: u8 = 0x82; // Query multiple servos at the same time. | Parameter length >= 3
+    pub const SYNCWRITE_DATA: u8 = 0x83; //Controlling multiple servos at the same time | Parameter length >= 2
+    pub const RESET: u8 = 0x06; //Reset the control table to the factory value | Parameter length = 0
+}
+use registers::*;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum RsblError {
@@ -367,11 +364,8 @@ pub fn uart_config() -> usart::Config {
 
 // generally missing: function to make two u8 to one u16, and vice versa
 impl<'d> RsblServo<'d> {
-    ///generate new RsblServo instance
-    pub fn new(
-        handle: usart::Uart<'d, Async>,
-        rx_dma_buf: &'static mut [u8],
-    ) -> Self {
+    /// generate new RsblServo instance
+    pub fn new(handle: usart::Uart<'d, Async>, rx_dma_buf: &'static mut [u8]) -> Self {
         let (tx, rx) = handle.split();
         let rx = rx.into_ring_buffered(rx_dma_buf);
         let left_pos = 0;
@@ -441,6 +435,7 @@ impl<'d> RsblServo<'d> {
     /// Servo is set up to use step servo mode and config is saved over power cycles
     /// Lock instruction might not work correctly right now, but that should be fixable by swapping the data between 1 and 0
     /// also try to set the voltage to actual 24V and also try to play around with the torque settings
+    #[expect(dead_code)]
     pub async fn setup_servo(&mut self, original_id: u8, new_id: u8) -> Result<(), RsblError> {
         //ID is given. First, we disable write protection. Then we set the new id
         self.write_data(original_id, LOCK_MARK, &[0x00]).await?;
@@ -658,7 +653,7 @@ impl<'d> RsblServo<'d> {
     }
 
     /* ===== Low Level Function Implementations ===== */
-    ///ping RSBL Servo id
+    /// ping RSBL Servo id
     pub async fn ping(&mut self, id: u8) -> Result<(), RsblError> {
         self.write_to_servo(id, PING, None, None).await?;
 
@@ -668,7 +663,7 @@ impl<'d> RsblServo<'d> {
         Ok(())
     }
 
-    ///read data starting at start_address with length buf.len() into buf from Servo id
+    /// read data starting at start_address with length buf.len() into buf from Servo id
     pub async fn read_data(
         &mut self,
         id: u8,
@@ -687,7 +682,7 @@ impl<'d> RsblServo<'d> {
         Ok(())
     }
 
-    ///write array data to Servo id registers, starting at start_data
+    /// write array data to Servo id registers, starting at start_data
     pub async fn write_data(
         &mut self,
         id: u8,
@@ -790,14 +785,13 @@ impl<'d> RsblServo<'d> {
         let mut data = [0u8];
         let buf = buf.unwrap_or(&mut []);
 
-
         //generate header arrays, only needed for some checks
         let mut header: [u8; 5] = [0; 5];
         let mut checksum: [u8; 1] = [0];
 
         // We need to read into the buffers byte-wise as otherwise at the end of the ring buffer it does not close within the read operation and
         // sets the part of the array exceeding the ring buffer to 0, which fucks up everything
-        for i in 0..header.len() {
+        for header in &mut header {
             match with_timeout(RSBL_TIMEOUT, self.rx.read(&mut data)).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
@@ -806,20 +800,17 @@ impl<'d> RsblServo<'d> {
                 }
                 Err(_) => return Err(RsblError::TimeoutError),
             }
-            header[i] = data[0];
+            *header = data[0];
         }
 
         // I may get empty buffers (e.g. ping, write), and this is so that I can use this function for every instance
-
-        if !buf.is_empty() {
-            for i in 0..buf.len() {
-                match with_timeout(RSBL_TIMEOUT, self.rx.read(&mut data)).await {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(_)) => return Err(RsblError::FailedRead),
-                    Err(_) => return Err(RsblError::TimeoutError),
-                }
-                buf[i] = data[0];
+        for byte in buf.iter_mut() {
+            match with_timeout(RSBL_TIMEOUT, self.rx.read(&mut data)).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(_)) => return Err(RsblError::FailedRead),
+                Err(_) => return Err(RsblError::TimeoutError),
             }
+            *byte = data[0];
         }
 
         match with_timeout(RSBL_TIMEOUT, self.rx.read(&mut checksum)).await {
@@ -867,7 +858,7 @@ impl<'d> RsblServo<'d> {
         }
     }
 
-    ///calculate checksum for servo frames
+    /// calculate checksum for servo frames
     fn calc_checksum(
         &self,
         id: u8,
