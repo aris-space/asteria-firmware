@@ -13,7 +13,9 @@ use core::sync::atomic::Ordering::SeqCst;
 use datatypes::status::ArmingState;
 use dp_recovery_board::{ActuatorStatus, SteeringPositions, SteeringStatus, WatchdogState};
 use embassy_futures::join::join;
-use embassy_stm32::gpio::{Input, Output};
+use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::gpio::{Level, Output};
+use embassy_stm32::mode::Async;
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
@@ -299,22 +301,18 @@ pub async fn deployment_task(mut deployment: RecoveryActuator<TIM16, TIM17>) {
     }
 }
 
-pub static ARMING_STATE: Watch<CriticalSectionRawMutex, ArmingState, 2> = Watch::new();
-
-/// Poll interval for the Arming pin (10 Hz)
-const ARMING_POLL_MS: u64 = 100;
+pub static ARMING_STATE: Watch<CriticalSectionRawMutex, ArmingState, 1> = Watch::new();
 
 #[embassy_executor::task]
-pub async fn arming_detection_task(arming_detect: Input<'static>) {
+pub async fn arming_detection_task(mut arming_detect: ExtiInput<'static, Async>) {
     let arming_sender = ARMING_STATE.sender();
     loop {
         // arming is high if safed, and low if armed
-        if arming_detect.is_low() {
-            arming_sender.send(ArmingState::Armed);
-        } else {
-            arming_sender.send(ArmingState::Safe);
-        }
-
-        Timer::after_millis(ARMING_POLL_MS).await;
+        let state = match arming_detect.get_level() {
+            Level::Low => ArmingState::Armed,
+            Level::High => ArmingState::Armed,
+        };
+        arming_sender.send(state);
+        arming_detect.wait_for_any_edge().await;
     }
 }

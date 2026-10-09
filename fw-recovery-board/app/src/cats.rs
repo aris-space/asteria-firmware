@@ -1,49 +1,48 @@
 //! Readout of the CATS backup recovery flight computer state.
 
-use crate::actuator_control::ARMING_STATE;
 use crate::can_io::OUTPUTS;
-use datatypes::status::ArmingState;
 use dp_recovery_board::DeploymentState;
-use embassy_stm32::gpio::Input;
+use embassy_futures::join::join;
+use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::mode::Async;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Sender;
 use embassy_time::Timer;
 
-/// Poll interval for the CATS outputs (20 Hz)
-const CATS_POLL_MS: u64 = 50;
-
 /// Reads the CATS IO pins and publishes them to `OUTPUTS`.
 ///
-/// The pins idle high and are pulled low once CATS has triggered the action. Until the board is armed
-/// the state is reported as [`DeploymentState::Unarmed`].
+/// The pins idle high and are pulled low if the CATS gives power to the servos.
+/// Upon deployment, it quickly (10ms) resets the power (to the other servo, but we don't care),
+/// which we wait for, but handle the fact that we could also have disarmed.
 #[embassy_executor::task]
-pub async fn cats_task(separation: Input<'static>, deployment: Input<'static>) {
-    /// Publish the state of one CATS pin, only notifying receivers (the CAN broadcast) on a change.
-    fn publish(
+pub async fn cats_task(
+    separation: ExtiInput<'static, Async>,
+    deployment: ExtiInput<'static, Async>,
+) -> ! {
+    async fn detect(
         tx: &Sender<'_, CriticalSectionRawMutex, DeploymentState, 1>,
-        armed: Option<ArmingState>,
-        pin: &Input<'static>,
-    ) {
-        let new = match (armed, pin.is_low()) {
-            (Some(ArmingState::Armed), false) => DeploymentState::NotYetDeployed,
-            (Some(ArmingState::Armed), true) => DeploymentState::Deployed,
-            (_, _) => DeploymentState::Unarmed,
-        };
-        tx.send_if_modified(|current| {
-            let changed = *current != Some(new);
-            *current = Some(new);
-            changed
-        });
+        mut pin: ExtiInput<'static, Async>,
+    ) -> ! {
+        loop {
+            tx.send(DeploymentState::Unarmed);
+            pin.wait_for_low().await; // low pin means the CATS is giving pyro power, thus must be armed
+            tx.send(DeploymentState::NotYetDeployed);
+            pin.wait_for_high().await; // disarmed or deployed, thus figure out which it is:
+
+            Timer::after_millis(20).await; // lets wait if the CATS only pulled it high quickly for 10ms
+            if pin.is_high() {
+                // we unarmed, thus lets wait for the arming again
+                continue;
+            }
+            tx.send(DeploymentState::Deployed);
+            pin.wait_for_high().await; // lets wait until it is now disarmed again
+        }
     }
 
-    let mut arming_rx = ARMING_STATE.receiver().unwrap();
-    let separation_tx = OUTPUTS.cats_separation.sender();
-    let deployment_tx = OUTPUTS.cats_deployment.sender();
-
-    loop {
-        let armed = arming_rx.try_get();
-        publish(&separation_tx, armed, &separation);
-        publish(&deployment_tx, armed, &deployment);
-        Timer::after_millis(CATS_POLL_MS).await;
-    }
+    join(
+        detect(&OUTPUTS.cats_separation.sender(), separation),
+        detect(&OUTPUTS.cats_deployment.sender(), deployment),
+    )
+    .await
+    .0
 }

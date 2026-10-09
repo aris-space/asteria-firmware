@@ -24,6 +24,7 @@ use can_utils::rxtx::TypedCanReceive as _;
 use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode;
 use embassy_executor::Spawner;
+use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
 use embassy_stm32::mode::Async;
 use embassy_stm32::peripherals::FDCAN1;
@@ -32,7 +33,7 @@ use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel::{Ch1, Ch2};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::Uart;
-use embassy_stm32::{bind_interrupts, can, dma, peripherals, usart};
+use embassy_stm32::{bind_interrupts, can, dma, exti, peripherals, usart};
 use embassy_time::Duration;
 use embassy_time::Timer;
 use embedded_utils::fmt::*;
@@ -88,6 +89,9 @@ bind_interrupts!(struct Irqs {
     DMA1_CHANNEL2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
     DMA2_CHANNEL5 => dma::InterruptHandler<peripherals::DMA2_CH5>;
     DMA2_CHANNEL6 => dma::InterruptHandler<peripherals::DMA2_CH6>;
+
+    EXTI9_5 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI9_5>;
+    EXTI15_10 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI15_10>;
 });
 
 #[embassy_executor::main]
@@ -99,10 +103,10 @@ async fn main(spawner: Spawner) -> ! {
     let _buzzer = Output::new(p.PB10, Level::Low, Speed::VeryHigh);
 
     /* ARMING DETECTION */
-    let arming_detect_pin = Input::new(p.PB11, Pull::None);
+    let arming_detect_pin = ExtiInput::new(p.PB11, p.EXTI11, Pull::None, Irqs);
     /* CATS backup flight computer, pulled up and driven low once it triggered */
-    let cats_separation = Input::new(p.PA8, Pull::Up); // CATS IO 1
-    let cats_deployment = Input::new(p.PA9, Pull::Up); // CATS IO 2
+    let cats_separation = ExtiInput::new(p.PA8, p.EXTI8, Pull::None, Irqs); // CATS IO 1
+    let cats_deployment = ExtiInput::new(p.PA9, p.EXTI9, Pull::None, Irqs); // CATS IO 2
 
     /* BEGIN SEPARATION */
     // separation power trigger
