@@ -384,7 +384,7 @@ pub fn uart_config() -> usart::Config {
     // Start/Stop bits config
 
     let mut config: usart::Config = Default::default();
-    config.baudrate = 1000000; //115200
+    config.baudrate = 1_000_000; // if reset (not from factory though...) it would be 115200
     config.stop_bits = usart::StopBits::STOP1;
     config.parity = usart::Parity::ParityNone;
     config.data_bits = usart::DataBits::DataBits8;
