@@ -53,8 +53,8 @@ use clocks::clocks_config;
 const SAFETY_SPIRAL_POS_LEFT: i32 = -2457;
 const SAFETY_SPIRAL_POS_RIGHT: i32 = 3227;
 // Somehow the motors don't like fully extended (180) or retraced (0), thus only close to it.
-const DEPLOYMENT_INITIAL_ANGLE: f32 = 175.0;
-const DEPLOYMENT_SERVO_ANGLE: f32 = 65.0;
+const DEPLOYMENT_INITIAL_ANGLE: f32 = 145.0;
+const DEPLOYMENT_SERVO_ANGLE: f32 = 35.0;
 const SEPARATION_INITIAL_ANGLE: f32 = 175.0;
 const SEPARATION_SERVO_ANGLE: f32 = 5.0;
 const SEP_DEPL_FREQ: Hertz = Hertz(333);
