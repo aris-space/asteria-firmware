@@ -29,7 +29,7 @@ pub async fn cats_task(
             tx.send(DeploymentState::NotYetDeployed);
             pin.wait_for_high().await; // disarmed or deployed, thus figure out which it is:
 
-            Timer::after_millis(20).await; // lets wait if the CATS only pulled it high quickly for 10ms
+            Timer::after_millis(20).await; // lets wait if the CATS only pulled it high quickly for 10ms (thus high again after 20ms)
             if pin.is_high() {
                 // we unarmed, thus lets wait for the arming again
                 continue;

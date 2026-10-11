@@ -14,7 +14,7 @@ use datatypes::status::ArmingState;
 use dp_recovery_board::{ActuatorStatus, SteeringPositions, SteeringStatus, WatchdogState};
 use embassy_futures::join::join;
 use embassy_stm32::exti::ExtiInput;
-use embassy_stm32::gpio::{Level, Output};
+use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::peripherals::{TIM2, TIM3, TIM16, TIM17};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -306,13 +306,11 @@ pub static ARMING_STATE: Watch<CriticalSectionRawMutex, ArmingState, 1> = Watch:
 #[embassy_executor::task]
 pub async fn arming_detection_task(mut arming_detect: ExtiInput<'static, Async>) {
     let arming_sender = ARMING_STATE.sender();
+    // arming is high if safed, and low if armed
     loop {
-        // arming is high if safed, and low if armed
-        let state = match arming_detect.get_level() {
-            Level::Low => ArmingState::Armed,
-            Level::High => ArmingState::Armed,
-        };
-        arming_sender.send(state);
-        arming_detect.wait_for_any_edge().await;
+        arming_sender.send(ArmingState::Safe);
+        arming_detect.wait_for_low().await;
+        arming_sender.send(ArmingState::Armed);
+        arming_detect.wait_for_high().await;
     }
 }

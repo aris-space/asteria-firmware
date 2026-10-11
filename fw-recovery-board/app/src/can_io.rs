@@ -109,11 +109,19 @@ pub static OUTPUTS: Outputs = Outputs {
 pub async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
     let status_creation_task = async {
         let mut last = Instant::now();
-        let mut steering_status_rx = STEERING_STATUS.receiver().unwrap();
-        let mut separation_status_rx = SEPARATION_SERVO_STATUS.receiver().unwrap();
-        let mut deployment_status_rx = DEPLOYMENT_SERVO_STATUS.receiver().unwrap();
-        let mut steering_watchdog_status_rx = WATCHDOG_STATE.receiver().unwrap();
-        let mut arming_state_rx = ARMING_STATE.receiver().unwrap();
+        let mut steering_status_rx = STEERING_STATUS
+            .receiver()
+            .expect("not enough receiver slots");
+        let mut separation_status_rx = SEPARATION_SERVO_STATUS
+            .receiver()
+            .expect("not enough receiver slots");
+        let mut deployment_status_rx = DEPLOYMENT_SERVO_STATUS
+            .receiver()
+            .expect("not enough receiver slots");
+        let mut steering_watchdog_status_rx = WATCHDOG_STATE
+            .receiver()
+            .expect("not enough receiver slots");
+        let mut arming_state_rx = ARMING_STATE.receiver().expect("not enough receiver slots");
 
         let mut sep1_status = ActuatorStatus::default();
         let mut sep2_status = ActuatorStatus::default();
@@ -148,7 +156,7 @@ pub async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'
                     arming_state = data;
                 }
 
-                common.micros_since_restart = Instant::as_micros(&Instant::now());
+                common.micros_since_restart = Instant::now().as_micros();
 
                 //now actually construct the REC board status message with the data collected
                 let msg = RecoveryBoardStatus {
