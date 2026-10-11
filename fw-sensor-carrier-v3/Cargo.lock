@@ -1164,6 +1164,7 @@ dependencies = [
  "ms5607",
  "nalgebra 0.33.3",
  "noline",
+ "num-traits",
  "panic-probe",
  "panic-reset",
  "postcard",

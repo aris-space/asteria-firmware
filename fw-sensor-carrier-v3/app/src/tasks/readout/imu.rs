@@ -42,6 +42,21 @@ const GYRO_ODR: GyroscopeOdr = GyroscopeOdr::Hz833;
 const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
 /// Gyroscope batch data rate. Should match [`GYRO_ODR`]
 const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
+/// Nominal FIFO sample rate.
+pub const SAMPLE_HZ: f32 = match GYRO_BDR {
+    GyroBatchDataRate::Hz65 => 6.5,
+    GyroBatchDataRate::Hz125 => 12.5,
+    GyroBatchDataRate::Hz26 => 26.0,
+    GyroBatchDataRate::Hz52 => 52.0,
+    GyroBatchDataRate::Hz104 => 104.0,
+    GyroBatchDataRate::Hz208 => 208.0,
+    GyroBatchDataRate::Hz417 => 417.0,
+    GyroBatchDataRate::Hz833 => 833.0,
+    GyroBatchDataRate::Hz1667 => 1667.0,
+    GyroBatchDataRate::Hz3333 => 3333.0,
+    GyroBatchDataRate::Hz6667 => 6667.0,
+    _ => panic!("Invalid IMU FIFO sample rate"),
+};
 // Twice the expected boost acceleration, so vibration on top of it does not clip.
 pub const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G16;
 pub const GYRO_FULL_SCALE: GyroscopeFullScale = GyroscopeFullScale::Dps2000;

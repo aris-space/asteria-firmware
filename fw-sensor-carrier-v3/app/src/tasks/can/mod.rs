@@ -1,6 +1,3 @@
-//! CAN bus: the RX task handles resets, one TX task per `dp-sensor-carrier`
-//! message sends it at its rate.
-
 use data_core::can::hal::CanDecode as _;
 use datatypes::status::BoardId;
 use embassy_executor::SendSpawner;
@@ -10,9 +7,9 @@ use static_cell::StaticCell;
 
 pub mod rx;
 pub mod tx;
+mod utils;
 
 pub const THIS_BOARD_ID: BoardId = BoardId::SensorCarrier;
-// One frame of every message, with room to spare.
 const TX_BUFFER_LEN: usize = 16;
 const RX_BUFFER_LEN: usize = 4;
 
@@ -23,11 +20,8 @@ data_core::can::sparse_decodable_can_message! {
     }
 }
 
-/// The IDs of [`ReceivedMessage`], the only ones the hardware filter passes.
 pub const RECEIVED_IDS: &[StandardId] = ReceivedMessage::SUPPORTED_IDS;
 
-/// Switches `can` to buffered mode and spawns the RX task and every TX task,
-/// each with its own handle to the TX buffer.
 pub fn spawn(can: Can<'static>, spawner: SendSpawner) {
     static TX_BUFFER: StaticCell<TxFdBuf<TX_BUFFER_LEN>> = StaticCell::new();
     static RX_BUFFER: StaticCell<RxFdBuf<RX_BUFFER_LEN>> = StaticCell::new();
@@ -35,8 +29,11 @@ pub fn spawn(can: Can<'static>, spawner: SendSpawner) {
         TX_BUFFER.init(TxFdBuf::new()),
         RX_BUFFER.init(RxFdBuf::new()),
     );
+
+    let rx = can.reader();
+    spawner.spawn(rx::task(rx).expect("Failed to spawn CAN RX task"));
+
     let tx = can.writer();
-    spawner.spawn(rx::task(can.reader()).expect("Failed to spawn CAN RX task"));
     spawner.spawn(tx::orientation(tx.clone()).expect("Failed to spawn CAN orientation task"));
     spawner.spawn(tx::imu(tx.clone()).expect("Failed to spawn CAN IMU task"));
     spawner.spawn(tx::position(tx.clone()).expect("Failed to spawn CAN position task"));

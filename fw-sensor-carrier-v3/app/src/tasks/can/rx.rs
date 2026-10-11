@@ -1,24 +1,13 @@
-use data_core::can::hal::CanDecode as _;
+use can_utils::rxtx::RxError;
 use defmt::{error, warn};
 use embassy_stm32::can::BufferedFdCanReceiver;
-use embedded_can::Id;
 
-use super::{ReceivedMessage, THIS_BOARD_ID};
+use crate::tasks::can::{ReceivedMessage, THIS_BOARD_ID, utils::BufferedCanReceive as _};
 
 #[embassy_executor::task]
-pub async fn task(can: BufferedFdCanReceiver) -> ! {
+pub async fn task(mut can: BufferedFdCanReceiver) -> ! {
     loop {
-        let frame = match can.receive().await {
-            Ok(envelope) => envelope.frame,
-            Err(err) => {
-                error!("CAN: RX error: {:?}", err);
-                continue;
-            }
-        };
-        let Id::Standard(id) = frame.id() else {
-            continue;
-        };
-        match ReceivedMessage::from_parts(*id, frame.data()) {
+        match can.recv::<ReceivedMessage>().await {
             Ok(ReceivedMessage::ResetAll(_)) => {
                 warn!("CAN: ResetAll received, resetting");
                 cortex_m::peripheral::SCB::sys_reset();
@@ -28,7 +17,8 @@ pub async fn task(can: BufferedFdCanReceiver) -> ! {
                 cortex_m::peripheral::SCB::sys_reset();
             }
             Ok(ReceivedMessage::ResetSpecific(_)) => {}
-            Err(_) => error!("CAN: undecodable frame with ID {=u16:#x}", id.as_raw()),
+            Err(RxError::Bug) => {}
+            Err(err) => error!("CAN: RX error: {:?}", err),
         }
     }
 }

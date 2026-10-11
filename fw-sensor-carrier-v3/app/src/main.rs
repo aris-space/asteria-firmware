@@ -10,6 +10,7 @@ use embassy_executor::Spawner;
 
 mod built;
 mod calibration;
+mod filters;
 mod macros;
 mod resources;
 mod sensors;

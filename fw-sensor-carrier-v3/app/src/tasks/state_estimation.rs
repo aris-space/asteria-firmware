@@ -44,7 +44,7 @@ const MAGNETIC_DECLINATION_DEG: f32 = -(37.0 / 60.0 + 19.0 / 3600.0);
 // GNSS fixes reach the estimator up to ~145 ms after their time of validity.
 const FUSION_DELAY_US: u64 = 200_000;
 const PENDING_CAPACITY: usize = 512; // ~350 readings per fusion delay
-const PUBLISH_PERIOD: Duration = Duration::from_millis(50);
+const PUBLISH_PERIOD: Duration = Duration::from_millis(25);
 const IMU_FRESH: Duration = Duration::from_millis(100);
 const WARNING_PERIOD: Duration = Duration::from_secs(1);
 
@@ -159,6 +159,7 @@ fn received<T>(message: WaitResult<T>, kind: &str) -> Option<T> {
 struct Processor {
     estimator: Estimator,
     reference: GeodeticReference,
+    newest_imu: Instant,
     last_publish: Option<Instant>,
     last_warning: Option<Instant>,
     msl_referenced: bool,
@@ -220,6 +221,7 @@ impl Processor {
                 FUSION_DELAY_US,
             )?,
             reference: launch_site(),
+            newest_imu: Instant::MIN,
             last_publish: None,
             last_warning: None,
             msl_referenced: false,
@@ -230,6 +232,7 @@ impl Processor {
 
     fn update_imu(&mut self, sample: ImuSample) -> Result<(), UpdateError> {
         const DEG_TO_RAD: f32 = core::f32::consts::PI / 180.0;
+        self.newest_imu = self.newest_imu.max(sample.ts);
         ImuAided::update_imu(
             &mut self.estimator,
             ImuInput {
@@ -301,7 +304,10 @@ impl Processor {
             longitude_deg: fix.pvt.longitude_deg,
             height_msl_m: fix.pvt.height_msl_m,
         });
-        let horizontal_std_m = (fix.pvt.horizontal_accuracy_mm as f32 / 1_000.0).max(GNSS_MIN_STD);
+        // hAcc covers the horizontal error as a whole, split across north and east.
+        let horizontal_std_m =
+            (fix.pvt.horizontal_accuracy_mm as f32 / 1_000.0 / core::f32::consts::SQRT_2)
+                .max(GNSS_MIN_STD);
         let height_std_m = (fix.pvt.vertical_accuracy_mm as f32 / 1_000.0 * GNSS_HEIGHT_STD_SCALE)
             .max(GNSS_MIN_STD);
         let speed_std_mps = fix.pvt.speed_accuracy_mps.max(GNSS_MIN_STD);
@@ -326,14 +332,16 @@ impl Processor {
     }
 
     fn publish(&mut self) {
-        let now = Instant::now();
+        // Spaced in sample time: the IMU samples arrive in FIFO batches.
+        let newest_imu = self.newest_imu;
         if self
             .last_publish
-            .is_some_and(|last| now.saturating_duration_since(last) < PUBLISH_PERIOD)
+            .is_some_and(|last| newest_imu.saturating_duration_since(last) < PUBLISH_PERIOD)
         {
             return;
         }
-        self.last_publish = Some(now);
+        self.last_publish = Some(newest_imu);
+        let now = Instant::now();
         let mut state = self.estimator.navigation_state();
         state.orientation_body_to_ned_wxyz = true_north(state.orientation_body_to_ned_wxyz);
         if now.saturating_duration_since(Instant::from_micros(state.time_us)) > IMU_FRESH {
@@ -352,6 +360,7 @@ impl Processor {
         }
         let sef = &self.estimator;
         let selected = sef.selected_imu();
+        signals::SELECTED_IMU.sender().send(ImuId::ALL[selected]);
         if selected != self.selected_imu {
             info!("SEF: switched to {}", ImuId::ALL[selected]);
             self.selected_imu = selected;

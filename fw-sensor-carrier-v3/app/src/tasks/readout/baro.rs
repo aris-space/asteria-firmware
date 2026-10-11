@@ -13,7 +13,7 @@ use crate::sensors::{BARO_STATUS, BaroId};
 use crate::signals;
 use crate::types::{RawBaroSample, Reading};
 
-const SAMPLE_HZ: u32 = 40;
+pub const SAMPLE_HZ: u32 = 40;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(1000 / SAMPLE_HZ as u64);
 
 type BusDevice = I2cDevice<'static, CriticalSectionRawMutex, SharedI2c>;

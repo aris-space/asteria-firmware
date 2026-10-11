@@ -4,6 +4,7 @@ use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 
+use crate::sensors::ImuId;
 use crate::types::{
     BaroReading, DhtReading, GnssReading, ImuReading, MagReading, Mark, SefLogSample,
 };
@@ -19,7 +20,7 @@ macro_rules! define_sample_channel {
     };
 }
 
-define_sample_channel!(IMU_CHANNEL, submit_imu: ImuReading, cap = 512, subs = 2);
+define_sample_channel!(IMU_CHANNEL, submit_imu: ImuReading, cap = 512, subs = 3);
 define_sample_channel!(MAG_CHANNEL, submit_mag: MagReading, cap = 32, subs = 3);
 define_sample_channel!(GNSS_CHANNEL, submit_gnss: GnssReading, cap = 32, subs = 3);
 define_sample_channel!(BARO_CHANNEL, submit_baro: BaroReading, cap = 64, subs = 3);
@@ -27,8 +28,9 @@ define_sample_channel!(DHT_CHANNEL, submit_dht: DhtReading, cap = 8, subs = 2);
 define_sample_channel!(STATE_CHANNEL, submit_state: SefLogSample, cap = 64, subs = 2);
 define_sample_channel!(MARK_CHANNEL, submit_mark: Mark, cap = 4, subs = 1);
 
-pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, NavigationState, 3> = Watch::new();
-pub static SELECTED_BARO: Watch<CriticalSectionRawMutex, BaroReading, 1> = Watch::new();
+pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, NavigationState, 5> = Watch::new();
+pub static SELECTED_IMU: Watch<CriticalSectionRawMutex, ImuId, 1> = Watch::new();
+pub static SELECTED_BARO: Watch<CriticalSectionRawMutex, BaroReading, 2> = Watch::new();
 pub static SELECTED_MAG: Watch<CriticalSectionRawMutex, MagReading, 1> = Watch::new();
 pub static SELECTED_DHT: Watch<CriticalSectionRawMutex, DhtReading, 1> = Watch::new();
 pub static STARTUP_COMPLETE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
