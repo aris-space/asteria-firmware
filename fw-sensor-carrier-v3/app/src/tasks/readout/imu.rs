@@ -1,20 +1,4 @@
 //! LSM6DSO32 IMU readout.
-//!
-//! The sensor batches accel and gyro samples into its hardware FIFO at the
-//! configured ODR. Each FIFO entry carries a `TagSensor` byte that says
-//! whether it's an accel or gyro reading; because [`ACCEL_ODR`] and [`GYRO_ODR`]
-//! are the same, we expect them to be produced in pairs. While it remains undefined
-//! in the datasheet, in practice these pairs are interleaved.
-//!
-//! One of the interrupt lines (INT1) is configured to fire when the FIFO
-//! crosses [`FIFO_WATERMARK`]. We then drain whatever is queued into a local
-//! scratch buffer ([`FIFO_BUFFER_SIZE`] entries) with a single SPI transaction, iterate
-//! it as accel+gyro pairs, calibrate them, and publish one [`crate::types::ImuSample`]
-//! per pair. Sample timestamps are interpolated across the batch using the wall-clock
-//! interval between consecutive interrupts.
-//!
-//! [`LOOP_TIMEOUT`] bounds the wait on INT1 so a missed interrupt is
-//! recovered after roughly two expected periods.
 
 use defmt::{Debug2Format, debug, error, info, warn};
 use embassy_stm32::exti::ExtiInput;
@@ -34,15 +18,11 @@ use crate::sensors::{IMU_STATUS, ImuId};
 use crate::signals;
 use crate::types::{RawImuSample, Reading};
 
-/// Accelerometer output data rate. Keep both ODRs and BDRs at 833 Hz.
+// Paired reads require matching accel/gyro output and FIFO rates.
 const ACCEL_ODR: AccelerometerOdr = AccelerometerOdr::Hz833;
-/// Gyroscope output data rate. Keep both ODRs and BDRs at 833 Hz.
 const GYRO_ODR: GyroscopeOdr = GyroscopeOdr::Hz833;
-/// Accelerometer batch data rate. Should match [`ACCEL_ODR`]
 const ACCEL_BDR: AccelBatchDataRate = AccelBatchDataRate::Hz833;
-/// Gyroscope batch data rate. Should match [`GYRO_ODR`]
 const GYRO_BDR: GyroBatchDataRate = GyroBatchDataRate::Hz833;
-/// Nominal FIFO sample rate.
 pub const SAMPLE_HZ: f32 = match GYRO_BDR {
     GyroBatchDataRate::Hz65 => 6.5,
     GyroBatchDataRate::Hz125 => 12.5,
@@ -57,8 +37,10 @@ pub const SAMPLE_HZ: f32 = match GYRO_BDR {
     GyroBatchDataRate::Hz6667 => 6667.0,
     _ => panic!("Invalid IMU FIFO sample rate"),
 };
-// Twice the expected boost acceleration, so vibration on top of it does not clip.
+
+// 8 g was insufficient in testing; 16 g avoids the noise cost of 32 g.
 pub const ACCEL_FULL_SCALE: AccelerometerFullScale = AccelerometerFullScale::G16;
+// Maximum range to reduce gyro saturation.
 pub const GYRO_FULL_SCALE: GyroscopeFullScale = GyroscopeFullScale::Dps2000;
 pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
     GyroscopeFullScale::Dps250 => 250.0,
@@ -66,8 +48,7 @@ pub const GYRO_RANGE_DPS: f32 = match GYRO_FULL_SCALE {
     GyroscopeFullScale::Dps1000 => 1000.0,
     GyroscopeFullScale::Dps2000 => 2000.0,
 };
-// The datasheet sensitivity (70 mdps/LSB at ±2000 dps) reads past the nominal range; the
-// gyroscope only clips at full scale.
+// Datasheet sensitivity scales with range (70 mdps/LSB at ±2000 dps).
 pub const GYRO_SATURATION_DPS: f32 = i16::MAX as f32 * GYRO_RANGE_DPS * 35e-6;
 pub const ACCEL_RANGE_G: f32 = match ACCEL_FULL_SCALE {
     AccelerometerFullScale::G4 => 4.0,
@@ -76,22 +57,18 @@ pub const ACCEL_RANGE_G: f32 = match ACCEL_FULL_SCALE {
     AccelerometerFullScale::G32 => 32.0,
 };
 
-/// Local scratch buffer for FIFO drains. Sized larger than the expected
-/// per-interrupt batch; the sensor's hardware FIFO is independent.
 const FIFO_BUFFER_SIZE: usize = 512;
-/// FIFO watermark in entries. With paired accel+gyro at 833 Hz, the
-/// watermark interrupt fires every ~15.6 ms (13 pairs).
+// 13 accel/gyro pairs per interrupt.
 const FIFO_WATERMARK: u16 = 26;
-/// Max wait for the FIFO watermark interrupt before retrying. Roughly
-/// 2x the expected period, to catch a missed/stuck interrupt.
+// Drain the FIFO if its interrupt is missed.
 const LOOP_TIMEOUT: Duration = Duration::from_millis(30);
-// ST AN5473 specifies 70 ms gyro turn-on plus three samples at 833 Hz.
+// 70 ms startup plus 3 samples at 833 Hz (AN5473).
 const GYRO_SETTLE_TIME: Duration = Duration::from_millis(75);
 
 async fn configure<SPI: embedded_hal_async::spi::SpiDevice>(
     sensor: &mut Lsm6dso32<Lsm6Dso32SpiInterface<SPI>, Initialised>,
 ) -> Result<(), ()> {
-    // Clear data left in the FIFO across an MCU-only reset before enabling ODR.
+    // Flush stale FIFO data after an MCU reset.
     sensor
         .set_fifo_mode(FifoMode::Bypass)
         .await
@@ -211,9 +188,7 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
 impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::Wait>
     Active<SPI, INT>
 {
-    /// Drains the FIFO and publishes one sample per accel+gyro pair, spread
-    /// evenly between the previous read and this one. This is more accurate
-    /// than the sensor's own FIFO timestamps.
+    /// Publish accel/gyro pairs with timestamps interpolated between FIFO reads.
     async fn read_batch(
         &mut self,
         fifo_buf: &mut [FifoDataOut],

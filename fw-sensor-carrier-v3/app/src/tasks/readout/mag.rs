@@ -55,13 +55,11 @@ async fn configure(bus: SharedI2cBus, id: MagId) -> Result<Sensor, ()> {
     Ok(sensor)
 }
 
-/// Brings the magnetometer up at startup; see [`super`] for why this is separate.
 pub async fn init(bus: SharedI2cBus, id: MagId) -> Option<Sensor> {
     init_at_startup(id, async || configure(bus, id).await).await
 }
 
 struct Inactive {
-    /// Initialized by [`init`] at startup, if it succeeded.
     sensor: Option<Sensor>,
     bus: SharedI2cBus,
     id: MagId,

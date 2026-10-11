@@ -1,6 +1,4 @@
-//! u-blox GNSS readout over UART. Every NAV-PVT epoch is published, with or
-//! without a fix. `Inactive` already reports the UART link as active before
-//! the first fix.
+//! u-blox GNSS readout over UART.
 
 use core::sync::atomic::Ordering;
 
@@ -14,23 +12,19 @@ use super::{MAX_CONSECUTIVE_ERRORS, State, backoff};
 use crate::calibration;
 use crate::sensors::{GNSS_STATUS, GnssId, SensorStatus};
 use crate::signals;
-use crate::types::{GnssSample, Pvt, RawGnssSample, Reading};
+use crate::types::{Pvt, RawGnssSample, Reading};
 
-// The receivers send NAV-PVT every 50 ms; a two-second gap means the link is silent.
 const LINK_SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
-// Reads while waiting for the link only check that bytes arrive.
 const PROBE_LEN: usize = 64;
 const RECV_LEN: usize = 4096;
 const UART_RING_LEN: usize = 4096;
-// Holds the largest UBX frame being assembled.
 const PARSE_LEN: usize = 4096;
-const WEEK_MS: u32 = 604_800_000;
 
 struct Inactive<'a, RX> {
     rx: RX,
     parser: Parser<ublox::FixedLinearBuffer<'a>>,
     id: GnssId,
-    newest_fix: NewestFix,
+    last_fix_itow_ms: Option<u32>,
     attempt: u8,
 }
 
@@ -98,10 +92,13 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                 self.attempt = 0;
                 consecutive_errors = 0;
                 if let PacketRef::NavPvt(pvt) = packet
-                    && let Some(sample) = read_pvt(self.id, &pvt, &mut self.newest_fix)
-                    && has_fix(&sample.pvt)
+                    && let Some(raw) = read_pvt(self.id, &pvt, &mut self.last_fix_itow_ms)
                 {
-                    fix = Some(sample.pvt.fix_type);
+                    let cal = calibration::gnss::apply_calibration(raw);
+                    signals::submit_gnss(Reading { raw, cal });
+                    if has_fix(&raw.pvt) {
+                        fix = Some(raw.pvt.fix_type);
+                    }
                 }
             }
             drop(parsed);
@@ -116,7 +113,7 @@ impl<'a, RX: embedded_io_async::Read> State for Inactive<'a, RX> {
                     rx: self.rx,
                     parser: self.parser,
                     id: self.id,
-                    newest_fix: self.newest_fix,
+                    last_fix_itow_ms: self.last_fix_itow_ms,
                 };
             }
         }
@@ -127,7 +124,7 @@ struct Active<'a, RX> {
     rx: RX,
     parser: Parser<ublox::FixedLinearBuffer<'a>>,
     id: GnssId,
-    newest_fix: NewestFix,
+    last_fix_itow_ms: Option<u32>,
 }
 
 impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
@@ -145,20 +142,20 @@ impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
                     while let Some(msg) = parsed.next() {
                         match msg {
                             Ok(PacketRef::NavPvt(pvt)) => {
-                                let Some(sample) = read_pvt(self.id, &pvt, &mut self.newest_fix)
+                                errors = 0;
+                                let Some(raw) = read_pvt(self.id, &pvt, &mut self.last_fix_itow_ms)
                                 else {
                                     continue;
                                 };
-                                let fix = has_fix(&sample.pvt);
-                                if fix {
-                                    errors = 0;
-                                }
+                                let cal = calibration::gnss::apply_calibration(raw);
+                                signals::submit_gnss(Reading { raw, cal });
+                                let fix = has_fix(&raw.pvt);
                                 if fix != had_fix {
                                     if fix {
                                         info!(
                                             "{}: fix regained ({:?})",
                                             self.id,
-                                            Debug2Format(&sample.pvt.fix_type)
+                                            Debug2Format(&raw.pvt.fix_type)
                                         );
                                     } else {
                                         warn!("{}: fix lost", self.id);
@@ -166,7 +163,7 @@ impl<'a, RX: embedded_io_async::Read> State for Active<'a, RX> {
                                     had_fix = fix;
                                 }
                             }
-                            Ok(_) => {}
+                            Ok(_) => errors = 0,
                             Err(e) => {
                                 warn!("{}: parse error: {:?}", self.id, Debug2Format(&e));
                                 errors = errors.saturating_add(1);
@@ -198,41 +195,25 @@ impl<'a, RX> Active<'a, RX> {
             rx: self.rx,
             parser: self.parser,
             id: self.id,
-            newest_fix: self.newest_fix,
+            last_fix_itow_ms: self.last_fix_itow_ms,
             attempt: 0,
         }
     }
 }
 
-/// GPS time of the newest fix. After a UART error, embassy restarts the
-/// ring-buffered DMA without clearing it, so the reads that follow can hand
-/// out bytes received seconds earlier; fixes not newer than this are those.
-#[derive(Clone, Copy, Default)]
-struct NewestFix {
-    itow_ms: Option<u32>,
+fn is_newer_epoch(itow_ms: u32, previous_itow_ms: u32) -> bool {
+    // GPS time-of-week wraps; assume fixes are less than half a week apart.
+    const WEEK_MS: u32 = 604_800_000;
+    let elapsed_ms = (itow_ms + WEEK_MS - previous_itow_ms) % WEEK_MS;
+    elapsed_ms > 0 && elapsed_ms < WEEK_MS / 2
 }
 
-impl NewestFix {
-    /// Whether a fix at `itow_ms` is newer, then remembers it; week rollover
-    /// counts as newer.
-    fn advance(&mut self, itow_ms: u32) -> bool {
-        let newer = self
-            .itow_ms
-            .is_none_or(|newest| itow_ms > newest || newest - itow_ms > WEEK_MS / 2);
-        if newer {
-            self.itow_ms = Some(itow_ms);
-        }
-        newer
-    }
-}
-
-/// Publishes a NAV-PVT epoch and returns it calibrated, unless it is a fix
-/// older than `newest_fix`.
+/// Build a raw NAV-PVT sample, rejecting stale fixes.
 fn read_pvt(
     id: GnssId,
     pvt: &ublox::NavPvtRef<'_>,
-    newest_fix: &mut NewestFix,
-) -> Option<GnssSample> {
+    last_fix_itow_ms: &mut Option<u32>,
+) -> Option<RawGnssSample> {
     let read_ts = Instant::now();
     let raw = RawGnssSample {
         src: id,
@@ -255,17 +236,24 @@ fn read_pvt(
             speed_accuracy_mps: pvt.speed_accuracy_estimate() as f32,
         },
     };
-    if has_fix(&raw.pvt) && !newest_fix.advance(raw.pvt.itow_ms) {
-        debug!("{}: dropped stale fix at iTOW {=u32}", id, raw.pvt.itow_ms);
-        return None;
+    if has_fix(&raw.pvt) {
+        // UART recovery can replay previously received fixes.
+        let itow_ms = raw.pvt.itow_ms;
+        if last_fix_itow_ms.is_some_and(|last| !is_newer_epoch(itow_ms, last)) {
+            debug!("{}: dropped stale fix at iTOW {=u32}", id, itow_ms);
+            return None;
+        }
+        *last_fix_itow_ms = Some(itow_ms);
     }
-    let cal = calibration::gnss::apply_calibration(raw);
-    signals::submit_gnss(Reading { raw, cal });
-    Some(cal)
+    Some(raw)
 }
 
 fn has_fix(pvt: &Pvt) -> bool {
-    pvt.fix_ok && matches!(pvt.fix_type, GpsFix::Fix2D | GpsFix::Fix3D)
+    pvt.fix_ok
+        && matches!(
+            pvt.fix_type,
+            GpsFix::Fix2D | GpsFix::Fix3D | GpsFix::GPSPlusDeadReckoning
+        )
 }
 
 #[embassy_executor::task(pool_size = 2)]
@@ -276,7 +264,7 @@ pub async fn task(rx: UartRx<'static, Async>, id: GnssId) -> ! {
         rx: rx.into_ring_buffered(&mut uart_ring_buf),
         parser: Parser::new(ublox::FixedLinearBuffer::new(&mut parse_buf)),
         id,
-        newest_fix: NewestFix::default(),
+        last_fix_itow_ms: None,
         attempt: 0,
     };
     super::run(&GNSS_STATUS[id.index()], inactive).await

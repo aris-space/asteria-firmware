@@ -26,13 +26,11 @@ async fn configure(bus: SharedI2cBus, id: BaroId) -> Result<Sensor, ()> {
         .map_err(|e| error!("{}: init failed: {:?}", id, Debug2Format(&e.kind)))
 }
 
-/// Brings the barometer up at startup; see [`super`] for why this is separate.
 pub async fn init(bus: SharedI2cBus, id: BaroId) -> Option<Sensor> {
     init_at_startup(id, async || configure(bus, id).await).await
 }
 
 struct Inactive {
-    /// Initialized by [`init`] at startup, if it succeeded.
     sensor: Option<Sensor>,
     bus: SharedI2cBus,
     id: BaroId,
@@ -103,8 +101,7 @@ impl Active {
             .measure(Oversampling::Osr2048, &mut Delay)
             .await
             .map_err(|e| warn!("{}: read error: {:?}", self.id, Debug2Format(&e)))?;
-        // Pressure is converted in the first half of the D1/D2 cycle.
-        // Use the measured cycle midpoint instead of a fixed read delay.
+        // Approximate the pressure timestamp with the D1/D2 cycle midpoint.
         let read_ts = Instant::now();
         let raw = RawBaroSample {
             src: self.id,

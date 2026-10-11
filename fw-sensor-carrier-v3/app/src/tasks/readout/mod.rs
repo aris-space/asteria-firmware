@@ -1,17 +1,3 @@
-//! Sensor readout tasks. Each one reads a single sensor, publishes its
-//! samples, logs them to SD, and reports its `SensorStatus`.
-//!
-//! Every readout has the same shape: an `Inactive` state that initializes the
-//! sensor, retrying with [`backoff`], and an `Active` state that reads until
-//! [`MAX_CONSECUTIVE_ERRORS`] in a row send it back to `Inactive`. [`run`]
-//! cycles between the two and mirrors each transition into the status.
-//!
-//! I2C sensors share buses, and a failed attempt busy-blocks the executor
-//! (embassy's async I2C does not yield while the bus is wedged). So startup
-//! calls each I2C readout's `init` in sequence, giving every healthy sensor its
-//! first attempt before any read task runs, and `Inactive` resets the bus
-//! controller after each failed attempt.
-
 use core::sync::atomic::Ordering;
 
 use defmt::{Format, debug, warn};
@@ -31,8 +17,7 @@ pub const MAX_CONSECUTIVE_ERRORS: u8 = 10;
 /// Initialization attempts an I2C readout makes at startup.
 pub const MAX_INIT_ATTEMPTS: u8 = 3;
 
-// The short base lets an absent I2C sensor run through its startup attempts
-// within ~0.6 s, before the healthy sensors settle into steady-state reads.
+// needed to limit startup delays from missing I2C sensors
 const BASE_BACKOFF_MS: u64 = 100;
 const MAX_BACKOFF_MS: u64 = 5000;
 
