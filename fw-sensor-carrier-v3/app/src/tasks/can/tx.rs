@@ -8,6 +8,7 @@
 use core::sync::atomic::Ordering;
 
 use asteria_sef_core::NavigationState;
+use asteria_sef_light::STANDARD_GRAVITY_MPS2;
 use data_core::can::hal::CanEncode as _;
 use datatypes::status::{SensorStatus as CanSensorStatus, StatusCommonMessage};
 use datatypes::units::{Celsius, HPa};
@@ -110,7 +111,8 @@ pub async fn imu(can: BufferedFdCanSender) -> ! {
         let body_to_ned = body_to_ned(&state);
         let acceleration = Vector3::from(state.specific_force_body_mps2);
         let rate_dps = Vector3::from(state.angular_rate_body_rad_s).map(f32::to_degrees);
-        let acceleration_ned = body_to_ned * acceleration;
+        let acceleration_ned =
+            body_to_ned * acceleration + Vector3::new(0.0, 0.0, STANDARD_GRAVITY_MPS2);
         let rate_ned_dps = body_to_ned * rate_dps;
         Some(Message::ImuData(ImuData {
             acceleration_x: acceleration.x,
