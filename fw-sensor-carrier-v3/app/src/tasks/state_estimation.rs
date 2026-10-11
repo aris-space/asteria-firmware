@@ -17,6 +17,7 @@ use defmt::{Debug2Format, info, warn};
 use embassy_futures::select::{Either4, select4};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant};
+use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
 use crate::calibration;
 use crate::sensors::{GnssId, IMU_COUNT, ImuId};
@@ -26,8 +27,19 @@ use crate::tasks::readout::mag;
 use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, SefLogSample};
 
 // Only has to be within a few hundred metres of the flight.
-const LAUNCH_SITE_LATITUDE_DEG: f64 = 47.405_336;
-const LAUNCH_SITE_LONGITUDE_DEG: f64 = 8.631_050;
+const LAUNCH_SITE_LATITUDE_DEG: f64 = 39.389_231_529_748_535;
+const LAUNCH_SITE_LONGITUDE_DEG: f64 = -8.287_750_809_600_846;
+// Taken from https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml?#igrfwmm
+// Calculated for the launch site near Constância, Portugal
+// Model Used:  WMMHR-2025
+// Latitude:    39° 23' 21" N
+// Longitude:   8° 17' 16" W
+// Elevation:   0.0 m Mean Sea Level
+//
+// 2026-10-18   Declination: 0° 37' 19" W
+//              changing by +0° 9' 9"/yr
+//              uncertainty ±0° 19' (1σ)
+const MAGNETIC_DECLINATION_DEG: f32 = -(37.0 / 60.0 + 19.0 / 3600.0);
 
 // GNSS fixes reach the estimator up to ~145 ms after their time of validity.
 const FUSION_DELAY_US: u64 = 200_000;
@@ -68,7 +80,7 @@ const GYRO_RESET_DPS: f32 = 0.99 * GYRO_SATURATION_DPS;
 const ACCEL_SATURATION_MPS2: f32 = 0.97 * ACCEL_RANGE_G * STANDARD_GRAVITY_MPS2;
 
 // Only for estimators that model them, not SEF-light.
-const LOCAL_MAGNETIC_FIELD_NED_NT: [f32; 3] = [21_300.0, 1_200.0, 43_000.0];
+const LOCAL_MAGNETIC_FIELD_NED_NT: [f32; 3] = [26_375.0, -286.0, 35_701.0]; // WMMHR-2025, launch site, 2026-10-18
 const MAG_DIRECTION_STD: f32 = 0.05;
 const BARO_REFERENCE_PRESSURE_HPA: f32 = 1_013.25;
 const BARO_PRESSURE_STD_HPA: f32 = 0.18; // BARO_HEIGHT_STD_M at ~0.12 hPa/m
@@ -322,7 +334,8 @@ impl Processor {
             return;
         }
         self.last_publish = Some(now);
-        let state = self.estimator.navigation_state();
+        let mut state = self.estimator.navigation_state();
+        state.orientation_body_to_ned_wxyz = true_north(state.orientation_body_to_ned_wxyz);
         if now.saturating_duration_since(Instant::from_micros(state.time_us)) > IMU_FRESH {
             return;
         }
@@ -368,8 +381,17 @@ impl Processor {
                 velocity_std_mps: libm::sqrtf(uncertainty.velocity_variance_m2_per_s2),
                 barometer_bias_std_m: uncertainty.barometer_bias_variance_m2.map(libm::sqrtf),
                 consistency_score: scores[imu],
-                orientation_body_to_ned_wxyz: sef.orientation_body_to_ned_wxyz(imu),
+                orientation_body_to_ned_wxyz: true_north(sef.orientation_body_to_ned_wxyz(imu)),
             });
         }
     }
+}
+
+/// Rotates about down by the declination, from magnetic to true north.
+fn true_north(body_to_ned_wxyz: [f32; 4]) -> [f32; 4] {
+    let [w, x, y, z] = body_to_ned_wxyz;
+    let declination =
+        UnitQuaternion::from_axis_angle(&Vector3::z_axis(), MAGNETIC_DECLINATION_DEG.to_radians());
+    let orientation = declination * UnitQuaternion::from_quaternion(Quaternion::new(w, x, y, z));
+    [orientation.w, orientation.i, orientation.j, orientation.k]
 }
