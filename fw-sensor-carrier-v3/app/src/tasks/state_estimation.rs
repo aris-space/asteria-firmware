@@ -43,7 +43,7 @@ const DEGRADED_ACCELERATION_NOISE: f32 = 20.0;
 const SATURATED_ACCELERATION_NOISE: f32 = 1_000.0; // a clipped sample hides how much
 const FREE_FALL_ACCELERATION_NOISE: f32 = 1.0; // falling, up is -g whatever the attitude
 const BARO_HEIGHT_STD_M: f32 = 1.5;
-const BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.02;
+const BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.05;
 const INITIAL_HEIGHT_STD_M: f32 = 1_000.0; // until GNSS references it to MSL
 const INITIAL_VELOCITY_STD_MPS: f32 = 3.0;
 const INITIAL_BARO_BIAS_STD_M: f32 = 200.0;
@@ -196,6 +196,8 @@ impl Processor {
             minimum_duration_us: 500_000,
             update_interval_us: 50_000,
             velocity_std_mps: 0.05,
+            maximum_velocity_mps: 0.3,
+            gnss_height_std_scale: 25.0,
         };
         Ok(Self {
             estimator: DualVerticalEstimator::new(
