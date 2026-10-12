@@ -17,13 +17,13 @@ assign_resources! {
         pin: PD15,
     }
     green_led: GreenLed {
-        pin: PA8,
+        pin: PA10,
     }
     yellow_led: YellowLed {
         pin: PA9,
     }
     red_led: RedLed {
-        pin: PA10,
+        pin: PA8,
     }
     gps1_uart: Gps1Uart {
         periph: UART8,
