@@ -1,7 +1,7 @@
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::mode::Async;
-use embassy_stm32::usart::UartRx;
+use embassy_stm32::usart::Uart;
 
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
@@ -22,8 +22,8 @@ pub struct PreparedBoard {
 }
 
 pub struct SensorResources {
-    pub gps1_rx: UartRx<'static, Async>,
-    pub gps2_rx: UartRx<'static, Async>,
+    pub gps1: Uart<'static, Async>,
+    pub gps2: Uart<'static, Async>,
     pub imu1: (SpiDevice, ExtiInput<'static, Async>),
     pub imu2: (SpiDevice, ExtiInput<'static, Async>),
     pub bus1: SharedI2cBus,
@@ -45,8 +45,8 @@ pub async fn prepare(
     let storage = storage::Storage::init(flash);
     calibration::load(storage).await;
 
-    let gps1_rx = resources.gps1_uart.setup();
-    let gps2_rx = resources.gps2_uart.setup();
+    let gps1 = resources.gps1_uart.setup();
+    let gps2 = resources.gps2_uart.setup();
 
     let imu1 = resources.imu1.setup();
     let imu2 = resources.imu2.setup();
@@ -67,8 +67,8 @@ pub async fn prepare(
         sd_card: resources.sd_card,
         buzzer,
         sensors: SensorResources {
-            gps1_rx,
-            gps2_rx,
+            gps1,
+            gps2,
             imu1,
             imu2,
             bus1,
@@ -131,11 +131,11 @@ pub async fn spawn_tasks(
             .expect("Failed to spawn DHT 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::gnss::task(board.sensors.gps1_rx, GNSS_1)
+        tasks::readout::gnss::task(board.sensors.gps1, GNSS_1)
             .expect("Failed to spawn GNSS 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::gnss::task(board.sensors.gps2_rx, GNSS_2)
+        tasks::readout::gnss::task(board.sensors.gps2, GNSS_2)
             .expect("Failed to spawn GNSS 2 task"),
     );
 
