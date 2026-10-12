@@ -20,6 +20,7 @@ macro_rules! paint {
 mod cal;
 mod flash;
 mod io;
+mod status;
 
 use core::str::SplitAsciiWhitespace;
 
@@ -87,6 +88,7 @@ const HELP: &str = r"commands:
   cal set <id> <key>=<value>...  store a line printed by the calibration tool
   cal show                       print the applied calibration as cal set lines
   mark <label>                   label this moment in the SD log, e.g. 'mark still'
+  status                         summarise five seconds of sensors and estimator
   flash info                     show chip id and status register
   flash list                     list the keys you can clear
   flash clear <key>              clear a key (needs --yes)
@@ -163,6 +165,7 @@ async fn handle_line(io: &mut ConsoleIo<'_>, line: &str, storage: &Storage) {
         Some("help") => say(io, HELP).await,
         Some("cal") => cal::command(io, &mut args, storage).await,
         Some("mark") => mark(io, &mut args).await,
+        Some("status") => status::command(io).await,
         Some("flash") => flash::command(io, &mut args, storage).await,
         Some("reset") => {
             say(io, "resetting...\n").await;

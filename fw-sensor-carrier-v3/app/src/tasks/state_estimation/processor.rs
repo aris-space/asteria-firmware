@@ -3,11 +3,12 @@ use asteria_sef_core::{
     StateEstimator, UpdateError,
 };
 use asteria_sef_light::STANDARD_GRAVITY_MPS2;
+use defmt::warn;
 use embassy_time::Instant;
 
 use super::{config, position_reference};
 use crate::calibration;
-use crate::sensors::ImuId;
+use crate::sensors::{GnssId, ImuId, MAG_COUNT};
 use crate::signals;
 use crate::types::{BaroSample, GnssSample, ImuSample, MagSample, SefLogSample};
 
@@ -16,6 +17,7 @@ pub struct Processor<E> {
     reference: GeodeticReference,
     newest_imu: Instant,
     last_publish: Option<Instant>,
+    last_mag_warnings: [Option<Instant>; MAG_COUNT],
 }
 
 impl<E: StateEstimator> Processor<E> {
@@ -25,6 +27,7 @@ impl<E: StateEstimator> Processor<E> {
             reference: position_reference(),
             newest_imu: Instant::MIN,
             last_publish: None,
+            last_mag_warnings: [None; MAG_COUNT],
         }
     }
 
@@ -49,9 +52,26 @@ impl<E: StateEstimator> Processor<E> {
 
     pub fn update_mag(&mut self, sample: MagSample) -> Result<(), UpdateError> {
         let field_body = [sample.x, sample.y, sample.z];
-        let field_strength_nt = libm::sqrtf(field_body.iter().map(|value| value * value).sum());
-        let calibration = calibration::mag::CAL.applied(sample.src);
-        if !calibration.correction.accepts_field(field_strength_nt) {
+        if !calibration::mag::CAL
+            .applied(sample.src)
+            .correction
+            .is_calibrated()
+        {
+            return Ok(());
+        }
+        let field_error = super::mag_field_error(field_body);
+        if libm::fabsf(field_error) > config::MAX_MAG_FIELD_ERROR {
+            let last_warning = &mut self.last_mag_warnings[sample.src.index()];
+            if last_warning.is_none_or(|last| {
+                sample.ts.saturating_duration_since(last) >= config::WARNING_PERIOD
+            }) {
+                warn!(
+                    "{}: field strength {}% off the local field, disturbed, not fused",
+                    sample.src,
+                    field_error * 100.0
+                );
+                *last_warning = Some(sample.ts);
+            }
             return Ok(());
         }
 
@@ -151,6 +171,9 @@ impl Processor<config::Estimator> {
         signals::SELECTED_IMU
             .sender()
             .send(ImuId::ALL[selected_imu]);
+        signals::SELECTED_GNSS
+            .sender()
+            .send(GnssId::ALL[estimator.selected_gnss()]);
         let scores = estimator.consistency_scores();
         for imu in ImuId::ALL {
             let index = imu.index();
@@ -167,6 +190,7 @@ impl Processor<config::Estimator> {
                 selected: index == selected_imu,
                 msl_ready: height_std_m < config::MSL_REFERENCED_HEIGHT_STD_M,
                 redundancy_ready: estimator.redundancy_ready(),
+                magnetometer_ignored: estimator.imu_status(index).magnetometer_ignored,
                 height_msl_m: vertical_state.height_m,
                 velocity_mps: vertical_state.velocity_mps,
                 barometer_bias_m: vertical_state.barometer_bias_m,

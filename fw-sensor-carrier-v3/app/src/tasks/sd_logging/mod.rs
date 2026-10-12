@@ -23,6 +23,7 @@ use static_cell::ConstStaticCell;
 
 use crate::resources::sd::Sd;
 use crate::signals;
+use crate::types::SdSession;
 use csv::{DROP_FILE, FILE_COUNT, FILES, RECORD_KINDS, Record};
 use writer::{CsvLog, LogBuffer};
 
@@ -57,7 +58,8 @@ pub async fn task(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>
 
 async fn run_session(sdmmc: &mut Sd, buffers: &mut [LogBuffer; FILE_COUNT]) -> Result<(), ()> {
     let fs = mount(sdmmc).await?;
-    let mut logs = create_logs(&fs, buffers).await?;
+    let log = next_log_dir(&fs).await?;
+    let mut logs = create_logs(&fs, &log, buffers).await?;
 
     let mut state = signals::STATE_CHANNEL
         .subscriber()
@@ -81,6 +83,7 @@ async fn run_session(sdmmc: &mut Sd, buffers: &mut [LogBuffer; FILE_COUNT]) -> R
         .subscriber()
         .expect("SD: subscriber slot");
     let mut dropped = [0u64; RECORD_KINDS];
+    let mut session_dropped = 0;
     let mut longest_write = Duration::from_ticks(0);
     let mut last_flush = Instant::now();
     loop {
@@ -140,6 +143,11 @@ async fn run_session(sdmmc: &mut Sd, buffers: &mut [LogBuffer; FILE_COUNT]) -> R
                 .map_err(|e| warn!("SD: {} flush failed: {}", log.name, Debug2Format(&e)))?;
         }
         longest_write = longest_write.max(started.elapsed());
+        session_dropped += dropped.iter().sum::<u64>();
+        signals::SD_SESSION.sender().send(SdSession {
+            log: log.clone(),
+            dropped: session_dropped,
+        });
         signals::SD_LOGGING.sender().send(true);
         if dropped.iter().any(|&count| count > 0) {
             warn!(
@@ -196,39 +204,35 @@ async fn mount(sdmmc: &mut Sd) -> Result<SdFileSystem<'_>, ()> {
     Ok(fs)
 }
 
-async fn create_logs<'buf>(
-    fs: &SdFileSystem<'_>,
-    buffers: &'buf mut [LogBuffer; FILE_COUNT],
-) -> Result<Vec<CsvLog<'buf, impl Write<Error: Debug> + Seek>, FILE_COUNT>, ()> {
+async fn next_log_dir(fs: &SdFileSystem<'_>) -> Result<String<8>, ()> {
     let root = fs.root_dir();
     let mut dir_name = String::<8>::new();
-    let mut found = false;
     for number in 1..=9999 {
         dir_name.clear();
         write!(dir_name, "LOG{:04}", number).unwrap();
         match root.open_dir(&dir_name).await {
             Ok(_) => continue,
-            Err(FatError::NotFound) => {
-                found = true;
-                break;
-            }
+            Err(FatError::NotFound) => return Ok(dir_name),
             Err(e) => {
                 warn!("SD: log directory lookup failed: {}", Debug2Format(&e));
                 return Err(());
             }
         }
     }
-    if !found {
-        warn!("SD: all log directory names are occupied");
-        return Err(());
-    }
-    let dir = root.create_dir(&dir_name).await.map_err(|e| {
-        warn!(
-            "SD: {} create failed: {}",
-            dir_name.as_str(),
-            Debug2Format(&e)
-        )
-    })?;
+    warn!("SD: all log directory names are occupied");
+    Err(())
+}
+
+async fn create_logs<'buf>(
+    fs: &SdFileSystem<'_>,
+    dir_name: &str,
+    buffers: &'buf mut [LogBuffer; FILE_COUNT],
+) -> Result<Vec<CsvLog<'buf, impl Write<Error: Debug> + Seek>, FILE_COUNT>, ()> {
+    let dir = fs
+        .root_dir()
+        .create_dir(dir_name)
+        .await
+        .map_err(|e| warn!("SD: {} create failed: {}", dir_name, Debug2Format(&e)))?;
 
     let mut logs = Vec::<_, FILE_COUNT>::new();
     for (spec, buffer) in FILES.iter().zip(buffers) {
@@ -238,7 +242,7 @@ async fn create_logs<'buf>(
             .map_err(|e| warn!("SD: {} create failed: {}", spec.name, Debug2Format(&e)))?;
         let _ = logs.push(CsvLog::new(spec.name, spec.header, file, buffer));
     }
-    info!("SD: logging to {}", dir_name.as_str());
+    info!("SD: logging to {}", dir_name);
     Ok(logs)
 }
 

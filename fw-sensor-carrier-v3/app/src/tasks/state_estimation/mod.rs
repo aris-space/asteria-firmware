@@ -12,7 +12,9 @@ use defmt::{Debug2Format, warn};
 use embassy_futures::select::{Either4, select4};
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::Instant;
+use nalgebra::Vector3;
 
+pub use config::MAX_MAG_FIELD_ERROR;
 use processor::Processor;
 
 use crate::signals;
@@ -25,6 +27,12 @@ pub fn position_reference() -> GeodeticReference {
         0.0,
     )
     .expect("position reference must be valid")
+}
+
+/// Fraction by which a calibrated field's strength is off the launch site's.
+pub fn mag_field_error(field_nt: [f32; 3]) -> f32 {
+    let local_nt = Vector3::from(config::LOCAL_MAGNETIC_FIELD_NED_NT).norm();
+    (Vector3::from(field_nt).norm() - local_nt) / local_nt
 }
 
 #[embassy_executor::task]

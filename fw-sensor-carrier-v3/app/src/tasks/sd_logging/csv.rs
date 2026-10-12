@@ -32,7 +32,7 @@ pub const DROP_FILE: usize = RECORD_KINDS;
 pub const FILES: [CsvFile; FILE_COUNT] = [
     CsvFile {
         name: "STATE.CSV",
-        header: "cal_us,imu,selected,msl_ready,redundancy_ready,height_msl_m,velocity_mps,bias0_m,bias1_m,height_std_m,velocity_std_mps,bias0_std_m,bias1_std_m,score,qw,qx,qy,qz\n",
+        header: "cal_us,imu,selected,msl_ready,redundancy_ready,mag_ignored,height_msl_m,velocity_mps,bias0_m,bias1_m,height_std_m,velocity_std_mps,bias0_std_m,bias1_std_m,score,qw,qx,qy,qz\n",
     },
     CsvFile {
         name: "IMU.CSV",
@@ -71,12 +71,13 @@ pub fn format_record(record: &Record) -> Result<Row, core::fmt::Error> {
             let [qw, qx, qy, qz] = s.orientation_body_to_ned_wxyz;
             writeln!(
                 row,
-                "{},{},{},{},{},{:.3},{:.4},{:.3},{:.3},{:.3},{:.4},{:.3},{:.3},{:.3},{:.6},{:.6},{:.6},{:.6}",
+                "{},{},{},{},{},{},{:.3},{:.4},{:.3},{:.3},{:.3},{:.4},{:.3},{:.3},{:.3},{:.6},{:.6},{:.6},{:.6}",
                 s.ts.as_micros(),
                 s.imu.index(),
                 u8::from(s.selected),
                 u8::from(s.msl_ready),
                 u8::from(s.redundancy_ready),
+                u8::from(s.magnetometer_ignored),
                 s.height_msl_m,
                 s.velocity_mps,
                 s.barometer_bias_m[0],

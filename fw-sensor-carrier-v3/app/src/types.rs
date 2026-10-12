@@ -170,6 +170,13 @@ impl Mark {
     pub const LABEL_LEN: usize = 16;
 }
 
+/// The SD session's log directory and readings dropped so far.
+#[derive(Clone, Debug)]
+pub struct SdSession {
+    pub log: heapless::String<8>,
+    pub dropped: u64,
+}
+
 /// One SEF chain's state at the output cadence, before selecting an IMU.
 #[derive(Clone, Copy, Debug)]
 pub struct SefLogSample {
@@ -178,6 +185,7 @@ pub struct SefLogSample {
     pub selected: bool,
     pub msl_ready: bool,
     pub redundancy_ready: bool,
+    pub magnetometer_ignored: bool,
     pub height_msl_m: f32,
     pub velocity_mps: f32,
     pub barometer_bias_m: [f32; 2],

@@ -26,6 +26,8 @@ pub const LAUNCH_SITE_LONGITUDE_DEG: f64 = -8.287_750_809_600_846;
 //              uncertainty ±0° 19' (1σ)
 // SEF-light turns its attitude to true north by this field's declination.
 pub const LOCAL_MAGNETIC_FIELD_NED_NT: [f32; 3] = [26_375.0, -286.0, 35_701.0];
+// Magnetometer samples further off this field's strength are disturbed and not fused.
+pub const MAX_MAG_FIELD_ERROR: f32 = 0.1;
 // For estimators that model the magnetic field.
 pub const MAG_DIRECTION_STD: f32 = 0.05;
 
