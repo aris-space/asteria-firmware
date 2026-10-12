@@ -11,7 +11,7 @@ const PERIOD: Duration = Duration::from_millis(50);
 
 #[embassy_executor::task]
 pub async fn task() -> ! {
-    let mut rx = signals::STATE_ESTIMATE_WATCH
+    let mut rx = signals::STATE_ESTIMATE
         .receiver()
         .expect("state report: estimate receiver available");
     // The biases are SEF-light's own, so they come from its per-chain log samples.

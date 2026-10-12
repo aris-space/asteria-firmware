@@ -45,7 +45,7 @@ const _: () = assert!(IMU_MEAN_SAMPLES > 0 && PRESSURE_MEAN_SAMPLES > 0);
 
 #[embassy_executor::task]
 pub async fn orientation(can: BufferedFdCanSender) -> ! {
-    let watch = &signals::STATE_ESTIMATE_WATCH;
+    let watch = &signals::STATE_ESTIMATE;
     on_change(can, watch, |state| {
         let ned_to_body = body_to_ned(&state).inverse();
         Some(Message::OrientationData(OrientationData {
@@ -78,7 +78,7 @@ pub async fn imu(mut can: BufferedFdCanSender) -> ! {
         if samples != 0 {
             continue;
         }
-        let Some(state) = signals::STATE_ESTIMATE_WATCH.try_get() else {
+        let Some(state) = signals::STATE_ESTIMATE.try_get() else {
             continue;
         };
         let body_to_ned = body_to_ned(&state);
@@ -109,7 +109,7 @@ pub async fn imu(mut can: BufferedFdCanSender) -> ! {
 #[embassy_executor::task]
 pub async fn position(can: BufferedFdCanSender) -> ! {
     let reference = position_reference();
-    let mut states = signals::STATE_ESTIMATE_WATCH
+    let mut states = signals::STATE_ESTIMATE
         .receiver()
         .expect("CAN: state watch receiver slot");
     every(can, POSITION_PERIOD, || {
@@ -129,7 +129,7 @@ pub async fn position(can: BufferedFdCanSender) -> ! {
 
 #[embassy_executor::task]
 pub async fn velocity(can: BufferedFdCanSender) -> ! {
-    let mut states = signals::STATE_ESTIMATE_WATCH
+    let mut states = signals::STATE_ESTIMATE
         .receiver()
         .expect("CAN: state watch receiver slot");
     every(can, VELOCITY_PERIOD, || {
@@ -163,7 +163,7 @@ pub async fn magnetometer(can: BufferedFdCanSender) -> ! {
     let watch = &signals::SELECTED_MAG;
     on_change(can, watch, |reading| {
         let body = Vector3::new(reading.cal.x, reading.cal.y, reading.cal.z) * NT_TO_UT;
-        let ned = body_to_ned(&signals::STATE_ESTIMATE_WATCH.try_get()?) * body;
+        let ned = body_to_ned(&signals::STATE_ESTIMATE.try_get()?) * body;
         Some(Message::MagnetometerData(MagnetometerData {
             magnetic_field_x: body.x,
             magnetic_field_y: body.y,

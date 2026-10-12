@@ -27,11 +27,6 @@ pub fn position_reference() -> GeodeticReference {
     .expect("position reference must be valid")
 }
 
-/// Whether GNSS has referenced the height to MSL, rather than only the barometers.
-pub fn height_msl_referenced(height_std_m: f32) -> bool {
-    height_std_m < config::MSL_REFERENCED_HEIGHT_STD_M
-}
-
 #[embassy_executor::task]
 pub async fn task() -> ! {
     let mut imu = signals::IMU_CHANNEL

@@ -28,10 +28,11 @@ define_sample_channel!(DHT_CHANNEL, submit_dht: DhtReading, cap = 8, subs = 2);
 define_sample_channel!(STATE_CHANNEL, submit_state: SefLogSample, cap = 64, subs = 2);
 define_sample_channel!(MARK_CHANNEL, submit_mark: Mark, cap = 4, subs = 1);
 
-pub static STATE_ESTIMATE_WATCH: Watch<CriticalSectionRawMutex, NavigationState, 5> = Watch::new();
+pub static STATE_ESTIMATE: Watch<CriticalSectionRawMutex, NavigationState, 5> = Watch::new();
 pub static SELECTED_IMU: Watch<CriticalSectionRawMutex, ImuId, 1> = Watch::new();
 pub static SELECTED_BARO: Watch<CriticalSectionRawMutex, BaroReading, 2> = Watch::new();
 pub static SELECTED_MAG: Watch<CriticalSectionRawMutex, MagReading, 1> = Watch::new();
 pub static SELECTED_DHT: Watch<CriticalSectionRawMutex, DhtReading, 1> = Watch::new();
+pub static SD_LOGGING: Watch<CriticalSectionRawMutex, bool, 1> = Watch::new();
 pub static STARTUP_COMPLETE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 pub static USB_LINK_SIGNAL: Signal<CriticalSectionRawMutex, bool> = Signal::new();

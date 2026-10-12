@@ -1,21 +1,18 @@
-//! Board LED patterns. Green shows startup and liveness, yellow shows estimate
-//! readiness, and red shows whether this is a development build.
+//! Board LED patterns. Green shows startup and liveness, yellow shows SD
+//! logging, and red shows whether this is a development build.
 
 use embassy_futures::join::join3;
 use embassy_stm32::gpio::{Level, Output};
-use embassy_time::{Duration, Instant, Ticker, Timer, with_timeout};
+use embassy_time::{Duration, Timer, with_timeout};
 
 use crate::resources::leds::BoardLeds;
 use crate::signals;
-use crate::tasks::state_estimation::height_msl_referenced;
-
-const ESTIMATE_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[embassy_executor::task]
 pub async fn task(leds: BoardLeds) {
     join3(
         heartbeat(leds.green),
-        estimate_status(leds.yellow),
+        sd_status(leds.yellow),
         build_status(leds.red),
     )
     .await;
@@ -43,34 +40,19 @@ async fn heartbeat(mut green: Output<'static>) {
     }
 }
 
-/// Off without a fresh estimate, blinking before MSL anchoring, solid afterward.
-async fn estimate_status(mut yellow: Output<'static>) {
-    let mut estimates = signals::STATE_ESTIMATE_WATCH
+/// On after a successful SD flush; off during initialization or retries.
+async fn sd_status(mut yellow: Output<'static>) {
+    let mut logging = signals::SD_LOGGING
         .receiver()
-        .expect("LEDs: estimate receiver available");
-    let mut last_estimate = None;
-    let mut msl_ready = false;
-    let mut blink_phase = 0;
-    let mut ticker = Ticker::every(Duration::from_millis(250));
+        .expect("LEDs: SD status receiver available");
 
+    yellow.set_low();
     loop {
-        ticker.next().await;
-        let now = Instant::now();
-        if let Some(estimate) = estimates.try_changed() {
-            last_estimate = Some(now);
-            msl_ready = height_msl_referenced(estimate.position_std_ned_m[2]);
-        }
-        // The height stays MSL-referenced long after GNSS loss. Solid yellow
-        // means a fresh estimate with an established MSL reference, not a live
-        // GNSS fix.
-        let fresh = last_estimate
-            .is_some_and(|last| now.saturating_duration_since(last) <= ESTIMATE_TIMEOUT);
-        yellow.set_level(if fresh && (msl_ready || blink_phase == 0) {
+        yellow.set_level(if logging.changed().await {
             Level::High
         } else {
             Level::Low
         });
-        blink_phase = (blink_phase + 1) % 4;
     }
 }
 

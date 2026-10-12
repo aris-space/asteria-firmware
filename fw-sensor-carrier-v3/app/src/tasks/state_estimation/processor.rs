@@ -6,7 +6,7 @@ use asteria_sef_light::STANDARD_GRAVITY_MPS2;
 use embassy_time::Instant;
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
-use super::{config, height_msl_referenced, position_reference};
+use super::{config, position_reference};
 use crate::calibration;
 use crate::sensors::ImuId;
 use crate::signals;
@@ -148,9 +148,7 @@ impl Processor<config::Estimator> {
 
         navigation_state.orientation_body_to_ned_wxyz =
             true_north(navigation_state.orientation_body_to_ned_wxyz);
-        signals::STATE_ESTIMATE_WATCH
-            .sender()
-            .send(navigation_state);
+        signals::STATE_ESTIMATE.sender().send(navigation_state);
 
         let estimator = &self.estimator;
         let selected_imu = estimator.selected_imu();
@@ -173,7 +171,7 @@ impl Processor<config::Estimator> {
                 ts: timestamp,
                 imu,
                 selected: index == selected_imu,
-                msl_ready: height_msl_referenced(height_std_m),
+                msl_ready: height_std_m < config::MSL_REFERENCED_HEIGHT_STD_M,
                 redundancy_ready: estimator.redundancy_ready(),
                 height_msl_m: vertical_state.height_m,
                 velocity_mps: vertical_state.velocity_mps,
