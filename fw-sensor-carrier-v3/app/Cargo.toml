@@ -11,7 +11,9 @@ debug = ["dep:panic-probe"]
 
 [dependencies]
 asteria-sef-light = { path = "../../asteria-state-estimation/crates/sef-light" }
-asteria-sef-core = { path = "../../asteria-state-estimation/crates/sef-core" }
+asteria-sef-core = { path = "../../asteria-state-estimation/crates/sef-core", features = [
+    "nalgebra",
+] }
 libm = "0.2.11"
 
 [target.'cfg(target_os = "none")'.dependencies]
@@ -83,7 +85,7 @@ defmt = "1.0.1"
 defmt-rtt = "1.0.0"
 
 # Math
-nalgebra = { version = "0.33", default-features = false, features = ["libm"] }
+nalgebra = { version = "0.35", default-features = false, features = ["libm"] }
 num-traits = { version = "0.2.19", default-features = false }
 
 atomic_enum = { version = "0.3.0", default-features = false }

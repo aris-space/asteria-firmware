@@ -4,7 +4,6 @@ use asteria_sef_core::{
 };
 use asteria_sef_light::STANDARD_GRAVITY_MPS2;
 use embassy_time::Instant;
-use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
 use super::{config, position_reference};
 use crate::calibration;
@@ -80,7 +79,6 @@ impl<E: StateEstimator> Processor<E> {
         self.estimator.update_barometer(input)
     }
 
-    /// Receiver selection is handled by the estimator.
     pub fn update_gnss(&mut self, fix: GnssSample) -> Result<(), UpdateError> {
         let pvt = &fix.pvt;
         if !pvt.has_3d_fix() {
@@ -140,14 +138,12 @@ impl Processor<config::Estimator> {
         self.last_publish = Some(newest_imu);
 
         let now = Instant::now();
-        let mut navigation_state = self.estimator.navigation_state();
+        let navigation_state = self.estimator.navigation_state();
         let timestamp = Instant::from_micros(navigation_state.time_us);
         if now.saturating_duration_since(timestamp) > config::IMU_FRESH {
             return;
         }
 
-        navigation_state.orientation_body_to_ned_wxyz =
-            true_north(navigation_state.orientation_body_to_ned_wxyz);
         signals::STATE_ESTIMATE.sender().send(navigation_state);
 
         let estimator = &self.estimator;
@@ -164,8 +160,6 @@ impl Processor<config::Estimator> {
             let height_std_m = libm::sqrtf(uncertainty.height_variance_m2);
             let velocity_std_mps = libm::sqrtf(uncertainty.velocity_variance_m2_per_s2);
             let barometer_bias_std_m = uncertainty.barometer_bias_variance_m2.map(libm::sqrtf);
-            let orientation_body_to_ned_wxyz =
-                true_north(estimator.orientation_body_to_ned_wxyz(index));
 
             signals::submit_state(SefLogSample {
                 ts: timestamp,
@@ -180,19 +174,8 @@ impl Processor<config::Estimator> {
                 velocity_std_mps,
                 barometer_bias_std_m,
                 consistency_score: scores[index],
-                orientation_body_to_ned_wxyz,
+                orientation_body_to_ned_wxyz: estimator.orientation_body_to_ned_wxyz(index),
             });
         }
     }
-}
-
-/// Rotates about down by the declination, from magnetic to true north.
-fn true_north(body_to_ned_wxyz: [f32; 4]) -> [f32; 4] {
-    let [w, x, y, z] = body_to_ned_wxyz;
-    let declination = UnitQuaternion::from_axis_angle(
-        &Vector3::z_axis(),
-        config::MAGNETIC_DECLINATION_DEG.to_radians(),
-    );
-    let orientation = declination * UnitQuaternion::from_quaternion(Quaternion::new(w, x, y, z));
-    [orientation.w, orientation.i, orientation.j, orientation.k]
 }

@@ -1,6 +1,5 @@
 use core::sync::atomic::Ordering;
 
-use asteria_sef_core::NavigationState;
 use asteria_sef_light::STANDARD_GRAVITY_MPS2;
 use datatypes::{
     status::{SensorStatus as CanSensorStatus, StatusCommonMessage},
@@ -15,7 +14,7 @@ use embassy_futures::select::{Either, select};
 use embassy_stm32::can::BufferedFdCanSender;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, watch::Watch};
 use embassy_time::{Duration, Instant, Ticker};
-use nalgebra::{Quaternion, UnitQuaternion, Vector3};
+use nalgebra::Vector3;
 
 use crate::{
     filters::{Filter as _, MovingAverage},
@@ -47,7 +46,7 @@ const _: () = assert!(IMU_MEAN_SAMPLES > 0 && PRESSURE_MEAN_SAMPLES > 0);
 pub async fn orientation(can: BufferedFdCanSender) -> ! {
     let watch = &signals::STATE_ESTIMATE;
     on_change(can, watch, |state| {
-        let ned_to_body = body_to_ned(&state).inverse();
+        let ned_to_body = state.orientation_body_to_ned().inverse();
         Some(Message::OrientationData(OrientationData {
             orientation_w: ned_to_body.w,
             orientation_x: ned_to_body.i,
@@ -81,7 +80,7 @@ pub async fn imu(mut can: BufferedFdCanSender) -> ! {
         let Some(state) = signals::STATE_ESTIMATE.try_get() else {
             continue;
         };
-        let body_to_ned = body_to_ned(&state);
+        let body_to_ned = state.orientation_body_to_ned();
         let acceleration = acceleration_g * STANDARD_GRAVITY_MPS2;
         let acceleration_ned =
             body_to_ned * acceleration + Vector3::new(0.0, 0.0, STANDARD_GRAVITY_MPS2);
@@ -134,8 +133,8 @@ pub async fn velocity(can: BufferedFdCanSender) -> ! {
         .expect("CAN: state watch receiver slot");
     every(can, VELOCITY_PERIOD, || {
         let state = states.try_changed()?;
-        let ned = Vector3::from(state.velocity_ned_mps);
-        let body = body_to_ned(&state).inverse() * ned;
+        let ned = state.velocity_ned();
+        let body = state.orientation_body_to_ned().inverse() * ned;
         Some(Message::VelocityData(VelocityData {
             velocity_x: body.x,
             velocity_y: body.y,
@@ -163,7 +162,7 @@ pub async fn magnetometer(can: BufferedFdCanSender) -> ! {
     let watch = &signals::SELECTED_MAG;
     on_change(can, watch, |reading| {
         let body = Vector3::new(reading.cal.x, reading.cal.y, reading.cal.z) * NT_TO_UT;
-        let ned = body_to_ned(&signals::STATE_ESTIMATE.try_get()?) * body;
+        let ned = signals::STATE_ESTIMATE.try_get()?.orientation_body_to_ned() * body;
         Some(Message::MagnetometerData(MagnetometerData {
             magnetic_field_x: body.x,
             magnetic_field_y: body.y,
@@ -281,9 +280,4 @@ fn send(can: &mut BufferedFdCanSender, msg: Message) {
         Err(TryTxError::Full) => trace!("CAN: TX buffer full, frame dropped"),
         Err(err) => error!("CAN: TX error: {:?}", err),
     }
-}
-
-fn body_to_ned(state: &NavigationState) -> UnitQuaternion<f32> {
-    let [w, x, y, z] = state.orientation_body_to_ned_wxyz;
-    UnitQuaternion::from_quaternion(Quaternion::new(w, x, y, z))
 }

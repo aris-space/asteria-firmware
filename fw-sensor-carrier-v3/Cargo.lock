@@ -111,6 +111,7 @@ version = "0.1.0"
 dependencies = [
  "heapless 0.9.3",
  "libm",
+ "nalgebra 0.35.0",
 ]
 
 [[package]]
@@ -1162,7 +1163,7 @@ dependencies = [
  "lsm303agr",
  "lsm6dso32",
  "ms5607",
- "nalgebra 0.33.3",
+ "nalgebra 0.35.0",
  "noline",
  "num-traits",
  "panic-probe",
@@ -1688,20 +1689,6 @@ dependencies = [
  "num-rational",
  "num-traits",
  "simba 0.8.1",
- "typenum",
-]
-
-[[package]]
-name = "nalgebra"
-version = "0.33.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d43ddcacf343185dfd6de2ee786d9e8b1c2301622afab66b6c73baf9882abfd"
-dependencies = [
- "approx",
- "num-complex",
- "num-rational",
- "num-traits",
- "simba 0.9.1",
  "typenum",
 ]
 
@@ -2233,18 +2220,6 @@ checksum = "061507c94fc6ab4ba1c9a0305018408e312e17c041eb63bef8aa726fa33aceae"
 dependencies = [
  "approx",
  "libm",
- "num-complex",
- "num-traits",
- "paste",
-]
-
-[[package]]
-name = "simba"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c99284beb21666094ba2b75bbceda012e610f5479dfcc2d6e2426f53197ffd95"
-dependencies = [
- "approx",
  "num-complex",
  "num-traits",
  "paste",
