@@ -27,7 +27,7 @@ use crate::{
     tasks::{
         can::utils::{BufferedCanTransmit as _, TryTxError},
         readout,
-        state_estimation::launch_site,
+        state_estimation::position_reference,
     },
     types::ImuSample,
 };
@@ -108,7 +108,7 @@ pub async fn imu(mut can: BufferedFdCanSender) -> ! {
 
 #[embassy_executor::task]
 pub async fn position(can: BufferedFdCanSender) -> ! {
-    let reference = launch_site();
+    let reference = position_reference();
     let mut states = signals::STATE_ESTIMATE_WATCH
         .receiver()
         .expect("CAN: state watch receiver slot");
