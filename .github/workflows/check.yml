@@ -126,13 +126,9 @@ jobs:
         run: just ci-checks
 
   doc:
-    # run docs generation on nightly rather than stable. This enables features like
-    # https://doc.rust-lang.org/beta/unstable-book/language-features/doc-cfg.html which allows an
-    # API be documented as only available in some specific platforms.
+    # Check docs on stable Rust.
     runs-on: self-hosted
     name: 📖 doc
-    env:
-      RUSTUP_TOOLCHAIN: nightly-2026-02-03
     steps:
       - uses: actions/checkout@v4
         with:
@@ -141,7 +137,8 @@ jobs:
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: thumbv7em-none-eabihf
       - name: Install just
         uses: extractions/setup-just@v1
       - uses: Swatinem/rust-cache@v2
@@ -159,7 +156,7 @@ jobs:
             fw-recovery-board
             fw-test-board
       - name: Build docs
-        # Not quite sure anymore about these flags. But --workspace is important.
+        # Build all documentation workspaces.
         run: just doc
         env:
-          RUSTDOCFLAGS: -Zunstable-options --cfg docsrs -D warnings
+          RUSTDOCFLAGS: -D warnings
