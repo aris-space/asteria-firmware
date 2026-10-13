@@ -24,8 +24,23 @@ embassy-stm32 = { version = "*", features = [
 ] }
 embassy-time = { version = "*", features = ["tick-hz-32_768", "defmt", "defmt-timestamp-uptime"] }
 embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread", "defmt"] }
+embassy-sync = { version = "*", features = ["defmt"] }
 
 assign-resources = "0.5.0"
+
+# CAN
+can-utils = { path = "../../crates/can-utils", features = ["defmt"] }
+data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
+dp-flight-computer = { path = "../../data-definitions/datapoints/dp-flight-computer", version = "=0.3", features = [
+    "can",
+    "derive_defmt",
+] }
+dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [
+    "can",
+    "derive_defmt",
+] }
+datatypes = { path = "../../data-definitions/datatypes", features = ["derive_defmt"] }
+embedded-can = "0.4.1"
 
 defmt = "1.0.1"
 defmt-rtt = { version = "1.0.0", features = ["disable-blocking-mode"] }

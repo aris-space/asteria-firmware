@@ -10,6 +10,7 @@ use embassy_executor::Spawner;
 
 mod built;
 mod resources;
+mod signals;
 mod startup;
 mod tasks;
 

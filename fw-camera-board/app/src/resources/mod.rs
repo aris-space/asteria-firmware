@@ -3,6 +3,7 @@ use embassy_stm32::{Peri, Peripherals, peripherals};
 
 pub mod address;
 pub mod camera;
+pub mod can;
 pub mod leds;
 
 // Pin map from the asteria-camera-PCB schematic (STM32G4A1KEUx, UFQFPN32).
