@@ -19,7 +19,7 @@ Submodules are required. `data-definitions` provides ASTERIA message/datapoint d
 
 ## Rust
 
-Install Rust with [`rustup`](https://rustup.rs/). The repo pins its nightly toolchain, components, and `thumbv7em-none-eabihf` target in [../rust-toolchain.toml](../rust-toolchain.toml), so first build should install them automatically.
+Install Rust with [`rustup`](https://rustup.rs/). The repo selects the stable toolchain and specifies the required components and `thumbv7em-none-eabihf` target in [../rust-toolchain.toml](../rust-toolchain.toml), so first build should install them automatically.
 
 ## Tools
 

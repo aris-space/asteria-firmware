@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: nightly-2026-02-03
+  RUST_TOOLCHAIN: stable
 
 jobs:
   pre-commit:
@@ -131,6 +131,8 @@ jobs:
     # API be documented as only available in some specific platforms.
     runs-on: self-hosted
     name: 📖 doc
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2026-02-03
     steps:
       - uses: actions/checkout@v4
         with:
@@ -139,7 +141,7 @@ jobs:
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - name: Install just
         uses: extractions/setup-just@v1
       - uses: Swatinem/rust-cache@v2

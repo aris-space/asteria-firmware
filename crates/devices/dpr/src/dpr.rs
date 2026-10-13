@@ -147,12 +147,8 @@ impl<'a> DPR<'a> {
 
     pub async fn step_bang(&mut self) {
         match self.loop_state {
-            ActiveNominal => {
-                if self.pressure < self.pid.setpoint {
-                    self.valve_pin.set_high();
-                } else {
-                    self.valve_pin.set_low();
-                }
+            ActiveNominal if self.pressure < self.pid.setpoint => {
+                self.valve_pin.set_high();
             }
             _ => {
                 self.valve_pin.set_low();

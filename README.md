@@ -1,7 +1,7 @@
 # ASTERIA Firmware
 
 [![CI](https://github.com/aris-space/asteria-firmware/actions/workflows/check.yml/badge.svg)](https://github.com/aris-space/asteria-firmware/actions/workflows/check.yml)
-[![Rust](https://img.shields.io/badge/rust-nightly-orange?logo=rust)](https://www.rust-lang.org/tools/install)
+[![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust)](https://www.rust-lang.org/tools/install)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
 This repository contains the firmware for the ASTERIA rocket, the ARIS launch vehicle competing at EuRoC 2026. It includes firmware for the avionics and ground support electronics.
