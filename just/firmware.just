@@ -9,8 +9,7 @@ import './logs.just'
 # `bin` : The name of the binary being built, e.g. `fw-engine-board` or `fw-sensor-carrier`.
 # `use_probe_rs` : Whether to use probe-rs for flashing (true/false).
 #
-# Probe-rs flag defaults. A board's justfile can re-assign either of these to
-# override; `allow-duplicate-variables` above makes the importing file win.
+# Probe-rs flag defaults. A board's justfile can re-assign either of these to override.
 probe_rs_run_flags := "--no-catch-hardfault --no-catch-reset --chip-erase --log-format '{t} {L:severity} {s}'"
 probe_rs_attach_flags := "--no-catch-hardfault --no-catch-reset"
 
