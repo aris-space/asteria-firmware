@@ -23,6 +23,7 @@ This repository was hard-forked from [`hermes-firmware`](https://github.com/aris
 
 | Firmware                     | Common name             | MCU             |
 | ---------------------------- | ----------------------- | --------------- |
+| `fw-camera-board`            | Camera control board    | `STM32G4A1KEUx` |
 | `fw-engine-board`            | Engine board            | `STM32G473RCTx` |
 | `fw-fuel-control-board`      | Fuel control board      | `STM32G473RCTx` |
 | `fw-lox-valve-control-board` | LOX valve control board | `STM32G4A1KETx` |

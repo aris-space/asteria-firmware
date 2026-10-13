@@ -1,0 +1,7 @@
+# Adds defmt.x + a probe-rs runner; rest inherited from ../.cargo/config.toml.
+[target.thumbv7em-none-eabihf]
+rustflags = ["-C", "link-arg=-Tdefmt.x"]
+runner = ["probe-rs", "run", "--chip", "STM32G4A1KEUx", "--log-format", "{t} {L:severity} {s}"]
+
+[env]
+DEFMT_LOG = "debug"

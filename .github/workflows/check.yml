@@ -66,6 +66,7 @@ jobs:
             fw-oxidizer-control-board
             fw-lox-valve-control-board
             fw-recovery-board
+            fw-camera-board
             fw-test-board
       - name: just test
         run: just test
@@ -121,6 +122,7 @@ jobs:
             fw-oxidizer-control-board
             fw-lox-valve-control-board
             fw-recovery-board
+            fw-camera-board
             fw-test-board
       - name: just ci-checks
         run: just ci-checks
@@ -155,6 +157,7 @@ jobs:
             fw-oxidizer-control-board
             fw-lox-valve-control-board
             fw-recovery-board
+            fw-camera-board
             fw-test-board
       - name: Build docs
         # Not quite sure anymore about these flags. But --workspace is important.
