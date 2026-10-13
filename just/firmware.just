@@ -1,3 +1,5 @@
+set allow-duplicate-variables
+
 target := "thumbv7em-none-eabihf"
 import './artifacts.just'
 import './logs.just'
@@ -7,9 +9,9 @@ import './logs.just'
 # `bin` : The name of the binary being built, e.g. `fw-engine-board` or `fw-sensor-carrier`.
 # `use_probe_rs` : Whether to use probe-rs for flashing (true/false).
 #
-# Probe-rs flag defaults. A board's justfile can re-assign either of these
-# before/after the import to override (the importing file wins in `just`).
-probe_rs_run_flags := "--no-catch-hardfault --no-catch-reset --connect-under-reset --chip-erase"
+# Probe-rs flag defaults. A board's justfile can re-assign either of these to
+# override; `allow-duplicate-variables` above makes the importing file win.
+probe_rs_run_flags := "--no-catch-hardfault --no-catch-reset --chip-erase --log-format '{t} {L:severity} {s}'"
 probe_rs_attach_flags := "--no-catch-hardfault --no-catch-reset"
 
 # Show available capabilities in a board workspace.
