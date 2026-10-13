@@ -9,9 +9,8 @@ use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::{i2c::I2c, mode::Async};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_time::{Delay, Duration, Instant, Timer};
-use embedded_utils::fmt::warn;
+use embedded_utils::debug;
 use embedded_utils::fmt::*;
-use embedded_utils::{_warn, debug};
 use ms5607::{Initialized, Ms5607, Oversampling};
 
 pub const SAMPLE_FREQUENCY_HZ: u32 = 40;
@@ -60,12 +59,12 @@ where
     /// On failure, waits using an exponential backoff strategy and retries.
     async fn run(mut self) -> ActivePressureSensor<'a, I2C> {
         loop {
-            debug!("{:?} Sensor initializing", self.sensor_id);
+            debug!("{:?} initializing", self.sensor_id);
             match self.sensor.init(&mut Delay).await {
                 Ok(initialized_sensor) => {
                     // Reset the attempt counter on successful initialization.
                     self.attempt_count = 0;
-                    info!("{:?} Sensor initialized", self.sensor_id);
+                    info!("{:?} initialized", self.sensor_id);
                     return ActivePressureSensor::new(
                         self.pressure_driver,
                         self.environmental_driver,
@@ -75,12 +74,7 @@ where
                     );
                 }
                 Err(err) => {
-                    //error!("{:?} Initialization failed,", self.sensor_id);
-                    error!(
-                        "{:?} Initialization error: {:?}",
-                        self.sensor_id,
-                        Debug2Format(&err)
-                    );
+                    error!("{:?} init failed: {:?}", self.sensor_id, Debug2Format(&err));
                     // If initialization fails, increment the attempt counter and wait.
                     self.attempt_count += 1;
                     // Wait with exponential backoff based on the number of attempts.
@@ -175,7 +169,7 @@ where
                 }
                 Err(err) => {
                     self.error_count += 1;
-                    _warn!("{:?} Read error: {:?}", self.sensor_id, Debug2Format(&err));
+                    warn!("{:?} read error: {:?}", self.sensor_id, Debug2Format(&err));
                     if self.error_count >= self.config.max_consecutive_errors {
                         break;
                     }
@@ -184,7 +178,7 @@ where
 
             if Instant::now() > next_sample {
                 warn!(
-                    "{:?} cannot keep up with measurement interval. Took {:?}ms too long",
+                    "{:?} can't keep up with sample interval (overran by {}ms)",
                     self.sensor_id,
                     (Instant::now() - next_sample).as_millis()
                 );
@@ -193,7 +187,7 @@ where
             }
         }
 
-        error!("{:?} Sensor offline (too many errors)", self.sensor_id);
+        error!("{:?} offline (too many consecutive errors)", self.sensor_id);
 
         // Get back the I2C interface from the sensor
         let old_addr = self.sensor.address();

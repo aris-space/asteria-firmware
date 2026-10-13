@@ -2,6 +2,13 @@
 name = "can-utils"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[lib]
+# STM32 code is checked on the embedded target; derive crates have host tests.
+test = false
+doctest = false
+bench = false
 
 [dependencies]
 embassy-stm32.workspace = true

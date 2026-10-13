@@ -2,6 +2,7 @@
 name = "epos4"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 embedded-io-async = { version = "0.7" }
@@ -9,3 +10,8 @@ defmt = { version = "0.3", optional = true }
 
 [features]
 defmt = ["dep:defmt", "embedded-io-async/defmt"]
+
+[lib]
+test = false
+doctest = false
+bench = false

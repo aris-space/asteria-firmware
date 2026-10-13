@@ -1,5 +1,0 @@
-chip    := "STM32G473RCTx"
-bin     := "fw-communication-board"
-use_probe_rs := "true"
-
-import '../just/firmware.just'

@@ -1,5 +1,5 @@
+use datatypes::status::BuildInformationCommon;
 use embassy_sync::lazy_lock::LazyLock;
-use hermes_can::messages::debug_info::BuildInformationCommon;
 
 pub mod built {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
@@ -37,9 +37,9 @@ pub(crate) static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|
     let is_git_dirty = built::GIT_DIRTY.unwrap_or(false);
     let author_initials = [6, 9];
     let can_semver = [
-        hermes_can::VERSION_MAJOR,
-        hermes_can::VERSION_MINOR,
-        hermes_can::VERSION_PATCH,
+        dp_fuel_control_board::VERSION_MAJOR,
+        dp_fuel_control_board::VERSION_MINOR,
+        dp_fuel_control_board::VERSION_PATCH,
     ];
 
     BuildInformationCommon {

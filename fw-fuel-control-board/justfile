@@ -1,5 +1,47 @@
 chip    := "STM32G473RCTx"
 bin     := "fw-fuel-control-board"
-use_probe_rs := "false"
+use_probe_rs := "true"
 
 import '../just/firmware.just'
+
+# Fuel-only lab helper: attach to running firmware and scrape the debug pressure log
+# from sensors/keller_analog_p.rs into a CSV. Keep this in sync with that log format.
+record-pressure:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    target_dir="$(cargo metadata --format-version=1 --no-deps | jq -r '.target_directory')"
+    elf="$(find "$target_dir/{{target}}" -type f -name "{{bin}}" -print0 | xargs -0 ls -t 2>/dev/null | head -n1 || true)"
+    [[ -n "$elf" ]] || { echo "No built {{bin}} found under $target_dir/{{target}}." >&2; exit 1; }
+
+    out="pressure_$(date +%Y%m%d_%H%M%S).csv"
+    echo "timestamp_s,pressurization_pressure_bar,fuel_tank_pressure_1_bar,fuel_tank_pressure_2_bar" > "$out"
+    echo "Recording pressurization pressure to $out for 5 minutes (Ctrl+C to stop early)..."
+
+    probe-rs attach --chip {{chip}} \
+        --no-catch-hardfault \
+        --no-catch-reset \
+        "$elf" \
+    | grep --line-buffered "Pressurization pressure:" \
+    | awk '
+        BEGIN { OFS="," }
+        {
+            ts = $1
+            p0 = p1 = p2 = ""
+            for (i = 1; i <= NF; i++) {
+                if ($i == "pressure:" && p0 == "") {
+                    p0 = $(i+1)
+                } else if ($i == "pressure" && $(i+1) == "1:") {
+                    p1 = $(i+2)
+                } else if ($i == "pressure" && $(i+1) == "2:") {
+                    p2 = $(i+2)
+                }
+            }
+            if (p0 != "" && p1 != "" && p2 != "") {
+                print ts, p0, p1, p2
+                fflush()
+            }
+        }
+    ' >> "$out" || true
+
+    echo "Done. Saved $(( $(wc -l < "$out") - 1 )) samples to $out"

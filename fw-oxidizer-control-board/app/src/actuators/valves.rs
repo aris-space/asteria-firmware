@@ -1,30 +1,27 @@
 use crate::drivers::WATCH;
+use crate::globals::STATE;
+use datatypes::actuator::NormallyOpenValve;
 use embassy_stm32::gpio::Output;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::watch::{Receiver, Watch};
-use hermes_can::messages::board_status::ValveState;
-
-pub static OXD_VENT_CONTROL: Watch<ThreadModeRawMutex, ValveState, WATCH> = Watch::new();
+use embassy_sync::watch::Receiver;
 
 #[embassy_executor::task]
-pub(crate) async fn valve_task(oxd_vnt_vlv: Output<'static>) {
-    let oxd_vnt_watcher = OXD_VENT_CONTROL.receiver().unwrap();
-    let oxd_vnt_task = valve_task_impl(oxd_vnt_vlv, oxd_vnt_watcher);
-
-    oxd_vnt_task.await;
+pub(crate) async fn valve_task(oxidizer_vent_valve: Output<'static>) {
+    let oxidizer_vent_watcher = STATE.oxidizer_vent_control.receiver().unwrap();
+    valve_task_impl(oxidizer_vent_valve, oxidizer_vent_watcher).await;
 }
 
 async fn valve_task_impl(
     mut valve: Output<'static>,
-    mut watch: Receiver<'static, ThreadModeRawMutex, ValveState, WATCH>,
+    mut watch: Receiver<'static, ThreadModeRawMutex, NormallyOpenValve, WATCH>,
 ) {
     loop {
         let state = watch.changed().await;
         match state {
-            ValveState::Active => {
+            NormallyOpenValve::Closed => {
                 valve.set_high();
             }
-            ValveState::Inactive => {
+            NormallyOpenValve::Open => {
                 valve.set_low();
             }
         }

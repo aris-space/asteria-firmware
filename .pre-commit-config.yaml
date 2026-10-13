@@ -42,8 +42,8 @@ repos:
     hooks:
       - id: cargo-clippy
         name: cargo clippy
-        entry: just clippy --all-targets --all-features -- -D warnings
+        entry: just ci-checks
         language: system
         pass_filenames: false
         stages: [manual]
-        # Lints code with clippy (manual run: `pre-commit run cargo-clippy`)
+        # Lints code with clippy (manual run: `pre-commit run --hook-stage manual cargo-clippy --all-files`)

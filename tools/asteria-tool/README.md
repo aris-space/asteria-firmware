@@ -22,9 +22,15 @@ Or from `tools/asteria-tool`:
 cargo run -- <COMMAND>
 ```
 
+To use the `asteria-tool` commands below, install it from the repository root:
+
+```bash
+cargo install --path tools/asteria-tool --locked
+```
+
 Optional:
 
-- Add `--stats` before the subcommand to print command timings.
+- Add `--stats` to print command timings.
 
 ## Connection Modes
 
@@ -130,7 +136,7 @@ asteria-tool fs pwd
 asteria-tool fs cat PATH
 asteria-tool fs pull [-r] REMOTE_PATH LOCAL_PATH
 asteria-tool fs rm [-r] PATH
-asteria-tool fs erase-storage
+asteria-tool fs erase-storage --yes
 asteria-tool fs info
 ```
 
@@ -144,6 +150,6 @@ asteria-tool fs pull /logs_25/defmt.bin ~/Downloads/defmt_25.bin
 asteria-tool fs pull -r /logs_25 ~/Downloads
 asteria-tool fs rm /logs_25/build_info.txt
 asteria-tool fs rm -r /logs_25
-asteria-tool fs erase-storage
+asteria-tool fs erase-storage --yes
 asteria-tool fs info
 ```

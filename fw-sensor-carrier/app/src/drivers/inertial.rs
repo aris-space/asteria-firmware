@@ -178,26 +178,24 @@ impl<'a> InertialDriver<'a> {
         ));
 
         // Taken from https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml?#igrfwmm
-        // Calculated for Gadmen, Switzerland
-        // Model Used: 	WMM-2025
-        // Latitude: 	46° 44' 15" N
-        // Longitude: 	8° 21' 8" E
-        // Date 	Declination
-        // 2025-05-26 	3° 24' E  ± 0° 22'  changing by  0° 7' E per year
-        // const DECLINATION_DEG: f32 = 3.4;
+        // Calculated for Gadmen Range, Switzerland
+        // Model Used:  WMMHR-2025
+        // Latitude:    46° 44' 59" N
+        // Longitude:   8° 23' 11" E
+        // Elevation:   1606.0 m Mean Sea Level
+        //
+        // 2026-05-18   Declination: 3° 28' 56" E
+        //              changing by +0° 7' 24"/yr
+        //              uncertainty ±0° 20' (1σ)
+        const DECLINATION_DEG: f32 = 3.0 + 28.0 / 60.0 + 56.0 / 3600.0;
 
-        // Calculated for Constancia, Portugal
-        // Latitude: 	39° 25' 32" N
-        // Longitude: 	8° 17' 29" W
-        // Elevation: 	160.0 m Mean Sea Level
-        // Date     Declination
-        // 2025-10-12 	-0° 47' 48" changing by 0° 9' 13"/yr
-        const DECLINATION_DEG: f32 = -0.7952;
         const DECLINATION_RAD: f32 = DECLINATION_DEG.to_radians();
 
-        // rotate around the world-up axis by –declination → TRUE-north quaternion
+        // Fusion aligns its +x with the measured horizontal field (magnetic north).
+        // Mag-NED is the true-NED frame rotated by +declination about z-down, so
+        // body -> true-NED is R_z(+declination) * body -> mag-NED.
         let orientation_true =
-            UnitQuaternion::from_axis_angle(&Vector3::z_axis(), -DECLINATION_RAD) * orientation_mag;
+            UnitQuaternion::from_axis_angle(&Vector3::z_axis(), DECLINATION_RAD) * orientation_mag;
 
         let orientation = orientation_true;
 
@@ -211,7 +209,7 @@ impl<'a> InertialDriver<'a> {
         // we need to convert accel to m/s^2, angular velocity stays in deg/s
         let body_accel_scaled = body_accel_raw * STANDARD_G;
 
-        // we need to rotate from body into inertial frame. the quaternion is a passive rotation.
+        // we need to rotate from body into inertial frame. orientation maps body -> NED.
         let inertial_accel = orientation.transform_vector(&body_accel_scaled);
         let inertial_gyro = orientation.transform_vector(&body_angular_velocity);
 

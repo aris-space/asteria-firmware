@@ -3,6 +3,7 @@ name = "fw-lox-valve-control-board"
 version = "0.1.0"
 edition = "2024"
 authors = ["Louis Schell <louis.schell1@gmx.de>"]
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 embedded-utils = { path = "../../crates/embedded-utils" }

@@ -2,7 +2,8 @@
 name = "max31889-thermistor"
 version = "0.1.0"
 edition = "2024"
-authors = ["Matteo Vass <matteo.vass@aris-space.ch"]
+authors = ["Matteo Vass <matteo.vass@aris-space.ch>"]
+license = "MIT OR Apache-2.0"
 description = "Driver for ADS1120 device reading thermocouples"
 keywords = ["embedded", "no-std", "embedded-hal", "sensor", "async"]
 

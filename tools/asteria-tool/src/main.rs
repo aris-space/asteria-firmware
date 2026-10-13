@@ -1,3 +1,6 @@
+// Copyright 2026 ARIS
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Host CLI tool for interacting with Asteria boards over USB.
 //!
 //! Supports:
@@ -37,7 +40,7 @@ Examples:
   asteria-tool fs pull -r /logs_25 ~/Downloads
   asteria-tool fs rm /logs_12/build_info.txt
   asteria-tool fs rm -r /logs_12
-  asteria-tool fs erase-storage
+  asteria-tool fs erase-storage --yes
   asteria-tool reset
   asteria-tool panic
   asteria-tool panic \"panic test message\"

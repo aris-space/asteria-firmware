@@ -1,3 +1,6 @@
+// Copyright 2026 ARIS
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 #![cfg_attr(not(feature = "use-std"), no_std)]
 
 use heapless::{String, Vec};

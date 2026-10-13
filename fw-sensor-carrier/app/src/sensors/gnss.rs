@@ -66,7 +66,7 @@ where
     }
 
     async fn run(mut self) -> ActivePositionSensor<'a, RX> {
-        debug!("{:?} GNSS initializing", self.id);
+        debug!("{:?} initializing", self.id);
 
         let mut consecutive_errors = 0;
         let fix_type;
@@ -78,18 +78,14 @@ where
                 ExponentialBackoff::new(self.cfg.base_backoff_ms, self.cfg.max_backoff_ms)
                     .wait(self.attempt)
                     .await;
-                debug!("{:?} GNSS re‑initializing", self.id);
+                debug!("{:?} re-initializing", self.id);
             }
 
             let read_bytes = match self.rx.read(&mut recv_buf).await {
                 Ok(0) => continue, // nothing read
                 Ok(n) => n,
                 Err(e) => {
-                    warn!(
-                        "{:?} Failed to read from GPS UART {:?}",
-                        self.id,
-                        Debug2Format(&e)
-                    );
+                    warn!("{:?} read error: {:?}", self.id, Debug2Format(&e));
                     consecutive_errors += 1;
                     continue;
                 }
@@ -100,19 +96,20 @@ where
             while let Some(msg) = parsed.next() {
                 match msg {
                     Ok(PacketRef::NavStatus(stat)) => {
-                        debug!("Received NAV status {:?}", Debug2Format(&stat));
+                        debug!("{:?} NAV status {:?}", self.id, Debug2Format(&stat));
                         match stat.fix_type() {
                             // These are ok. We continue if we get these.
                             GpsFix::Fix2D
                             | GpsFix::Fix3D
                             | GpsFix::GPSPlusDeadReckoning
+                            | GpsFix::DeadReckoningOnly
                             | GpsFix::TimeOnlyFix => {
                                 fix_type = stat.fix_type();
                                 break 'outer;
                             }
                             _ => {
-                                // GpsFix::NoFix | GpsFix::DeadReckoningOnly are ok, but we have to wait until
-                                // we do have a fix
+                                // GpsFix::NoFix is ok, but we have to wait until
+                                // we do have a usable fix.
                                 self.attempt = 0;
                                 consecutive_errors = 0;
                             }
@@ -124,7 +121,7 @@ where
                         consecutive_errors = 0;
                     }
                     Err(e) => {
-                        warn!("{:?} parse err: {:?}", self.id, Debug2Format(&e));
+                        warn!("{:?} parse error: {:?}", self.id, Debug2Format(&e));
                         consecutive_errors += 1;
                     }
                 }
@@ -132,7 +129,7 @@ where
         }
 
         info!(
-            "{:?} GNSS initialized with fix type {}",
+            "{:?} initialized (fix type: {:?})",
             self.id,
             Debug2Format(&fix_type)
         );
@@ -185,8 +182,15 @@ where
                                 //todo: send time to the driver
                             }
                             Ok(PacketRef::NavPvt(pvt))
-                                if matches!(pvt.fix_type(), GpsFix::Fix2D | GpsFix::Fix3D) =>
+                                if matches!(
+                                    pvt.fix_type(),
+                                    GpsFix::Fix2D
+                                        | GpsFix::Fix3D
+                                        | GpsFix::GPSPlusDeadReckoning
+                                        | GpsFix::DeadReckoningOnly
+                                ) =>
                             {
+                                // TODO: we might want to check that for the GPS_FIX_OK flag
                                 let data = PvtData {
                                     lon_deg: pvt.lon_degrees(),
                                     lat_deg: pvt.lat_degrees(),
@@ -219,21 +223,21 @@ where
                                 // TODO: handle other messages
                             }
                             Err(e) => {
-                                warn!("{:?} parse err: {:?}", self.id, Debug2Format(&e));
+                                warn!("{:?} parse error: {:?}", self.id, Debug2Format(&e));
                                 self.errors += 1;
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("{:?} UART err: {:?}", self.id, Debug2Format(&e));
+                    warn!("{:?} read error: {:?}", self.id, Debug2Format(&e));
                     self.errors += 1;
                 }
                 _ => {}
             }
 
             if self.errors >= self.cfg.max_consecutive_errors {
-                error!("{:?} too many errors – resetting", self.id);
+                error!("{:?} offline (too many consecutive errors)", self.id);
                 return InactivePositionSensor::new(
                     self.driver,
                     self.rx,

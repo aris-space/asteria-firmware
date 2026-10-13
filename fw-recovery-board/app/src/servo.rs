@@ -3,6 +3,7 @@
 
    Inspired by code from Domenic Nebiker (meaning that I copied most of it)
 */
+use crate::SEP_DEPL_FREQ;
 use cortex_m::prelude::_embedded_hal_Pwm;
 use dp_recovery_board::ActuatorStatus;
 use embassy_stm32::PeripheralType;
@@ -10,7 +11,6 @@ use embassy_stm32::gpio::{Input, Output};
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
 use embedded_utils::fmt::*;
-// idk if this is possible to do it nicer. Ill have to see
 
 #[allow(unused_imports)]
 #[cfg(feature = "defmt")]
@@ -65,32 +65,17 @@ impl<A: PeripheralType + GeneralInstance4Channel, B: PeripheralType + GeneralIns
         self.active = false;
     }
 
-    /// set the specified angle to both servos
+    /// set the specified angle to both servos. Both are always attempted, the first error is returned.
     pub fn set_angle(&mut self, angle: f32) -> Result<(), ServoError> {
-        match self.act1.set_angle(angle) {
-            Ok(()) => {}
-            Err(e) => {
-                error!("error on act1: {}", e);
-
-                // still attempt to set act2 to angle
-                match self.act2.set_angle(angle) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        error!("error on act2: {}", e);
-                        return Err(e);
-                    }
-                }
-                return Err(e);
-            }
+        let r1 = self.act1.set_angle(angle);
+        let r2 = self.act2.set_angle(angle);
+        if let Err(e) = &r1 {
+            error!("error on act1: {}", e);
         }
-        match self.act2.set_angle(angle) {
-            Ok(()) => {}
-            Err(e) => {
-                error!("error on act2: {}", e);
-                return Err(e);
-            }
+        if let Err(e) = &r2 {
+            error!("error on act2: {}", e);
         }
-        Ok(())
+        r1.and(r2)
     }
 
     pub fn get_actuator_status(&mut self) -> [ActuatorStatus; 2] {
@@ -142,7 +127,7 @@ impl<TIM: PeripheralType + GeneralInstance4Channel> Servo<TIM> {
         // For 333Hz servo with 500us (0 deg) to 2500us (180 deg) pulse width
         let min_pulse = 0.5; // in milliseconds
         let max_pulse = 2.5; // in milliseconds
-        let freq_hz = 333.0; // Updated servo PWM frequency
+        let freq_hz = SEP_DEPL_FREQ.0 as f32;
 
         // Calculate the duty cycle range
         let period_ms = 1000.0 / freq_hz; // Convert frequency to period in milliseconds
@@ -151,8 +136,6 @@ impl<TIM: PeripheralType + GeneralInstance4Channel> Servo<TIM> {
 
         // Interpolate the duty cycle based on the angle
         let duty = min_duty + (angle / 180.0) * (max_duty - min_duty);
-
-        // Set the PWM duty cycle
 
         self.handle.set_duty(self.channel, duty as u32);
 
@@ -174,8 +157,6 @@ impl<TIM: PeripheralType + GeneralInstance4Channel> Servo<TIM> {
     ///returns true if an actuator is detected, false otherwise
     /// (Actuator is detected when ~1mA is pulled from the servo connector)
     pub fn is_connected(&self) -> bool {
-        //maybe needs to be replaced by !self.actuator_presence.is_high(), as state might be undefined and as such not low and not high->might work,
-        //must be tested ASAP
         self.actuator_presence.is_high()
     }
 
