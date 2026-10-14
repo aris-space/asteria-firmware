@@ -15,7 +15,7 @@ use crate::{calibration, resources, signals, storage, tasks};
 pub struct PreparedBoard {
     pub buzzer: resources::buzzer::BuzzerPwm,
     pub sensors: SensorResources,
-    pub can: embassy_stm32::can::Can<'static>,
+    pub can: resources::can::BufferedCan,
     pub storage: &'static storage::Storage,
     pub usb: resources::usb::UsbDriver,
     pub sd_card: resources::SdCard,

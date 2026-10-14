@@ -1,17 +1,17 @@
 use data_core::can::hal::CanDecode as _;
 use datatypes::status::BoardId;
 use embassy_executor::SendSpawner;
-use embassy_stm32::can::{Can, RxFdBuf, TxFdBuf};
 use embedded_can::StandardId;
-use static_cell::StaticCell;
+
+use crate::resources::can::BufferedCan;
 
 pub mod rx;
 pub mod tx;
 mod utils;
 
 pub const THIS_BOARD_ID: BoardId = BoardId::SensorCarrier;
-const TX_BUFFER_LEN: usize = 16;
-const RX_BUFFER_LEN: usize = 4;
+pub const TX_BUFFER_LEN: usize = 16;
+pub const RX_BUFFER_LEN: usize = 4;
 
 data_core::can::sparse_decodable_can_message! {
     enum ReceivedMessage {
@@ -22,14 +22,7 @@ data_core::can::sparse_decodable_can_message! {
 
 pub const RECEIVED_IDS: &[StandardId] = ReceivedMessage::SUPPORTED_IDS;
 
-pub fn spawn(can: Can<'static>, spawner: SendSpawner) {
-    static TX_BUFFER: StaticCell<TxFdBuf<TX_BUFFER_LEN>> = StaticCell::new();
-    static RX_BUFFER: StaticCell<RxFdBuf<RX_BUFFER_LEN>> = StaticCell::new();
-    let can = can.buffered_fd(
-        TX_BUFFER.init(TxFdBuf::new()),
-        RX_BUFFER.init(RxFdBuf::new()),
-    );
-
+pub fn spawn(can: BufferedCan, spawner: SendSpawner) {
     let rx = can.reader();
     spawner.spawn(rx::task(rx).expect("Failed to spawn CAN RX task"));
 
