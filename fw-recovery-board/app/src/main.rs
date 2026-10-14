@@ -336,13 +336,12 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-/// Green LED heartbeat, 1 Hz at 50% duty cycle
 #[embassy_executor::task]
 async fn heartbeat(mut led: Output<'static>) {
     loop {
         led.set_high();
-        Timer::after_millis(500).await;
+        Timer::after_millis(250).await;
         led.set_low();
-        Timer::after_millis(500).await;
+        Timer::after_millis(750).await;
     }
 }

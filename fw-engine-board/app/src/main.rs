@@ -113,7 +113,7 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
-    let _green = Output::new(p.PC15, Level::High, Speed::Low);
+    let green = Output::new(p.PC15, Level::High, Speed::Low);
     let red = Output::new(p.PC13, Level::High, Speed::Low);
 
     //Used the yellow LED as critical error indicator
@@ -223,6 +223,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(can_rx_task(rx).expect("Can't spawn CAN RX task"));
     spawner.spawn(board_status_update_task(mcu_temp).expect("Board Status Task failed"));
 
+    spawner.spawn(heartbeat(green).expect("blinky executor"));
     spawner.spawn(build_status_blinky(red).expect("blinky executor"));
 
     spawner.spawn(
@@ -240,6 +241,16 @@ async fn main(spawner: Spawner) -> ! {
 
     loop {
         pending::<()>().await;
+    }
+}
+
+#[embassy_executor::task]
+async fn heartbeat(mut green: Output<'static>) {
+    loop {
+        green.set_low();
+        Timer::after_millis(250).await;
+        green.set_high();
+        Timer::after_millis(750).await;
     }
 }
 
