@@ -1,0 +1,14 @@
+[project]
+name = "gnss-tools"
+version = "0.1.0"
+description = "GNSS module and antenna test scripts"
+requires-python = ">=3.12"
+dependencies = ["pyserial", "pyubx2"]
+
+[tool.uv]
+package = false
+
+[tool.pyright]
+typeCheckingMode = "off"
+venvPath = "."
+venv = ".venv"
