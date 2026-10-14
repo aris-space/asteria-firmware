@@ -7,7 +7,7 @@ import time
 
 from pyubx2 import POLL_LAYER_FLASH, SET_LAYER_BBR, SET_LAYER_FLASH, SET_LAYER_RAM, TXN_NONE
 from pyubx2 import ERR_IGNORE, POLL, UBXMessage, UBXReader
-from serial import Serial
+from serial import serial_for_url
 
 from config import BAUD_RATE, BAUD_RATE_CONFIG, CONFIG
 
@@ -37,7 +37,7 @@ def wait_for(ser, name):
 # finds the baud rate the receiver answers on and prints its version
 def connect(port):
     for baud in BAUD_RATES:
-        ser = Serial(port, baud, timeout=0.1)
+        ser = serial_for_url(port, baud, timeout=0.1)
         send(ser, UBXMessage("MON", "MON-VER", POLL))
         ver = wait_for(ser, "MON-VER")
         if ver is not None:
