@@ -1,37 +1,30 @@
 // Copyright 2026 ARIS
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+//! Firmware for the ASTERIA Recovery Board
+
 #![no_std]
 #![no_main]
 
+mod actuator_control;
 mod build_info;
 mod can_io;
-mod recovery_actuator_control;
+mod cats;
 mod rsbl_servo;
 mod servo;
-
-/// IN THE FINAL VERSION; MAKE SURE THAT SERVO ID 2 IS LEFT, AND SERVO ID 3 IS RIGHT POSITION!!!
 mod watchdog;
 
-use crate::can_io::ReceivedMessage;
-use crate::recovery_actuator_control::{
-    ARMING_STATE, DEPLOYMENT_OCCURRED, DEPLOYMENT_SERVO_STATUS, DEPLOYMENT_TARGET_STATE, INPUTS,
-    OUTPUTS, SEPARATION_OCCURRED, SEPARATION_SERVO_STATUS, SEPARATION_TARGET_STATE,
-    STEERING_STATUS, ServoTargetState, SteeringStatus, WATCHDOG_STATE, arming_detection,
-    deployment_task, separation_task, steering_task,
-};
+use crate::actuator_control::{DEPLOYMENT_TARGET_STATE, SEPARATION_TARGET_STATE, ServoTargetState};
+use crate::can_io::{INPUTS, OUTPUTS, ReceivedMessage};
 use crate::servo::{RecoveryActuator, Servo};
 use crate::watchdog::Watchdog;
 use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector as _;
-use can_utils::rxtx::{TypedCanReceive as _, TypedCanTransmit};
+use can_utils::rxtx::TypedCanReceive as _;
 use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode;
-use datatypes::status::{ArmingState, StatusCommonMessage};
-use dp_recovery_board::{ActuatorStatus, RecoveryBoardStatus, WatchdogState};
 use embassy_executor::Spawner;
-use embassy_futures::join::join3;
-use embassy_stm32::can::CanTx;
+use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Pull, Speed};
 use embassy_stm32::mode::Async;
 use embassy_stm32::peripherals::FDCAN1;
@@ -40,11 +33,9 @@ use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel::{Ch1, Ch2};
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::Uart;
-use embassy_stm32::{bind_interrupts, can, dma, peripherals, usart};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Instant};
-use embassy_time::{Timer, with_timeout};
+use embassy_stm32::{bind_interrupts, can, dma, exti, peripherals, usart};
+use embassy_time::Duration;
+use embassy_time::Timer;
 use embedded_utils::fmt::*;
 
 mod clocks {
@@ -61,19 +52,18 @@ use clocks::clocks_config;
 /* BEGIN MOTOR CONSTANTS */
 const SAFETY_SPIRAL_POS_LEFT: i32 = -2457;
 const SAFETY_SPIRAL_POS_RIGHT: i32 = 3227;
-const DEPLOYMENT_INITIAL_ANGLE: f32 = 100.0;
-const DEPLOYMENT_SERVO_ANGLE: f32 = 30.0;
-const SEPARATION_INITIAL_ANGLE: f32 = 90.0;
-const SEPARATION_SERVO_ANGLE: f32 = 180.0;
+// Somehow the motors don't like fully extended (180) or retraced (0), thus only close to it.
+const DEPLOYMENT_INITIAL_ANGLE: f32 = 145.0;
+const DEPLOYMENT_SERVO_ANGLE: f32 = 35.0;
+const SEPARATION_INITIAL_ANGLE: f32 = 175.0;
+const SEPARATION_SERVO_ANGLE: f32 = 5.0;
 const SEP_DEPL_FREQ: Hertz = Hertz(333);
 /* END MOTOR CONSTANTS */
 
 /* BEGIN TIMER CONSTANTS */
-const CAN_TX_TIMEOUT: Duration = Duration::from_millis(50);
-#[allow(dead_code)]
-const CAN_RX_TIMEOUT: Duration = Duration::from_millis(50);
+pub const CAN_TX_TIMEOUT: Duration = Duration::from_millis(50);
+pub const STATUS_CREATION_INTERVAL: Duration = Duration::from_millis(1000);
 const AUTOMATIC_SAFETY_SPIRAL_TIMER: Duration = Duration::from_millis(10000);
-const STATUS_CREATION_INTERVAL: Duration = Duration::from_millis(1000);
 
 /* END TIMER CONSTANTS */
 
@@ -90,7 +80,7 @@ use panic_reset as _;
 
 // bind interrupts for UART and CAN
 bind_interrupts!(struct Irqs {
-    USART1 => usart::InterruptHandler<peripherals::USART1>; // data Steering Motors
+    USART2 => usart::InterruptHandler<peripherals::USART2>; // steering motors (RS-485)
 
     FDCAN1_IT0 => can::IT0InterruptHandler<FDCAN1>; // can bus
     FDCAN1_IT1 => can::IT1InterruptHandler<FDCAN1>; // can bus
@@ -99,6 +89,9 @@ bind_interrupts!(struct Irqs {
     DMA1_CHANNEL2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
     DMA2_CHANNEL5 => dma::InterruptHandler<peripherals::DMA2_CH5>;
     DMA2_CHANNEL6 => dma::InterruptHandler<peripherals::DMA2_CH6>;
+
+    EXTI9_5 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI9_5>;
+    EXTI15_10 => exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI15_10>;
 });
 
 #[embassy_executor::main]
@@ -110,14 +103,17 @@ async fn main(spawner: Spawner) -> ! {
     let _buzzer = Output::new(p.PB10, Level::Low, Speed::VeryHigh);
 
     /* ARMING DETECTION */
-    let arming_detect_pin = Input::new(p.PB11, Pull::None);
+    let arming_detect_pin = ExtiInput::new(p.PB11, p.EXTI11, Pull::None, Irqs);
+    /* CATS backup flight computer, pulled up and driven low once it triggered */
+    let cats_separation = ExtiInput::new(p.PA8, p.EXTI8, Pull::None, Irqs); // CATS IO 1
+    let cats_deployment = ExtiInput::new(p.PA9, p.EXTI9, Pull::None, Irqs); // CATS IO 2
+
     /* BEGIN SEPARATION */
-    //general power
-    let sep_pwr = Output::new(p.PA1, Level::Low, Speed::Low);
+    // separation power trigger
+    let sep_pwr = Output::new(p.PC0, Level::Low, Speed::Low);
 
     // Separation 1 control
     // setup PWM for SEP1
-    // idk if this works as in the datasheet PA4 is on timer channel 2, but embassy wants it on channel 1
     let sep1_ch2_pin = PwmPin::new(p.PA4, OutputType::PushPull);
     let sep1_pwm_temp = SimplePwm::new(
         p.TIM3,
@@ -149,8 +145,8 @@ async fn main(spawner: Spawner) -> ! {
     /* END SEPARATION */
 
     /* BEGIN DEPLOYMENT */
-    //general power deployment
-    let depl_pwr = Output::new(p.PA2, Level::Low, Speed::Low);
+    // deployment power trigger
+    let depl_pwr = Output::new(p.PC1, Level::Low, Speed::Low);
 
     //Deployment 1 control
     let depl1_ch1_pin = PwmPin::new(p.PA6, OutputType::PushPull);
@@ -186,31 +182,30 @@ async fn main(spawner: Spawner) -> ! {
     /* END DEPLOYMENT */
 
     /* BEGIN STEERING MOTORS */
-    //steering power
-    let steer_pwr = Output::new(p.PA3, Level::Low, Speed::Low);
-    //steer_pwr.set_high();
-    //Timer::after_millis(200).await;
+    // steering power trigger
+    let steer_pwr = Output::new(p.PC2, Level::Low, Speed::Low);
 
-    //UART for steering motors
-    //USART 1
-    //UART RX: PC5
-    //UART TX: PC4
-    //DE Pin: PC3
+    // RS-485 on USART2 with hardware driver enable
+    // USART2.DE on PA1
+    // USART2.TX on PA2
+    // USART2.RX on PA3
     let usart_config = rsbl_servo::uart_config();
-    let steering_dir = Output::new(p.PC3, Level::Low, Speed::VeryHigh);
 
-    // this is a necessary thing: To pass the UART instance to an embassy task, the buffer here
-    // needs to have static lifetime.
-    static mut BUFFER_TEMP: [u8; 128] = [0; 128];
-    // This unsafe block is safe because the BUFFER_TEMP array never goes out of scope (declared here in main and main never ends), is never used within the main function after declaration
-    // and will be integrated into the UART only once. This assures that only a single mutable reference to the Buffer exists.
-    #[allow(static_mut_refs)]
-    let steering_buffer = unsafe { &mut BUFFER_TEMP };
+    // SAFETY:
+    // The main function is only called once, thus
+    // the static is narrowly scoped and will be integrated into the UART only once.
+    // This assures that only a single mutable reference to the Buffer exists.
+    let steering_buffer = unsafe {
+        static mut BUFFER_TEMP: [u8; 128] = [0; 128];
+        #[allow(static_mut_refs)]
+        &mut BUFFER_TEMP
+    };
 
-    let steering_temp: Uart<Async> = Uart::new(
-        p.USART1,
-        p.PC5,
-        p.PC4,
+    let steering_uart: Uart<Async> = Uart::new_with_de(
+        p.USART2,
+        p.PA3,
+        p.PA2,
+        p.PA1,
         p.DMA1_CH1,
         p.DMA1_CH2,
         Irqs,
@@ -218,9 +213,8 @@ async fn main(spawner: Spawner) -> ! {
     )
     .unwrap();
 
-    let steering = rsbl_servo::RsblServo::new(steering_temp, steering_dir, steering_buffer);
+    let steering = rsbl_servo::RsblServo::new(steering_uart, steering_buffer);
     let steering_watchdog = Watchdog::new(AUTOMATIC_SAFETY_SPIRAL_TIMER);
-    let steering_detect = Input::new(p.PA8, Pull::None);
     /* END STEERING MOTORS */
 
     /* BEGIN SPI FLASH */
@@ -255,14 +249,13 @@ async fn main(spawner: Spawner) -> ! {
     let can = setup_can(p.FDCAN1, p.PB8, p.PB9, Irqs, ReceivedMessage::SUPPORTED_IDS);
     let (can_tx, mut can_rx, _prop) = can.split();
     let can_tx = make_multiplexable(can_tx);
-
     /* END CAN BUS */
 
     /* BEGIN LEDS */
     // LED1 is on PB0, is green
     // LED2 is on PB1, is yellow
     // LED3 is on PB2, is red
-    let _led_green = Output::new(p.PB0, Level::Low, Speed::Low);
+    let led_green = Output::new(p.PB0, Level::Low, Speed::Low);
     let mut led_yellow = Output::new(p.PB1, Level::Low, Speed::Low);
     let led_red = Output::new(p.PB2, Level::Low, Speed::Low);
     /* END LEDS */
@@ -273,14 +266,15 @@ async fn main(spawner: Spawner) -> ! {
         .sender()
         .send(crate::build_info::BUILD_INFO.get().clone());
 
-    //indication that async is working correctly, hopefully
-    spawner.spawn(build_status_blinky(led_red).unwrap());
-    spawner.spawn(steering_task(steering, steer_pwr, steering_detect, steering_watchdog).unwrap());
-    spawner.spawn(separation_task(separation).unwrap());
-    spawner.spawn(deployment_task(deployment).unwrap());
-    spawner.spawn(can_tx_task(can_tx).unwrap());
+    spawner.spawn(heartbeat(led_green).unwrap());
+    spawner.spawn(build_info::build_status_blinky(led_red).unwrap());
+    spawner.spawn(actuator_control::steering_task(steering, steer_pwr, steering_watchdog).unwrap());
+    spawner.spawn(actuator_control::separation_task(separation).unwrap());
+    spawner.spawn(actuator_control::deployment_task(deployment).unwrap());
+    spawner.spawn(actuator_control::arming_detection_task(arming_detect_pin).unwrap());
+    spawner.spawn(cats::cats_task(cats_separation, cats_deployment).unwrap());
+    spawner.spawn(can_io::can_tx_task(can_tx).unwrap());
     OUTPUTS.start_broadcasting(spawner, can_tx).unwrap();
-    spawner.spawn(arming_detection(arming_detect_pin).unwrap());
 
     //now start with CAN tx stuff
     let separation_target_state_tx = SEPARATION_TARGET_STATE.sender();
@@ -311,23 +305,11 @@ async fn main(spawner: Spawner) -> ! {
                     ReceivedMessage::RecoveryPowerConfig(x) => {
                         info!("RecoveryPowerConfig: {}", x);
 
-                        if x.steering_enabled {
-                            steering_pwr_tx.send(true);
-                        } else {
-                            steering_pwr_tx.send(false);
-                        }
-
-                        if x.separation_enabled {
-                            separation_target_state_tx.send(ServoTargetState::PoweredOn);
-                        } else {
-                            separation_target_state_tx.send(ServoTargetState::PoweredOff);
-                        }
-
-                        if x.deployment_enabled {
-                            deployment_target_state_tx.send(ServoTargetState::PoweredOn);
-                        } else {
-                            deployment_target_state_tx.send(ServoTargetState::PoweredOff);
-                        }
+                        steering_pwr_tx.send(x.steering_enabled);
+                        separation_target_state_tx
+                            .send(ServoTargetState::powered(x.separation_enabled));
+                        deployment_target_state_tx
+                            .send(ServoTargetState::powered(x.deployment_enabled));
                     }
 
                     ReceivedMessage::SeparationTrigger(_) => {
@@ -347,7 +329,6 @@ async fn main(spawner: Spawner) -> ! {
             }
             Err(e) => {
                 error!("HELP! THERE IS A CAN ERROR!!!! {}", e);
-                error!("AAAAAAAAAAAAAAAAAHHHHHHHHHHHHHHHHHHH");
                 led_yellow.set_high();
                 Timer::after_millis(10).await;
             }
@@ -355,186 +336,13 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
+/// Green LED heartbeat, 1 Hz at 50% duty cycle
 #[embassy_executor::task]
-async fn build_status_blinky(mut led: Output<'static>) {
-    let build_info = crate::build_info::BUILD_INFO.get();
-    let warning_build =
-        build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
-    let (on_ms, off_ms) = if warning_build {
-        (125, 125)
-    } else {
-        (200, 1800)
-    };
-
+async fn heartbeat(mut led: Output<'static>) {
     loop {
-        led.set_low();
-        Timer::after_millis(on_ms).await;
         led.set_high();
-        Timer::after_millis(off_ms).await;
+        Timer::after_millis(500).await;
+        led.set_low();
+        Timer::after_millis(500).await;
     }
-}
-
-#[embassy_executor::task]
-async fn can_tx_task(can_tx: &'static Mutex<CriticalSectionRawMutex, CanTx<'static>>) {
-    let status_creation_task = async {
-        let mut last = Instant::now();
-        let mut steering_status_rx = STEERING_STATUS.receiver().unwrap();
-        let mut separation_status_rx = SEPARATION_SERVO_STATUS.receiver().unwrap();
-        let mut deployment_status_rx = DEPLOYMENT_SERVO_STATUS.receiver().unwrap();
-        let mut steering_watchdog_status_rx = WATCHDOG_STATE.receiver().unwrap();
-        let mut arming_state_rx = ARMING_STATE.receiver().unwrap();
-
-        let mut sep1_status = ActuatorStatus::default();
-        let mut sep2_status = ActuatorStatus::default();
-        let mut depl1_status = ActuatorStatus::default();
-        let mut depl2_status = ActuatorStatus::default();
-        let mut steering_general = ActuatorStatus::default();
-        let mut steering_left_connected = false;
-        let mut steering_right_connected = false;
-        let mut steering_watchdog_status = WatchdogState::default();
-        let mut arming_state = ArmingState::default();
-        let mut common = StatusCommonMessage::default();
-
-        loop {
-            if last + STATUS_CREATION_INTERVAL <= Instant::now() {
-                last = Instant::now();
-                //try to update separation status
-                if let Some(data) = separation_status_rx.try_changed() {
-                    [sep1_status, sep2_status] = data;
-                }
-                //try to update deployment status
-                if let Some(data) = deployment_status_rx.try_changed() {
-                    [depl1_status, depl2_status] = data;
-                }
-                //try to update steering status
-                if let Some(data) = steering_status_rx.try_changed() {
-                    match data {
-                        SteeringStatus::NotConnected => {
-                            steering_general = ActuatorStatus::NotConnected;
-                            steering_left_connected = false;
-                            steering_right_connected = false;
-                        }
-                        SteeringStatus::Connected => {
-                            steering_general = ActuatorStatus::Connected;
-                            steering_left_connected = false;
-                            steering_right_connected = false;
-                        }
-                        SteeringStatus::Responsive(values) => {
-                            steering_general = ActuatorStatus::PowerOn;
-                            // update left response bool by reading if it has responded with data
-                            steering_left_connected = values[0];
-                            // update right response bool by reading if it has responded with data
-                            steering_right_connected = values[1];
-                        }
-                    }
-                }
-                //try to update watchdog status
-                if let Some(data) = steering_watchdog_status_rx.try_changed() {
-                    steering_watchdog_status = data;
-                }
-
-                if let Some(data) = arming_state_rx.try_changed() {
-                    arming_state = data;
-                }
-
-                common.micros_since_restart = Instant::as_micros(&Instant::now());
-
-                //now actually construct the REC board status message with the data collected
-                let msg = RecoveryBoardStatus {
-                    common: common.clone(),
-                    sep1_status,
-                    sep2_status,
-                    depl1_status,
-                    depl2_status,
-                    steering_general,
-                    steering_left_connected,
-                    steering_right_connected,
-                    steering_watchdog_status,
-                    arming_state,
-                };
-                info!("status: {}", msg);
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    CAN_TX_TIMEOUT,
-                    tx.transmit(dp_recovery_board::Message::BoardStatus(msg)),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("sent REC Board status message");
-                    }
-                    Ok(Err(err)) => {
-                        error!("CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("CAN TX timed out after {} ms", CAN_TX_TIMEOUT);
-                    }
-                }
-                drop(tx);
-            } else {
-                Timer::after_millis(25).await;
-            }
-        }
-    };
-
-    let separation_response_task = async {
-        let mut separation_triggered_rx = SEPARATION_OCCURRED.receiver().unwrap();
-        loop {
-            let rx = separation_triggered_rx.changed().await;
-            if rx {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    CAN_TX_TIMEOUT,
-                    tx.transmit(dp_recovery_board::Message::SeparationOccurred),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("sent Separation Occurred");
-                    }
-                    Ok(Err(err)) => {
-                        error!("CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("CAN TX timed out after {} ms", CAN_TX_TIMEOUT);
-                    }
-                }
-                drop(tx);
-            }
-        }
-    };
-
-    let deployment_response_task = async {
-        let mut deployment_triggered_rx = DEPLOYMENT_OCCURRED.receiver().unwrap();
-        loop {
-            let rx = deployment_triggered_rx.changed().await;
-            if rx {
-                let mut tx = can_tx.lock().await;
-                match with_timeout(
-                    CAN_TX_TIMEOUT,
-                    tx.transmit(dp_recovery_board::Message::DeploymentOccurred),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {
-                        trace!("sent Deployment Occurred");
-                    }
-                    Ok(Err(err)) => {
-                        error!("CAN TX error: {:?}", err);
-                    }
-                    Err(_) => {
-                        error!("CAN TX timed out after {} ms", CAN_TX_TIMEOUT);
-                    }
-                }
-                drop(tx);
-            }
-        }
-    };
-
-    join3(
-        status_creation_task,
-        deployment_response_task,
-        separation_response_task,
-    )
-    .await;
 }

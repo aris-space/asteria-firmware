@@ -3,21 +3,7 @@
 # See also: ../shared/ for raw source snippets included via include!().
 [workspace]
 resolver = "2"
-members = [
-    "embedded-utils",
-    "wire-types",
-    "filters",
-    "can-utils",
-    "devices/ads1120-thermocouples",
-    "devices/ms5607",
-    "devices/lsm6dso32",
-    "devices/epos4",
-    "devices/keller-pressure",
-    "devices/analog-pressure",
-    "devices/max31889-thermistor",
-    "devices/dpr",
-    "devices/ina232",
-]
+members = ["embedded-utils", "wire-types", "filters", "can-utils", "devices/*"]
 
 [workspace.dependencies]
 cortex-m = "0.7.7"

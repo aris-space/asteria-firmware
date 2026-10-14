@@ -1,13 +1,16 @@
+use crate::Irqs;
 use crate::globals::STATE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
 use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
 use datatypes::status::{ArmingState, BoardId, SensorStatus, StatusCommonMessage};
+use datatypes::units::Celsius;
 use embassy_futures::yield_now;
-use embassy_stm32::can::CanRx;
+use embassy_stm32::{can::CanRx, peripherals};
 use embassy_time::{Duration, Instant, Ticker};
 use embedded_utils::fmt::*;
+use stm32_temp::MCUTemperature;
 
 const THIS_BOARD_ID: BoardId = BoardId::EngineControlBoard;
 
@@ -56,16 +59,21 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
     }
 }
 
+/// Read the subsystem status and temperature every second, and send it via CAN.
 #[embassy_executor::task]
-pub async fn board_status_update_task() -> ! {
+pub async fn board_status_update_task(
+    mut temp: MCUTemperature<'static, peripherals::ADC5, peripherals::DMA2_CH4>,
+) -> ! {
     let start = Instant::now();
     let mut status_ticker = Ticker::every(Duration::from_millis(
-        1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,
+        const { (1000.0 / CAN_BOARD_STATUS_FREQ_HZ) as u64 },
     ));
     let build_info = crate::build_info::BUILD_INFO.get();
     STATE.build_info.sender().send(build_info.clone());
+
     let mut thermocouple_status_watch = STATE.thermocouple_status.receiver().unwrap();
     let mut arming_state_watch = STATE.arming_state.receiver().unwrap();
+
     let mut thermocouple_status = SensorStatus::Online;
     let mut armed = ArmingState::Safe;
 
@@ -87,6 +95,7 @@ pub async fn board_status_update_task() -> ! {
                 },
                 thermocouple_status,
                 armed,
+                temperature: Celsius(temp.read_internal_temperature(Irqs).await),
             });
         status_ticker.next().await;
     }

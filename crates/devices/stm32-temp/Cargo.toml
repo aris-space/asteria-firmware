@@ -1,0 +1,21 @@
+[package]
+name = "stm32-temp"
+version = "0.1.0"
+edition = "2024"
+authors = ["Cyrill Bucher <cyrill.bucher@aris-space.ch>"]
+license = "MIT OR Apache-2.0"
+description = "Driver for the internal temperature reading of an STM32"
+keywords = ["embedded", "no-std", "async"]
+
+[dependencies]
+embassy-stm32 = { workspace = true, features = ["unstable-pac"] }
+cortex-m = { workspace = true }
+
+[features]
+default = ["stm32g473rc"]
+stm32g473rc = ["embassy-stm32/stm32g473rc"]
+
+[lib]
+test = false
+doctest = false
+bench = false

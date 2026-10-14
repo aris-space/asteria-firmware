@@ -51,7 +51,6 @@ use can_utils::setup::{make_multiplexable, setup_can};
 use data_core::can::hal::CanDecode as _;
 
 use crate::buzzer::buzzer_task;
-use analog_pressure::config_vref_buf;
 #[allow(unused_imports)]
 #[cfg(not(feature = "defmt"))]
 use panic_reset as _;
@@ -68,6 +67,7 @@ bind_interrupts!(struct Irqs {
     DMA1_CHANNEL6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
     DMA1_CHANNEL7 => dma::InterruptHandler<peripherals::DMA1_CH7>;
     DMA2_CHANNEL3 => dma::InterruptHandler<peripherals::DMA2_CH3>;
+    DMA2_CHANNEL4 => dma::InterruptHandler<peripherals::DMA2_CH4>;
 });
 
 #[embassy_executor::main]
@@ -116,7 +116,10 @@ async fn main(spawner: Spawner) -> ! {
         Default::default(),
     );
 
-    config_vref_buf();
+    // Initialize the ADC and enable the internal temperature sensor channel
+    // SAFETY: this board has an unconnected VREF+ and no other system sets the VREFBUF.
+    let vrefbuf_cfg = unsafe { stm32_temp::setup_internal_vref_buffer() };
+    let mcu_temp = stm32_temp::MCUTemperature::new(p.ADC5, p.DMA2_CH4, vrefbuf_cfg);
 
     // Keller analog pressure sensors
     let pressure_handles = FuelPressureHandles {
@@ -166,7 +169,8 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(can_rx_task(rx).expect("failed to prepare can_rx_task spawn token"));
     spawner.spawn(
-        board_status_update_task().expect("failed to prepare board_status_update_task spawn token"),
+        board_status_update_task(mcu_temp)
+            .expect("failed to prepare board_status_update_task spawn token"),
     );
 
     spawner.spawn(

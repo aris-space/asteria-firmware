@@ -1,3 +1,4 @@
+use crate::Irqs;
 use crate::buzzer::BuzzerState;
 use crate::globals::STATE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
@@ -5,11 +6,13 @@ use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
 use datatypes::status::{BoardId, DprGainInfo, DprLoopInfo, SensorStatus, StatusCommonMessage};
+use datatypes::units::Celsius;
 use dpr::dpr::{GAINS, MAX_TIME_MS, MIN_TIME_MS};
 use embassy_futures::yield_now;
-use embassy_stm32::can::CanRx;
+use embassy_stm32::{can::CanRx, peripherals};
 use embassy_time::{Duration, Instant, Ticker};
 use embedded_utils::fmt::*;
+use stm32_temp::MCUTemperature;
 
 const THIS_BOARD_ID: BoardId = BoardId::FuelControlBoard;
 
@@ -96,7 +99,9 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn board_status_update_task() -> ! {
+pub async fn board_status_update_task(
+    mut temp: MCUTemperature<'static, peripherals::ADC5, peripherals::DMA2_CH4>,
+) -> ! {
     let start = Instant::now();
     let mut status_ticker = Ticker::every(Duration::from_millis(
         1000 / CAN_BOARD_STATUS_FREQ_HZ as u64,
@@ -146,6 +151,7 @@ pub async fn board_status_update_task() -> ! {
                 pressure_bus: pressure_status,
                 dpr_loop_info: dpr_status,
                 dpr_gain_info: dpr_gain,
+                temperature: Celsius(temp.read_internal_temperature(Irqs).await),
             });
 
         status_ticker.next().await;
