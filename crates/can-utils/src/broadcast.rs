@@ -9,6 +9,7 @@ use embassy_time::Duration;
 use embassy_time::Instant;
 
 pub use broadcast_derive::Broadcast;
+use embedded_utils::error;
 
 /// Spawns a CAN broadcast task for all tracked values in the struct.
 ///
@@ -89,8 +90,19 @@ where
         const TX_TIMEOUT: Duration = Duration::from_millis(100);
 
         let mut last_sent = Instant::now();
-        let throttle_period = Duration::from_millis((1000. / max_freq_hz) as u64);
-        let resend_period = Duration::from_millis((1000. / min_freq_hz) as u64);
+        let throttle_period = if max_freq_hz.is_finite() && max_freq_hz > 0.0 {
+            Duration::from_millis((1000. / max_freq_hz) as u64)
+        } else {
+            error!(
+                "Cannot throttle to a negative or zero maximum frequency, use a finite positive frequency"
+            );
+            core::future::pending().await
+        };
+        let resend_period = if min_freq_hz.is_finite() && min_freq_hz > 0.0 {
+            Duration::from_millis((1000. / min_freq_hz) as u64)
+        } else {
+            Duration::MAX
+        };
 
         loop {
             let data = match embassy_time::with_timeout(resend_period, watch.changed()).await {
