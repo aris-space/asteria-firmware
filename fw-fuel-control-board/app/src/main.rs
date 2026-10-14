@@ -89,7 +89,7 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
-    let _green = Output::new(p.PC15, Level::High, Speed::Low);
+    let green = Output::new(p.PC15, Level::High, Speed::Low);
     let _yellow = Output::new(p.PC14, Level::High, Speed::Low);
     let red = Output::new(p.PC13, Level::High, Speed::Low);
 
@@ -173,6 +173,7 @@ async fn main(spawner: Spawner) -> ! {
             .expect("failed to prepare board_status_update_task spawn token"),
     );
 
+    spawner.spawn(heartbeat(green).expect("failed to prepare heartbeat spawn token"));
     spawner.spawn(
         build_status_blinky(red).expect("failed to prepare build_status_blinky spawn token"),
     );
@@ -195,6 +196,16 @@ async fn main(spawner: Spawner) -> ! {
     #[allow(unreachable_code)]
     loop {
         pending::<()>().await;
+    }
+}
+
+#[embassy_executor::task]
+async fn heartbeat(mut green: Output<'static>) {
+    loop {
+        green.set_low();
+        Timer::after_millis(250).await;
+        green.set_high();
+        Timer::after_millis(750).await;
     }
 }
 

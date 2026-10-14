@@ -201,9 +201,9 @@ async fn main(spawner: Spawner) -> ! {
     // NOTE: Removed SPI2 flash stub that used PB12..PB15 to avoid conflicts with UART5 pins.
 
     // LEDs: LED3=PA8, LED2=PA9, LED1=PA10
-    let _led_green = Output::new(p.PA8, Level::Low, Speed::Low);
-    let led_yellow = Output::new(p.PA9, Level::Low, Speed::Low);
-    let _led_red = Output::new(p.PA10, Level::Low, Speed::Low);
+    let led_green = Output::new(p.PA8, Level::Low, Speed::Low);
+    let _led_yellow = Output::new(p.PA9, Level::Low, Speed::Low);
+    let led_red = Output::new(p.PA10, Level::Low, Speed::Low);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     // I2C buses: use I2C4 (PF14=SCL, PF15=SDA) and I2C5 (PF1=SCL, PF0=SDA)
@@ -405,7 +405,10 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // === Other Tasks ===
-    spawner.spawn(blink(led_yellow).expect("Error spawning blinking task."));
+    spawner.spawn(blink(led_green).expect("Error spawning blinking task."));
+    spawner.spawn(
+        build_info::build_status_blinky(led_red).expect("Error spawning build status task."),
+    );
 
     // setup CAN on FDCAN3 PF6/PF7 and start the loops
     let can = can_impl::setup_can(p.FDCAN3, p.PF6, p.PF7, Irqs); // TX=PF7, RX=PF6
@@ -425,8 +428,8 @@ async fn main(spawner: Spawner) -> ! {
 async fn blink(mut led: Output<'static>) {
     loop {
         led.set_high();
-        Timer::after_millis(300).await;
+        Timer::after_millis(250).await;
         led.set_low();
-        Timer::after_millis(700).await;
+        Timer::after_millis(750).await;
     }
 }

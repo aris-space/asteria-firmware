@@ -1,4 +1,6 @@
+use embassy_stm32::gpio::Output;
 use embassy_sync::lazy_lock::LazyLock;
+use embassy_time::Timer;
 use hermes_can::messages::debug_info::BuildInformationCommon;
 
 pub mod built {
@@ -52,3 +54,22 @@ pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
         can_semver,
     }
 });
+
+#[embassy_executor::task]
+pub async fn build_status_blinky(mut led: Output<'static>) {
+    let build_info = BUILD_INFO.get();
+    let warning_build =
+        build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
+    let (on_ms, off_ms) = if warning_build {
+        (125, 125)
+    } else {
+        (200, 1800)
+    };
+
+    loop {
+        led.set_high();
+        Timer::after_millis(on_ms).await;
+        led.set_low();
+        Timer::after_millis(off_ms).await;
+    }
+}

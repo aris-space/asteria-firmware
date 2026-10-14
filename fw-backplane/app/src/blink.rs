@@ -5,8 +5,8 @@ use embassy_time::{Duration, Timer};
 pub async fn blink(mut led: Output<'static>) -> ! {
     loop {
         led.set_high();
-        Timer::after(Duration::from_millis(200)).await;
+        Timer::after(Duration::from_millis(250)).await;
         led.set_low();
-        Timer::after(Duration::from_millis(800)).await;
+        Timer::after(Duration::from_millis(750)).await;
     }
 }
