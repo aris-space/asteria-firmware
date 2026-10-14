@@ -10,7 +10,8 @@ use crate::signals;
 
 const OFF_DELAY: Duration = Duration::from_secs(5 * 60);
 /// Spreads the cameras' inrush currents.
-const STAGGER_STEP: Duration = Duration::from_millis(200);
+// TODO: tune on hw, 0 disables the stagger
+const STAGGER_STEP: Duration = Duration::from_millis(0);
 
 #[embassy_executor::task]
 pub async fn task(mut power: Output<'static>, address: u8) {
