@@ -1,4 +1,4 @@
-chip    := "STM32G4A1KETx"
+chip    := "STM32G4A1KE"
 bin     := "fw-lox-valve-control-board"
 use_probe_rs := "true"
 
