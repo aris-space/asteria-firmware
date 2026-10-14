@@ -1,6 +1,3 @@
-//! RunCam Split power switch and control UART. The camera speaks the RunCam
-//! Device Protocol at [`BAUD_RATE`].
-
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{self, Uart};
@@ -11,12 +8,13 @@ use super::{CameraPower, CameraUart};
 pub const BAUD_RATE: u32 = 115_200;
 
 impl CameraPower {
-    /// Starts with the camera off.
     pub fn setup(self) -> Output<'static> {
         Output::new(self.pin, Level::Low, Speed::Low)
     }
 }
 
+// TODO: untested on hw
+#[allow(dead_code)]
 impl CameraUart {
     pub fn setup(self) -> Uart<'static, Async> {
         bind_interrupts!(struct CameraIrqs {

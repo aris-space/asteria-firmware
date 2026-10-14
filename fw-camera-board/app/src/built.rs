@@ -1,5 +1,3 @@
-//! Build metadata from the `built` crate.
-
 #![allow(dead_code)]
 #![allow(clippy::all)]
 #![allow(clippy::pedantic)]

@@ -29,10 +29,11 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner) {
     defmt::info!("camera board address {}", board.address);
 
     thread_spawner.spawn(tasks::leds::task(board.debug_led).expect("Failed to spawn LED task"));
-    thread_spawner
-        .spawn(tasks::camera::task(board.camera_power).expect("Failed to spawn camera task"));
+    thread_spawner.spawn(
+        tasks::camera::task(board.camera_power, board.address)
+            .expect("Failed to spawn camera task"),
+    );
 
-    // The board never transmits, so only the receiving half is kept.
     let (_, can_rx, _) = board.can.split();
     thread_spawner.spawn(tasks::can::rx(can_rx).expect("Failed to spawn CAN RX task"));
 }

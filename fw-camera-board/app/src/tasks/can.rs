@@ -1,7 +1,3 @@
-//! CAN reception. The board only listens: it follows the flight computer's
-//! arming state and resets on ResetAll. There is no camera board `BoardId`, so
-//! ResetSpecific is not received.
-
 use can_utils::rxtx::{RxError, TypedCanReceive as _};
 use data_core::can::hal::CanDecode as _;
 use defmt::{error, warn};
@@ -10,6 +6,7 @@ use embedded_can::StandardId;
 
 use crate::signals;
 
+// TODO: no ResetSpecific yet, there is no BoardId for this board
 data_core::can::sparse_decodable_can_message! {
     enum ReceivedMessage {
         ResetAll(dp_system_management::Message::ResetAll),

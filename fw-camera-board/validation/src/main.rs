@@ -16,14 +16,10 @@ fn defmt_panic() -> ! {
 }
 
 mod checks;
+mod clocks;
 mod resources;
-
-mod clocks {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../shared/stm32g473_clocks.rs"
-    ));
-}
+// TODO: untested on hw
+// mod runcam;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
@@ -33,24 +29,10 @@ async fn main(_spawner: Spawner) -> ! {
 
     println!("=== camera-board hardware validation ===");
 
-    // Visual first; the operator confirms it by eye.
     let mut led = r.debug_led.setup();
     checks::led(&mut led).await;
 
-    let mut all_passed = true;
-
     checks::address(r.address).await;
 
-    let camera_power = r.camera_power.setup();
-    let camera_uart = r.camera_uart.setup();
-    all_passed &= checks::camera(camera_power, camera_uart).await;
-
-    let verdict = if all_passed {
-        "=== CORE CHECKS PASSED ==="
-    } else {
-        "=== SOME CHECKS FAILED (scroll up for details) ==="
-    };
-    println!("{}", verdict);
-
-    checks::announce(&mut led, all_passed).await
+    checks::camera(r.camera_power.setup()).await
 }

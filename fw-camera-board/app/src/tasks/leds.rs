@@ -1,5 +1,5 @@
-//! Debug LED pattern: fast blinking marks a development build, a short blink
-//! every two seconds a clean release build.
+// only one led on this board, so we just show the build status. works as a
+// status blinky too
 
 use embassy_stm32::gpio::Output;
 use embassy_time::Timer;
