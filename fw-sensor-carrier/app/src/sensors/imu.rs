@@ -284,7 +284,7 @@ impl<'a> ActiveImuSensor<'a> {
 
             // Process each pair of samples.
             let aligned_data = &fifo_data_out[0..fifo_entries];
-            let iter = aligned_data.chunks_exact(2).enumerate();
+            let iter = aligned_data.as_chunks::<2>().0.iter().enumerate();
             let num_chunks = iter.len();
             for (sample_index, chunk) in iter {
                 let (a, b) = (chunk[0], chunk[1]);

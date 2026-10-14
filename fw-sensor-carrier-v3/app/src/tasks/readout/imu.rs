@@ -173,7 +173,12 @@ impl<SPI: embedded_hal_async::spi::SpiDevice, INT: embedded_hal_async::digital::
                 this_data_end.duration_since(this_data_start).as_micros() / num_pairs as u64;
 
             let mut samples = heapless::Vec::<ImuSample, 256>::new();
-            for (i, chunk) in fifo_buf[..fifo_entries].chunks_exact(2).enumerate() {
+            for (i, chunk) in fifo_buf[..fifo_entries]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .enumerate()
+            {
                 let (acc, gyr) = match (chunk[0].tag_sensor(), chunk[1].tag_sensor()) {
                     (TagSensor::AccelerometerNC, TagSensor::GyroscopeNC) => (chunk[0], chunk[1]),
                     (TagSensor::GyroscopeNC, TagSensor::AccelerometerNC) => (chunk[1], chunk[0]),

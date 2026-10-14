@@ -35,7 +35,7 @@ pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
     let is_release = built::PROFILE == "release";
     let debug_defmt_rtt = built::FEATURES.contains(&"defmt");
     let is_git_dirty = built::GIT_DIRTY.unwrap_or(false);
-    let author_initials = [b'L', b'S'];
+    let author_initials = *b"LS";
     let can_semver = [
         hermes_can::VERSION_MAJOR,
         hermes_can::VERSION_MINOR,

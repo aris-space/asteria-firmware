@@ -24,8 +24,8 @@ test *args:
 
 # Build docs for shared crates
 doc *args:
-    cargo doc --no-deps --workspace --target {{target}} \
-    --document-private-items {{args}}
+    cargo +nightly doc --no-deps --workspace --target {{target}} \
+    --document-private-items -Zrustdoc-map {{args}}
 
 # Clean rust build artifacts
 clean:

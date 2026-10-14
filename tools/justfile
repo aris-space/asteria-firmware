@@ -18,7 +18,7 @@ test *args:
 # Build docs for tooling
 # Note: no target override needed for host tooling.
 doc *args:
-    cargo  doc --no-deps --all-features --workspace --document-private-items {{args}}
+    cargo +nightly doc --no-deps --all-features --workspace --document-private-items {{args}}
 
 # clean rust build artifacts
 clean:

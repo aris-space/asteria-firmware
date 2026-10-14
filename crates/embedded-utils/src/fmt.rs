@@ -159,7 +159,7 @@ macro_rules! _warn {
             #[cfg(not(feature = "defmt"))]
             let _ = ($( &$x ),*);
 
-            let _ = ::core::sync::atomic::AtomicU32::fetch_update(
+            let _ = ::core::sync::atomic::AtomicU32::try_update(
                 &$crate::WARN_COUNT,
                 ::core::sync::atomic::Ordering::Relaxed,
                 ::core::sync::atomic::Ordering::Relaxed,
@@ -178,7 +178,7 @@ macro_rules! error {
             #[cfg(not(feature="defmt"))]
             let _ = ($( & $x ),*);
 
-            let _ = ::core::sync::atomic::AtomicU32::fetch_update(
+            let _ = ::core::sync::atomic::AtomicU32::try_update(
                 &$crate::ERROR_COUNT,
                 ::core::sync::atomic::Ordering::Relaxed,
                 ::core::sync::atomic::Ordering::Relaxed,

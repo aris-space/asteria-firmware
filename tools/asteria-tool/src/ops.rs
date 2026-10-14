@@ -44,6 +44,10 @@ pub struct StorageReport {
     pub artifact_timestamp_ms: Option<u64>,
 }
 
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to methods that return must_use futures"
+)]
 #[async_trait]
 pub trait RpcBackend {
     async fn fs_info(&self) -> Result<FsInfoResp>;
