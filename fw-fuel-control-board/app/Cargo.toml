@@ -6,7 +6,7 @@ authors = ["Domenic Nebiker <dnebiker@aris-space.ch>", "Ben Lies <ben.lies@aris-
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-dpr = { path = "../../crates/devices/dpr", features = ["defmt"] }
+dpr = { path = "../../crates/devices/dpr" }
 filters = { path = "../../crates/filters" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 analog-pressure = { path = "../../crates/devices/analog-pressure" }
@@ -71,6 +71,7 @@ defmt = [
     "embedded-hal-bus/defmt-03",
     "embedded-utils/defmt",
     "analog-pressure/defmt",
+    "dpr/defmt",
 ]
 
 [[bin]]

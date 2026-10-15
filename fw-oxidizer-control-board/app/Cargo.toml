@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 filters = { path = "../../crates/filters" }
-dpr = { path = "../../crates/devices/dpr", features = ["defmt"] }
+dpr = { path = "../../crates/devices/dpr" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 analog-pressure = { path = "../../crates/devices/analog-pressure" }
 stm32-temp = { path = "../../crates/devices/stm32-temp" }
@@ -68,6 +68,7 @@ defmt = [
     "embedded-hal-bus/defmt-03",
     "embedded-utils/defmt",
     "analog-pressure/defmt",
+    "dpr/defmt",
 ]
 
 [[bin]]
