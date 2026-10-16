@@ -11,11 +11,11 @@ pub struct PreparedBoard {
     pub address: u8,
 }
 
-pub async fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
+pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
     let debug_led = resources.debug_led.setup();
     let camera_power = resources.camera_power.setup();
     let can = resources.can_bus.setup();
-    let address = resources.address.read().await;
+    let address = resources.address.setup();
 
     PreparedBoard {
         debug_led,

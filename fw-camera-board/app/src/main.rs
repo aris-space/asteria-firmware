@@ -26,7 +26,7 @@ use panic_reset as _;
 #[embassy_executor::main]
 async fn main(thread_spawner: Spawner) -> ! {
     let p = embassy_stm32::init(clocks::clocks_config());
-    let board = startup::prepare(resources::split(p)).await;
+    let board = startup::prepare(resources::split(p));
 
     startup::spawn_tasks(board, thread_spawner);
 
