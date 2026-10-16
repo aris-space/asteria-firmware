@@ -129,21 +129,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
-name = "camera-board-validation"
-version = "0.1.0"
-dependencies = [
- "assign-resources",
- "cortex-m",
- "cortex-m-rt",
- "defmt 1.1.1",
- "defmt-rtt",
- "embassy-executor",
- "embassy-stm32",
- "embassy-time",
- "panic-probe",
-]
-
-[[package]]
 name = "can-hal"
 version = "0.1.0"
 dependencies = [
