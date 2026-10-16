@@ -9,7 +9,6 @@ use embassy_time::Duration;
 use embassy_time::Instant;
 
 pub use broadcast_derive::Broadcast;
-use embedded_utils::error;
 
 /// Spawns a CAN broadcast task for all tracked values in the struct.
 ///
@@ -90,24 +89,16 @@ where
         const TX_TIMEOUT: Duration = Duration::from_millis(100);
 
         let mut last_sent = Instant::now();
-        let throttle_period = if max_freq_hz.is_finite() && max_freq_hz > 0.0 {
-            Duration::from_millis((1000. / max_freq_hz) as u64)
-        } else {
-            error!(
-                "Cannot throttle to a negative or zero maximum frequency, use a finite positive frequency"
-            );
-            core::future::pending().await
-        };
-        let resend_period = if min_freq_hz.is_finite() && min_freq_hz > 0.0 {
-            Duration::from_millis((1000. / min_freq_hz) as u64)
-        } else {
-            Duration::MAX
-        };
-
+        let throttle_period = Duration::try_from_millis((1000. / max_freq_hz) as u64)
+            .expect("a too large throttle period just prevents anything sent at all");
+        let resend_period = Duration::try_from_millis((1000. / min_freq_hz) as u64);
         loop {
-            let data = match embassy_time::with_timeout(resend_period, watch.changed()).await {
-                Ok(t) => t,
-                Err(_) => watch.get().await,
+            let data = match resend_period {
+                Some(period) => match embassy_time::with_timeout(period, watch.changed()).await {
+                    Ok(t) => t,
+                    Err(_) => watch.get().await,
+                },
+                None => watch.changed().await,
             };
             let Some(msg) = filter_map(data) else {
                 embedded_utils::trace!("Skipping new data of type {}", core::any::type_name::<T>());
