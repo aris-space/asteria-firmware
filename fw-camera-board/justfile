@@ -2,4 +2,8 @@ chip    := "STM32G4A1KEUx"
 bin     := "fw-camera-board"
 use_probe_rs := "true"
 
+# SWD clock in kHz for every probe-rs call. The hand-modified Tag-Connect cable is unreliable
+# at the probe-rs default; override with e.g. `PROBE_RS_SPEED=4000 just run` on a proper adapter.
+export PROBE_RS_SPEED := env("PROBE_RS_SPEED", "200")
+
 import '../just/firmware.just'
