@@ -6,7 +6,7 @@ use embassy_stm32::usart::Uart;
 use crate::resources::buses::SharedI2cBus;
 use crate::resources::sensors::SpiDevice;
 use crate::sensors::{
-    BARO_BUS_1, BARO_BUS_2, DHT_BUS_1, DHT_BUS_2, GNSS_1, GNSS_2, IMU_0, IMU_1, MAG_BUS_1,
+    BARO_BUS_1, BARO_BUS_2, DHT_BUS_1, DHT_BUS_2, GNSS_1, GNSS_2, IMU_1, IMU_2, MAG_BUS_1,
     MAG_BUS_2,
 };
 
@@ -93,10 +93,10 @@ pub async fn spawn_tasks(
     let (imu1_spi, imu1_int1) = board.sensors.imu1;
     let (imu2_spi, imu2_int1) = board.sensors.imu2;
     level_0_spawner.spawn(
-        tasks::readout::imu::task(imu1_spi, imu1_int1, IMU_0).expect("Failed to spawn IMU 0 task"),
+        tasks::readout::imu::task(imu1_spi, imu1_int1, IMU_1).expect("Failed to spawn IMU 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_1).expect("Failed to spawn IMU 1 task"),
+        tasks::readout::imu::task(imu2_spi, imu2_int1, IMU_2).expect("Failed to spawn IMU 2 task"),
     );
 
     let mag1 = tasks::readout::mag::init(board.sensors.bus1, MAG_BUS_1).await;
@@ -108,27 +108,27 @@ pub async fn spawn_tasks(
 
     level_0_spawner.spawn(
         tasks::readout::mag::task(mag1, board.sensors.bus1, MAG_BUS_1)
-            .expect("Failed to spawn magnetometer 0 task"),
-    );
-    level_0_spawner.spawn(
-        tasks::readout::baro::task(baro1, board.sensors.bus1, BARO_BUS_1)
-            .expect("Failed to spawn barometer 0 task"),
-    );
-    level_0_spawner.spawn(
-        tasks::readout::mag::task(mag2, board.sensors.bus2, MAG_BUS_2)
             .expect("Failed to spawn magnetometer 1 task"),
     );
     level_0_spawner.spawn(
-        tasks::readout::baro::task(baro2, board.sensors.bus2, BARO_BUS_2)
+        tasks::readout::baro::task(baro1, board.sensors.bus1, BARO_BUS_1)
             .expect("Failed to spawn barometer 1 task"),
     );
     level_0_spawner.spawn(
+        tasks::readout::mag::task(mag2, board.sensors.bus2, MAG_BUS_2)
+            .expect("Failed to spawn magnetometer 2 task"),
+    );
+    level_0_spawner.spawn(
+        tasks::readout::baro::task(baro2, board.sensors.bus2, BARO_BUS_2)
+            .expect("Failed to spawn barometer 2 task"),
+    );
+    level_0_spawner.spawn(
         tasks::readout::dht::task(dht1, board.sensors.bus1, DHT_BUS_1)
-            .expect("Failed to spawn DHT 0 task"),
+            .expect("Failed to spawn DHT 1 task"),
     );
     level_0_spawner.spawn(
         tasks::readout::dht::task(dht2, board.sensors.bus2, DHT_BUS_2)
-            .expect("Failed to spawn DHT 1 task"),
+            .expect("Failed to spawn DHT 2 task"),
     );
     level_0_spawner.spawn(
         tasks::readout::gnss::task(board.sensors.gps1, GNSS_1)

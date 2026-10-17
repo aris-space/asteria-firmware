@@ -225,7 +225,7 @@ impl<Id: SensorId, C: Correction, const N: usize> Calibrations<Id, C, N> {
     }
 }
 
-/// Flash key of a sensor's [`StoredCal`], e.g. `cal:IMU_0`. The prefix keeps
+/// Flash key of a sensor's [`StoredCal`], e.g. `cal:IMU_1`. The prefix keeps
 /// records that older firmware stored in another layout from being decoded.
 pub fn key(id: impl SensorId) -> Key {
     const PREFIX: &[u8] = b"cal:";

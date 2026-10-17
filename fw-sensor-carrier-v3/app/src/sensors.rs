@@ -28,7 +28,7 @@ macro_rules! define_sensor_family {
                 self.0 as usize
             }
 
-            /// The id's Rust identifier, e.g. `"IMU_0"`. Used for logs, console
+            /// The id's Rust identifier, e.g. `"IMU_1"`. Used for logs, console
             /// display, and flash keys, so there is a single source.
             pub const fn name(self) -> &'static str {
                 match self.0 {
@@ -73,7 +73,7 @@ macro_rules! define_sensor_family {
 define_sensor_family! {
     pub struct ImuId;
     count: IMU_COUNT;
-    ids: [IMU_0 = 0, IMU_1 = 1];
+    ids: [IMU_1 = 0, IMU_2 = 1];
 }
 
 define_sensor_family! {
