@@ -50,8 +50,9 @@ const FREE_FALL_ACCELERATION_NOISE: f32 = 0.0354;
 
 pub const BARO_HEIGHT_STD_M: f32 = 1.5; // 5x the measured 0.3 m noise
 const BARO_BIAS_WALK_M_PER_SQRT_S: f32 = 0.05;
-// Static-port error as a share of dynamic pressure: 3 % is 86 m at 290 m/s.
-const BARO_DYNAMIC_PRESSURE_ERROR: f32 = 0.03;
+// Airflow over the static port can spoil the barometers above this speed, which is something
+// that was learnt the hard way for a few teams. Not for us!
+const BARO_MAXIMUM_SPEED_MPS: f32 = 100.0;
 // Pressure inputs support estimators that model pressure directly.
 pub const BARO_REFERENCE_PRESSURE_HPA: f32 = 1_013.25;
 pub const BARO_PRESSURE_STD_HPA: f32 = 0.18; // BARO_HEIGHT_STD_M at ~0.12 hPa/m
@@ -105,7 +106,7 @@ pub fn new_estimator() -> Result<Estimator, EstimatorError> {
             initial_velocity_std_mps: INITIAL_VELOCITY_STD_MPS,
             initial_barometer_bias_std_m: INITIAL_BARO_BIAS_STD_M,
             innovation_gate_sigma: INNOVATION_GATE_SIGMA,
-            barometer_dynamic_pressure_error: BARO_DYNAMIC_PRESSURE_ERROR,
+            barometer_maximum_speed_mps: BARO_MAXIMUM_SPEED_MPS,
             maximum_unaided_us: MAXIMUM_UNAIDED_US,
         },
         attitude: ImuAttitudeConfig {
