@@ -1,29 +1,32 @@
-#![allow(dead_code)]
-
-use embassy_stm32::peripherals::USB_OTG_HS;
-use embassy_stm32::{bind_interrupts, usb as embassy_usb};
+use embassy_stm32::usb::{self, Driver};
+use embassy_stm32::{bind_interrupts, peripherals};
 use static_cell::StaticCell;
 
 use super::Usb;
 
-pub type UsbDriver = embassy_stm32::usb::Driver<'static, USB_OTG_HS>;
+pub type UsbDriver = Driver<'static, peripherals::USB_OTG_HS>;
 
-static USB_EP_OUT_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
+const EP_OUT_BUFFER_LEN: usize = 256;
+static EP_OUT_BUFFER: StaticCell<[u8; EP_OUT_BUFFER_LEN]> = StaticCell::new();
 
 impl Usb {
     pub fn setup(self) -> UsbDriver {
         bind_interrupts!(struct UsbIrqs {
-            OTG_HS => embassy_usb::InterruptHandler<USB_OTG_HS>;
+            OTG_HS => usb::InterruptHandler<peripherals::USB_OTG_HS>;
         });
 
-        let buffer = USB_EP_OUT_BUFFER.init([0u8; 256]);
-        embassy_stm32::usb::Driver::new_hs(
-            self.usb,
+        let ep_out_buffer = EP_OUT_BUFFER.init([0u8; EP_OUT_BUFFER_LEN]);
+        let mut config = usb::Config::default();
+        // vbus_detection requires the pin wired. TODO: unsure if actually wired
+        config.vbus_detection = false;
+
+        Driver::new_fs(
+            self.periph,
             UsbIrqs,
             self.dp,
             self.dm,
-            buffer,
-            embassy_stm32::usb::Config::default(),
+            ep_out_buffer,
+            config,
         )
     }
 }

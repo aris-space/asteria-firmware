@@ -2,25 +2,28 @@ use assign_resources::assign_resources;
 use embassy_stm32::{Peri, Peripherals, peripherals};
 
 pub mod buses;
+pub mod buzzer;
 pub mod can;
 pub mod flash;
 pub mod leds;
+pub mod sd;
 pub mod sensors;
 pub mod uart;
 pub mod usb;
 
 assign_resources! {
     buzzer: Buzzer {
+        timer: TIM4,
         pin: PD15,
     }
     green_led: GreenLed {
-        pin: PA8,
+        pin: PA10,
     }
     yellow_led: YellowLed {
         pin: PA9,
     }
     red_led: RedLed {
-        pin: PA10,
+        pin: PA8,
     }
     gps1_uart: Gps1Uart {
         periph: UART8,
@@ -78,16 +81,29 @@ assign_resources! {
         tx: PF7,
     }
     flash: Flash {
-        periph: SPI2,
-        sck: PB13,
-        miso: PB14,
-        mosi: PB15,
-        cs: PB12,
+        periph: OCTOSPI1,
+        sck: PB2,
+        io0: PB1,
+        io1: PB0,
+        hold: PA6,
+        wp: PA7,
+        ncs: PG6,
     }
     usb: Usb {
-        usb: USB_OTG_HS,
+        periph: USB_OTG_HS,
         dp: PA12,
         dm: PA11,
+    }
+    sd_card: SdCard {
+        periph: SDMMC1,
+        clk: PC12,
+        cmd: PD2,
+        d0: PC8,
+        d1: PC9,
+        d2: PC10,
+        d3: PC11,
+        detect: PD3,
+        power: PD6,
     }
 }
 

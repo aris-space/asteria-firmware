@@ -1,3 +1,4 @@
+use embassy_embedded_hal::SetConfig;
 use embassy_stm32::i2c::mode::Master as I2cMaster;
 use embassy_stm32::mode::Async;
 use embassy_stm32::{bind_interrupts, i2c, peripherals};
@@ -10,10 +11,21 @@ use super::{Bus1, Bus2};
 pub type SharedI2c = embassy_stm32::i2c::I2c<'static, Async, I2cMaster>;
 pub type SharedI2cBus = &'static Mutex<CriticalSectionRawMutex, SharedI2c>;
 
+/// Reset a timed-out I2C controller while holding the shared bus lock.
+pub async fn recover(bus: SharedI2cBus) {
+    let mut i2c = bus.lock().await;
+    i2c.set_config(&config().frequency)
+        .expect("I2C timing configuration must be valid");
+}
+
 fn config() -> i2c::Config {
     let mut config = i2c::Config::default();
-    config.frequency = embassy_stm32::time::khz(100);
-    config.timeout = embassy_time::Duration::from_millis(50);
+    config.frequency = embassy_stm32::time::khz(400);
+    // embassy's async I2C busy-spins (no yield) while waiting for the bus to go
+    // idle, so a stuck/shorted bus blocks the shared executor for the full timeout.
+    // Keep this just above a real transaction (well under 1 ms at 400 kHz) so one
+    // dead bus can't starve the others.
+    config.timeout = embassy_time::Duration::from_millis(10);
     config
 }
 
