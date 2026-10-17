@@ -57,9 +57,9 @@ async fn main(spawner: Spawner) -> ! {
     let ext_p = Input::new(p.PA1, embassy_stm32::gpio::Pull::None);
 
     // Configure LEDs as outputs (low = off)
-    let _led_green = Output::new(p.PA3, Level::Low, Speed::Low);
-    let led_yellow = Output::new(p.PA4, Level::Low, Speed::Low);
-    let _led_red = Output::new(p.PA5, Level::Low, Speed::Low);
+    let led_green = Output::new(p.PA3, Level::Low, Speed::Low);
+    let _led_yellow = Output::new(p.PA4, Level::Low, Speed::Low);
+    let led_red = Output::new(p.PA5, Level::Low, Speed::Low);
     let led_bat_p = Output::new(p.PA6, Level::Low, Speed::Low);
     let led_ext_p = Output::new(p.PA7, Level::Low, Speed::Low);
 
@@ -118,7 +118,10 @@ async fn main(spawner: Spawner) -> ! {
     let can_tx = make_multiplexable(can_tx);
 
     // Spawn activity LED
-    spawner.spawn(blink::blink(led_yellow).expect("Failed to spawn blink task"));
+    spawner.spawn(blink::blink(led_green).expect("Failed to spawn blink task"));
+    spawner.spawn(
+        build_info::build_status_blinky(led_red).expect("Failed to spawn build status task"),
+    );
 
     // Spawn active power source + indicator task
     spawner.spawn(
