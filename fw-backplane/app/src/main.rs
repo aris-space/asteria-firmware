@@ -4,7 +4,6 @@
 #![no_std]
 #![no_main]
 
-mod blink;
 mod board;
 mod build_info;
 mod buzzer;
@@ -57,9 +56,9 @@ async fn main(spawner: Spawner) -> ! {
     let ext_p = Input::new(p.PA1, embassy_stm32::gpio::Pull::None);
 
     // Configure LEDs as outputs (low = off)
-    let _led_green = Output::new(p.PA3, Level::Low, Speed::Low);
-    let led_yellow = Output::new(p.PA4, Level::Low, Speed::Low);
-    let _led_red = Output::new(p.PA5, Level::Low, Speed::Low);
+    let led_green = Output::new(p.PA3, Level::Low, Speed::Low);
+    let _led_yellow = Output::new(p.PA4, Level::Low, Speed::Low);
+    let led_red = Output::new(p.PA5, Level::Low, Speed::Low);
     let led_bat_p = Output::new(p.PA6, Level::Low, Speed::Low);
     let led_ext_p = Output::new(p.PA7, Level::Low, Speed::Low);
 
@@ -118,7 +117,13 @@ async fn main(spawner: Spawner) -> ! {
     let can_tx = make_multiplexable(can_tx);
 
     // Spawn activity LED
-    spawner.spawn(blink::blink(led_yellow).expect("Failed to spawn blink task"));
+    spawner.spawn(
+        embedded_utils::led::heartbeat(led_green, Level::High).expect("failed to spawn heartbeat"),
+    );
+    spawner.spawn(
+        embedded_utils::led::build_status(led_red, build_info::BUILD_INFO.get(), Level::High)
+            .expect("failed to spawn build status"),
+    );
 
     // Spawn active power source + indicator task
     spawner.spawn(
@@ -143,7 +148,7 @@ async fn main(spawner: Spawner) -> ! {
     OUTPUTS
         .build_info
         .sender()
-        .send(crate::build_info::BUILD_INFO.get().clone());
+        .send(build_info::BUILD_INFO.get().clone());
     OUTPUTS
         .start_broadcasting(spawner, can_tx)
         .expect("Failed to start CAN broadcasters");

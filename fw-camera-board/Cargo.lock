@@ -698,7 +698,10 @@ dependencies = [
 name = "embedded-utils"
 version = "0.1.0"
 dependencies = [
+ "datatypes",
  "defmt 1.1.1",
+ "embassy-executor",
+ "embassy-stm32",
  "embassy-time",
 ]
 
@@ -764,6 +767,7 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embedded-can",
+ "embedded-utils",
  "panic-probe",
  "panic-reset",
 ]

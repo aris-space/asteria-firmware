@@ -264,10 +264,15 @@ async fn main(spawner: Spawner) -> ! {
     OUTPUTS
         .build_info
         .sender()
-        .send(crate::build_info::BUILD_INFO.get().clone());
+        .send(build_info::BUILD_INFO.get().clone());
 
-    spawner.spawn(heartbeat(led_green).unwrap());
-    spawner.spawn(build_info::build_status_blinky(led_red).unwrap());
+    spawner.spawn(
+        embedded_utils::led::heartbeat(led_green, Level::High).expect("failed to spawn heartbeat"),
+    );
+    spawner.spawn(
+        embedded_utils::led::build_status(led_red, build_info::BUILD_INFO.get(), Level::High)
+            .expect("failed to spawn build status"),
+    );
     spawner.spawn(actuator_control::steering_task(steering, steer_pwr, steering_watchdog).unwrap());
     spawner.spawn(actuator_control::separation_task(separation).unwrap());
     spawner.spawn(actuator_control::deployment_task(deployment).unwrap());
@@ -333,16 +338,5 @@ async fn main(spawner: Spawner) -> ! {
                 Timer::after_millis(10).await;
             }
         }
-    }
-}
-
-/// Green LED heartbeat, 1 Hz at 50% duty cycle
-#[embassy_executor::task]
-async fn heartbeat(mut led: Output<'static>) {
-    loop {
-        led.set_high();
-        Timer::after_millis(500).await;
-        led.set_low();
-        Timer::after_millis(500).await;
     }
 }

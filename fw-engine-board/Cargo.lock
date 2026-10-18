@@ -741,7 +741,10 @@ dependencies = [
 name = "embedded-utils"
 version = "0.1.0"
 dependencies = [
+ "datatypes",
  "defmt 1.0.1",
+ "embassy-executor",
+ "embassy-stm32",
  "embassy-time",
 ]
 
