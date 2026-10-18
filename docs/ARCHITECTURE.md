@@ -15,8 +15,8 @@ Most board crates follow this shape:
 
 ## Board LEDs
 
-- Green: fast blink (250/250 ms) during startup, slow blink (250/750 ms) while running
-- Red: slow blink (200/1800 ms) on a clean release build (no uncommitted changes, `--release --no-default-features`), fast blink (125/125 ms) otherwise
+- Green: fast blink (250/250 ms) during startup, slow blink (750 ms on, 250 ms off; 75% duty) while running
+- Red: slow blink (1800 ms on, 200 ms off; 90% duty) on a clean release build (no uncommitted changes, `--release --no-default-features`), fast blink (125/125 ms) otherwise
 - Yellow: board specific
 
 ## Shared Code

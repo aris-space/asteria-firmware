@@ -63,7 +63,7 @@ pub async fn build_status_blinky(mut led: Output<'static>) {
     let (on_ms, off_ms) = if warning_build {
         (125, 125)
     } else {
-        (200, 1800)
+        (1800, 200)
     };
 
     loop {

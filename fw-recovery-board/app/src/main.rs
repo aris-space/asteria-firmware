@@ -340,8 +340,8 @@ async fn main(spawner: Spawner) -> ! {
 async fn heartbeat(mut led: Output<'static>) {
     loop {
         led.set_high();
-        Timer::after_millis(250).await;
-        led.set_low();
         Timer::after_millis(750).await;
+        led.set_low();
+        Timer::after_millis(250).await;
     }
 }
