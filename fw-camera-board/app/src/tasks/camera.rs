@@ -8,7 +8,7 @@ use embassy_time::{Duration, Timer, with_timeout};
 use crate::runcam::{Features, RunCam};
 use crate::signals;
 
-const OFF_DELAY: Duration = Duration::from_millis(5000);
+const OFF_DELAY: Duration = Duration::from_secs(5 * 60);
 /// Spreads the cameras' inrush currents.
 // TODO: tune on hw, 0 disables the stagger
 const STAGGER_STEP: Duration = Duration::from_millis(0);
