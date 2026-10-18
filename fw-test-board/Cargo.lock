@@ -712,6 +712,8 @@ dependencies = [
 name = "embedded-utils"
 version = "0.1.0"
 dependencies = [
+ "embassy-executor",
+ "embassy-stm32",
  "embassy-time",
 ]
 

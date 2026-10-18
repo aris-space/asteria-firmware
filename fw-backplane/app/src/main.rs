@@ -4,7 +4,6 @@
 #![no_std]
 #![no_main]
 
-mod blink;
 mod board;
 mod build_info;
 mod buzzer;
@@ -118,9 +117,14 @@ async fn main(spawner: Spawner) -> ! {
     let can_tx = make_multiplexable(can_tx);
 
     // Spawn activity LED
-    spawner.spawn(blink::blink(led_green).expect("Failed to spawn blink task"));
+    spawner.spawn(embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"));
     spawner.spawn(
-        build_info::build_status_blinky(led_red).expect("Failed to spawn build status task"),
+        embedded_utils::led::build_status(
+            led_red,
+            crate::build_info::BUILD_INFO.get(),
+            false,
+        )
+        .expect("failed to spawn build status"),
     );
 
     // Spawn active power source + indicator task

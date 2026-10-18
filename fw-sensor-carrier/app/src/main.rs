@@ -34,7 +34,7 @@ use embassy_stm32::usart::Uart;
 use embassy_stm32::{bind_interrupts, can, dma, exti, i2c, peripherals, spi, usart};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Delay, Duration, Timer};
+use embassy_time::{Delay, Duration};
 use embedded_utils::fmt::*;
 use lsm6dso32::spi::Lsm6Dso32SpiInterface;
 use ms5607::Ms5607;
@@ -405,9 +405,14 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // === Other Tasks ===
-    spawner.spawn(blink(led_green).expect("Error spawning blinking task."));
+    spawner.spawn(embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"));
     spawner.spawn(
-        build_info::build_status_blinky(led_red).expect("Error spawning build status task."),
+        embedded_utils::led::build_status(
+            led_red,
+            crate::build_info::LED_BUILD_INFO.get(),
+            false,
+        )
+        .expect("failed to spawn build status"),
     );
 
     // setup CAN on FDCAN3 PF6/PF7 and start the loops
@@ -424,12 +429,3 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-#[embassy_executor::task]
-async fn blink(mut led: Output<'static>) {
-    loop {
-        led.set_high();
-        Timer::after_millis(750).await;
-        led.set_low();
-        Timer::after_millis(250).await;
-    }
-}

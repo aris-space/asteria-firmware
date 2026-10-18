@@ -29,7 +29,15 @@ pub fn prepare(resources: resources::AssignedResources) -> PreparedBoard {
 pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner) {
     defmt::info!("camera board address {}", board.address);
 
-    thread_spawner.spawn(tasks::leds::task(board.debug_led).expect("Failed to spawn LED task"));
+    // only one led on this board, so we just show the build status
+    thread_spawner.spawn(
+        embedded_utils::led::build_status(
+            board.debug_led,
+            crate::build_info::BUILD_INFO.get(),
+            false,
+        )
+        .expect("Failed to spawn LED task"),
+    );
     thread_spawner.spawn(
         tasks::camera::task(board.camera, board.address).expect("Failed to spawn camera task"),
     );

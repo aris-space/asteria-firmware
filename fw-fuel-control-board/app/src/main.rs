@@ -20,7 +20,7 @@ use embassy_stm32::rcc::mux;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, can, dma, i2c, peripherals};
-use embassy_time::{Duration, Timer};
+use embassy_time::Duration;
 use embedded_utils::fmt::*;
 
 mod clocks {
@@ -173,9 +173,14 @@ async fn main(spawner: Spawner) -> ! {
             .expect("failed to prepare board_status_update_task spawn token"),
     );
 
-    spawner.spawn(heartbeat(green).expect("failed to prepare heartbeat spawn token"));
+    spawner.spawn(embedded_utils::led::heartbeat(green, true).expect("failed to spawn heartbeat"));
     spawner.spawn(
-        build_status_blinky(red).expect("failed to prepare build_status_blinky spawn token"),
+        embedded_utils::led::build_status(
+            red,
+            crate::build_info::BUILD_INFO.get(),
+            true,
+        )
+        .expect("failed to spawn build status"),
     );
 
     spawner.spawn(buzzer_task(buzzer_pwm).expect("failed to prepare buzzer_task spawn token"));
@@ -199,31 +204,3 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-#[embassy_executor::task]
-async fn heartbeat(mut green: Output<'static>) {
-    loop {
-        green.set_low();
-        Timer::after_millis(750).await;
-        green.set_high();
-        Timer::after_millis(250).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn build_status_blinky(mut red: Output<'static>) {
-    let build_info = crate::build_info::BUILD_INFO.get();
-    let warning_build =
-        build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
-    let (on_ms, off_ms) = if warning_build {
-        (125, 125)
-    } else {
-        (1800, 200)
-    };
-
-    loop {
-        red.set_low();
-        Timer::after_millis(on_ms).await;
-        red.set_high();
-        Timer::after_millis(off_ms).await;
-    }
-}

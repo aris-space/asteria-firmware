@@ -4,6 +4,7 @@
 #![no_std]
 
 pub mod fmt;
+pub mod led;
 
 use core::sync::atomic::AtomicU32;
 use embassy_time::{Duration, Instant};

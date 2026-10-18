@@ -6,6 +6,7 @@ authors = ["Louis Schell <louis.schell1@gmx.de>"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+datatypes = { path = "../../data-definitions/datatypes" }
 embedded-utils = { path = "../../crates/embedded-utils" }
 ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
 lsm6dso32 = { path = "../../crates/devices/lsm6dso32", features = ["defmt-03"] }

@@ -25,6 +25,7 @@ embassy-stm32 = { version = "*", features = [
 embassy-time = { version = "*", features = ["tick-hz-32_768", "defmt", "defmt-timestamp-uptime"] }
 embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-sync = { version = "*", features = ["defmt"] }
+embedded-utils = { path = "../../crates/embedded-utils" }
 
 assign-resources = "0.5.0"
 bitflags = "2.9.4"

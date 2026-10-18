@@ -7,6 +7,9 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 embassy-time = { workspace = true, features = ["tick-hz-32_768"] }
+datatypes = { path = "../../data-definitions/datatypes" }
+embassy-stm32 = { workspace = true }
+embassy-executor = { workspace = true }
 defmt = { workspace = true, optional = true }
 
 [features]
