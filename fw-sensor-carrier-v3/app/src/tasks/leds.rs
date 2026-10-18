@@ -34,9 +34,9 @@ async fn heartbeat(mut green: Output<'static>) {
 
     loop {
         green.set_high();
-        Timer::after_millis(250).await;
-        green.set_low();
         Timer::after_millis(750).await;
+        green.set_low();
+        Timer::after_millis(250).await;
     }
 }
 
@@ -63,7 +63,7 @@ async fn build_status(mut red: Output<'static>) {
     let (on_ms, off_ms) = if warning_build {
         (125, 125)
     } else {
-        (200, 1800)
+        (1800, 200)
     };
 
     loop {
