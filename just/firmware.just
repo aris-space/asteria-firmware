@@ -170,95 +170,43 @@ _flash-elf elf:
     fi
 
 # Usage: just flash-tag portugal --release
-# Refuses to run on a dirty tree. Flashing the same commit with the same args again reuses the existing tag.
 # Build and flash like `flash`, tag the commit as <event>/<board>/<n>, push it and attach the ELF to a GitHub release.
 flash-tag event *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ " {{args}} " == *" --message-format "* ]] || [[ " {{args}} " == *" --message-format="* ]]; then
-      echo "Do not pass --message-format; recipe needs JSON output." >&2
-      exit 2
-    fi
-
-    event="{{event}}"
-    if [[ ! "$event" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-      echo "Event name may only contain letters, digits, '.', '_' and '-': $event" >&2
-      exit 2
-    fi
-    board="{{trim_start_match(bin, "fw-")}}"
-
     repo_root="$(git rev-parse --show-toplevel)"
-    dirty="$(git -C "$repo_root" status --porcelain --untracked-files=no --ignore-submodules=none)"
-    if [[ -n "$dirty" ]]; then
-      echo "Tree is dirty, commit first, then flash-tag:" >&2
-      echo "$dirty" >&2
+    if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no --ignore-submodules=none)" ]]; then
+      echo "Tree is dirty, commit first so the tag matches what's flashed." >&2
       exit 1
     fi
-    commit="$(git rev-parse HEAD)"
-
-    # Pull tags others made for this event so numbering doesn't collide. Fine to fail offline.
-    git fetch origin --tags --quiet || echo "Could not fetch tags from origin, numbering from local tags." >&2
 
     build_out="$("$repo_root/just/scripts/build-elf.sh" "{{bin}}" "{{target}}" {{args}})"
     elf="${build_out#*:}"
-    echo "Using ELF: $elf"
-
     just _flash-elf "$elf"
 
-    args_line="args: {{args}}"
-    defmt_line="DEFMT_LOG: ${DEFMT_LOG:-from .cargo/config.toml}"
-
-    # Same commit and same build settings means the same firmware, so keep its tag.
-    tag=""
-    last=0
-    for t in $(git tag -l "$event/$board/*"); do
-      n="${t##*/}"
-      [[ "$n" =~ ^[0-9]+$ ]] || continue
-      (( n > last )) && last="$n"
-      msg="$(git tag -l --format='%(contents)' "$t")"
-      if [[ "$(git rev-parse "$t^{commit}")" == "$commit" ]] \
-        && grep -Fxq "$args_line" <<<"$msg" && grep -Fxq "$defmt_line" <<<"$msg"; then
-        tag="$t"
-      fi
+    prefix="{{event}}/{{trim_start_match(bin, "fw-")}}"
+    n=1
+    while git rev-parse -q --verify "refs/tags/$prefix/$n" >/dev/null; do
+      n=$((n + 1))
     done
+    tag="$prefix/$n"
 
-    if [[ -n "$tag" ]]; then
-      echo "Already tagged as $tag, not making a new tag"
-      exit 0
-    fi
-
-    tag="$event/$board/$((last + 1))"
-    git tag -a "$tag" "$commit" -F - <<EOF
+    git tag -a "$tag" -F - <<EOF
     $tag
 
     board: {{bin}} ({{chip}})
     flashed: $(date -u '+%Y-%m-%d %H:%M UTC')
-    $args_line
-    $defmt_line
+    args: {{args}}
+    DEFMT_LOG: ${DEFMT_LOG:-from .cargo/config.toml}
 
     submodules:
     $(git -C "$repo_root" submodule status)
     EOF
-    echo "Tagged $tag at ${commit:0:7}"
 
-    # Keep a copy so the release can still be made later if we're offline now.
-    saved_elf="$repo_root/target/flash-tag/$tag/{{bin}}.elf"
-    mkdir -p "$(dirname "$saved_elf")"
-    cp "$elf" "$saved_elf"
-
-    if ! git push --quiet origin "refs/tags/$tag"; then
-      echo "Push failed, the tag only exists locally. Retry with:" >&2
-      echo "  git push origin $tag && gh release create $tag $saved_elf --verify-tag --notes-from-tag --latest=false" >&2
-      exit 0
-    fi
-    echo "Pushed $tag to origin"
-
-    if gh release create "$tag" "$saved_elf" --verify-tag --notes-from-tag --latest=false >/dev/null; then
-      echo "Attached ELF to release $tag"
-    else
-      echo "Release failed. Retry with: gh release create $tag $saved_elf --verify-tag --notes-from-tag --latest=false" >&2
-    fi
+    git push --quiet origin "refs/tags/$tag"
+    gh release create "$tag" "$elf" --verify-tag --notes-from-tag --latest=false >/dev/null
+    echo "Tagged and released $tag"
 
 # Attach to the target with probe-rs, using the most recently built ELF as the specified binary.
 attach:
