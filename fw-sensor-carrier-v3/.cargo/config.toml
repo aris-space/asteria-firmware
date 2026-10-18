@@ -16,4 +16,6 @@ rustflags = [
 target = "thumbv7em-none-eabihf" # Cortex-M7F (with single and double-precision FPU)
 
 [env]
-DEFMT_LOG = "trace"
+DEFMT_LOG = "info"
+# We have the memory, and the sensor board sometimes yaps a lot
+DEFMT_RTT_BUFFER_SIZE = "16384"

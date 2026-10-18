@@ -1,0 +1,197 @@
+//! Per-sensor samples and the estimator's output. A sample is a measurement
+//! with its source and timestamp.
+
+use embassy_time::Instant;
+use lsm6dso32::types::{Acceleration, AccelerationRaw, AngularRate, AngularRateRaw};
+
+use crate::sensors::{BaroId, DhtId, GnssId, ImuId, MagId};
+
+/// A sample before and after calibration. Readouts publish these, so each
+/// consumer can use whichever side it needs.
+#[derive(Clone, Copy, Debug)]
+pub struct Reading<R, C> {
+    pub raw: R,
+    pub cal: C,
+}
+
+pub type ImuReading = Reading<RawImuSample, ImuSample>;
+pub type MagReading = Reading<RawMagSample, MagSample>;
+pub type GnssReading = Reading<RawGnssSample, GnssSample>;
+pub type BaroReading = Reading<RawBaroSample, BaroSample>;
+pub type DhtReading = Reading<RawDhtSample, DhtSample>;
+
+// Every sensor has a raw sample, built by its readout, and a calibrated
+// sample, built by `crate::calibration::<kind>::apply_calibration`. A raw `ts`
+// is the readout's estimate of the measurement time; `read_ts` is when the
+// readout received the data. A calibrated `ts` also removes the stored latency.
+
+/// Raw IMU sample, sensor frame, native LSM6DSO32 counts (i16 LSB).
+#[derive(Clone, Copy, Debug)]
+pub struct RawImuSample {
+    pub src: ImuId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub accel: AccelerationRaw,
+    pub gyro: AngularRateRaw,
+}
+
+/// Calibrated IMU sample, board frame, g and deg/s.
+#[derive(Clone, Copy, Debug)]
+pub struct ImuSample {
+    pub src: ImuId,
+    pub ts: Instant,
+    pub accel: Acceleration,
+    pub gyro: AngularRate,
+}
+
+/// Raw magnetometer sample, sensor frame, native LSM303AGR counts (i16 LSB).
+/// The cal solver fits these counts directly.
+#[derive(Clone, Copy, Debug)]
+pub struct RawMagSample {
+    pub src: MagId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub x: i16,
+    pub y: i16,
+    pub z: i16,
+}
+
+/// Calibrated magnetometer sample, board frame, nT.
+#[derive(Clone, Copy, Debug)]
+pub struct MagSample {
+    pub src: MagId,
+    pub ts: Instant,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+/// Raw GNSS navigation data, stamped when its packet arrived.
+#[derive(Clone, Copy, Debug)]
+pub struct RawGnssSample {
+    pub src: GnssId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub pvt: Pvt,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GnssSample {
+    pub src: GnssId,
+    pub ts: Instant,
+    pub pvt: Pvt,
+}
+
+/// Raw barometer sample, factory-compensated by the MS5607, stamped at the
+/// middle of the pressure conversion.
+#[derive(Clone, Copy, Debug)]
+pub struct RawBaroSample {
+    pub src: BaroId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub pressure_mbar: f32,
+    pub temperature_c: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BaroSample {
+    pub src: BaroId,
+    pub ts: Instant,
+    pub pressure_mbar: f32,
+    pub temperature_c: f32,
+}
+
+impl BaroSample {
+    /// ISA pressure altitude. It differs from MSL height by the local
+    /// sea-level pressure, which the estimator's bias states absorb.
+    pub fn pressure_altitude_m(&self) -> f32 {
+        44_330.0 * (1.0 - libm::powf(self.pressure_mbar / 1_013.25, 0.190_294_95))
+    }
+}
+
+/// Raw humidity and temperature sample, stamped on completion.
+#[derive(Clone, Copy, Debug)]
+pub struct RawDhtSample {
+    pub src: DhtId,
+    pub ts: Instant,
+    pub read_ts: Instant,
+    pub temperature_c: f32,
+    pub humidity_rh: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DhtSample {
+    #[expect(dead_code, reason = "no consumer reads calibrated DHT samples yet")]
+    pub src: DhtId,
+    pub ts: Instant,
+    pub temperature_c: f32,
+    pub humidity_rh: f32,
+}
+
+/// GNSS position and velocity fused by the state estimator.
+#[derive(Clone, Copy, Debug)]
+pub struct Pvt {
+    /// GPS time of week of the navigation epoch.
+    pub itow_ms: u32,
+    pub num_satellites: u8,
+    pub fix_type: ublox::GpsFix,
+    pub fix_ok: bool,
+    pub latitude_deg: f64,
+    pub longitude_deg: f64,
+    pub height_msl_m: f32,
+    pub velocity_north_mps: f32,
+    pub velocity_east_mps: f32,
+    pub velocity_down_mps: f32,
+    pub pdop_centi: u16,
+    pub horizontal_accuracy_mm: u32,
+    pub vertical_accuracy_mm: u32,
+    pub speed_accuracy_mps: f32,
+}
+
+impl Pvt {
+    /// A valid 3D solution, the quality SEF-light fuses.
+    pub fn has_3d_fix(&self) -> bool {
+        self.fix_ok
+            && matches!(
+                self.fix_type,
+                ublox::GpsFix::Fix3D | ublox::GpsFix::GPSPlusDeadReckoning
+            )
+    }
+}
+
+/// A console `mark <label>`, logged to label part of an SD session.
+#[derive(Clone, Debug)]
+pub struct Mark {
+    pub ts: Instant,
+    pub label: heapless::String<{ Mark::LABEL_LEN }>,
+}
+
+impl Mark {
+    pub const LABEL_LEN: usize = 16;
+}
+
+/// The SD session's log directory and readings dropped so far.
+#[derive(Clone, Debug)]
+pub struct SdSession {
+    pub log: heapless::String<8>,
+    pub dropped: u64,
+}
+
+/// One SEF chain's state at the output cadence, before selecting an IMU.
+#[derive(Clone, Copy, Debug)]
+pub struct SefLogSample {
+    pub ts: Instant,
+    pub imu: ImuId,
+    pub selected: bool,
+    pub msl_ready: bool,
+    pub redundancy_ready: bool,
+    pub magnetometer_ignored: bool,
+    pub height_msl_m: f32,
+    pub velocity_mps: f32,
+    pub barometer_bias_m: [f32; 2],
+    pub height_std_m: f32,
+    pub velocity_std_mps: f32,
+    pub barometer_bias_std_m: [f32; 2],
+    pub consistency_score: f32,
+    pub orientation_body_to_ned_wxyz: [f32; 4],
+}
