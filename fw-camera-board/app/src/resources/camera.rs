@@ -1,21 +1,17 @@
 use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{self, Uart};
 use embassy_stm32::{bind_interrupts, dma, peripherals};
 
-use super::{CameraPower, CameraUart};
+use super::Camera;
+use crate::runcam::RunCam;
 
 pub const BAUD_RATE: u32 = 115_200;
 
-impl CameraPower {
-    /// PA15 is pulled up after reset (JTDI), so drive it low to keep the camera off.
-    pub fn setup(self) -> Output<'static> {
-        Output::new(self.pin, Level::Low, Speed::Low)
-    }
-}
+impl Camera {
+    pub fn setup(self) -> RunCam {
+        // PA15 is pulled up after reset (JTDI), so set it low to keep the camera off.
+        let power = Output::new(self.power, Level::Low, Speed::Low);
 
-impl CameraUart {
-    pub fn setup(self) -> Uart<'static, Async> {
         bind_interrupts!(struct CameraIrqs {
             USART1 => usart::InterruptHandler<peripherals::USART1>;
             DMA1_CHANNEL1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
@@ -25,7 +21,7 @@ impl CameraUart {
         let mut config = usart::Config::default();
         config.baudrate = BAUD_RATE;
 
-        Uart::new(
+        let uart = Uart::new(
             self.periph,
             self.rx,
             self.tx,
@@ -34,6 +30,8 @@ impl CameraUart {
             CameraIrqs,
             config,
         )
-        .expect("Failed to create camera UART")
+        .expect("Failed to create camera UART");
+
+        RunCam::new(power, uart)
     }
 }

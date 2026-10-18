@@ -16,10 +16,8 @@ assign_resources! {
         add2: PA2,
         add3: PA3,
     }
-    camera_power: CameraPower {
-        pin: PA15,
-    }
-    camera_uart: CameraUart {
+    camera: Camera {
+        power: PA15,
         periph: USART1,
         tx: PA9,
         rx: PA10,

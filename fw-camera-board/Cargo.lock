@@ -748,6 +748,7 @@ name = "fw-camera-board"
 version = "0.1.0"
 dependencies = [
  "assign-resources",
+ "bitflags 2.13.2",
  "built",
  "can-utils",
  "cortex-m",
