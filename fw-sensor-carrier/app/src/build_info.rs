@@ -35,7 +35,7 @@ pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
     const TIMESTAMP: u64 = parse_unix_timestamp(env!("BUILT_UNIX_TS"));
     let commit_hash = parse_commit_hash(built::GIT_COMMIT_HASH_SHORT);
     let is_release = built::PROFILE == "release";
-    let debug_defmt_rtt = built::FEATURES.contains(&"defmt");
+    let debug_defmt_rtt = built::FEATURES_LOWERCASE.contains(&"defmt");
     let is_git_dirty = built::GIT_DIRTY.unwrap_or(false);
     let author_initials = [b'L', b'S'];
     let can_semver = [

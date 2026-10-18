@@ -33,7 +33,7 @@ pub(crate) static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|
     const TIMESTAMP: u64 = parse_unix_timestamp(env!("BUILT_UNIX_TS"));
     let commit_hash = parse_commit_hash(built::GIT_COMMIT_HASH_SHORT);
     let is_release = built::PROFILE == "release";
-    let debug_defmt_rtt = built::FEATURES.contains(&"defmt");
+    let debug_defmt_rtt = built::FEATURES_LOWERCASE.contains(&"defmt");
     let is_git_dirty = built::GIT_DIRTY.unwrap_or(false);
     #[allow(clippy::char_lit_as_u8)] // good as long as it is ascii
     let author_initials = ['C' as u8, 'B' as u8];
