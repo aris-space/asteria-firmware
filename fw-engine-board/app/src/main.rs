@@ -17,7 +17,7 @@ use core::future::pending;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Input, Level, Output, OutputType, Speed};
 use embassy_stm32::{bind_interrupts, can, dma, exti, i2c, peripherals};
-use embassy_time::{Duration, Timer};
+use embassy_time::Duration;
 use embedded_utils::fmt::*;
 
 mod clocks {
@@ -113,8 +113,8 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
-    let _green = Output::new(p.PC15, Level::High, Speed::Low);
-    let red = Output::new(p.PC13, Level::High, Speed::Low);
+    let green = Output::new(p.PC15, Level::Low, Speed::Low);
+    let red = Output::new(p.PC13, Level::Low, Speed::Low);
 
     //Used the yellow LED as critical error indicator
     CRICITAL_ERROR_INDICATOR
@@ -223,7 +223,13 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(can_rx_task(rx).expect("Can't spawn CAN RX task"));
     spawner.spawn(board_status_update_task(mcu_temp).expect("Board Status Task failed"));
 
-    spawner.spawn(build_status_blinky(red).expect("blinky executor"));
+    spawner.spawn(
+        embedded_utils::led::heartbeat(green, Level::High).expect("failed to spawn heartbeat"),
+    );
+    spawner.spawn(
+        embedded_utils::led::build_status(red, build_info::BUILD_INFO.get(), Level::High)
+            .expect("failed to spawn build status"),
+    );
 
     spawner.spawn(
         k23_temperature_control(heating_pad_switching).expect("K23 temperature control failed"),
@@ -240,25 +246,6 @@ async fn main(spawner: Spawner) -> ! {
 
     loop {
         pending::<()>().await;
-    }
-}
-
-#[embassy_executor::task]
-async fn build_status_blinky(mut red: Output<'static>) {
-    let build_info = crate::build_info::BUILD_INFO.get();
-    let warning_build =
-        build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
-    let (on_ms, off_ms) = if warning_build {
-        (125, 125)
-    } else {
-        (200, 1800)
-    };
-
-    loop {
-        red.set_low();
-        Timer::after_millis(on_ms).await;
-        red.set_high();
-        Timer::after_millis(off_ms).await;
     }
 }
 

@@ -145,14 +145,7 @@ flash *args:
     ) >"$upload_log" 2>&1 &
     upload_pid="$!"
 
-    if [[ "{{use_probe_rs}}" == "true" ]]; then
-        probe-rs download --chip {{chip}} --chip-erase "$elf"
-        # download leaves the core halted in its flash loader; start the new firmware.
-        probe-rs reset --chip {{chip}}
-    else
-        arm-none-eabi-objcopy -O binary "$elf" "${elf}.bin"
-        STM32_Programmer_CLI -c port=SWD -d "${elf}.bin" 0x08000000 -rst
-    fi
+    just _flash-elf "$elf"
 
     if wait "$upload_pid"; then
       cat "$upload_log"
@@ -161,6 +154,80 @@ flash *args:
       cat "$upload_log" >&2
       exit 1
     fi
+
+# Flash a built ELF without attaching, shared by flash and flash-tag.
+_flash-elf elf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ "{{use_probe_rs}}" == "true" ]]; then
+        probe-rs download --chip {{chip}} --chip-erase "{{elf}}"
+        # download leaves the core halted in its flash loader; start the new firmware.
+        probe-rs reset --chip {{chip}}
+    else
+        arm-none-eabi-objcopy -O binary "{{elf}}" "{{elf}}.bin"
+        STM32_Programmer_CLI -c port=SWD -d "{{elf}}.bin" 0x08000000 -rst
+    fi
+
+# Usage: just flash-tag portugal --release
+# Build and flash like `flash`, then tag the commit as <event>/<board>/<n> and push the tag.
+flash-tag event *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ "{{event}}" == -* ]]; then
+      echo "First argument is the event name, e.g. just flash-tag portugal {{event}} {{args}}" >&2
+      exit 2
+    fi
+
+    repo_root="$(git rev-parse --show-toplevel)"
+    if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no --ignore-submodules=none)" ]]; then
+      echo "Tree is dirty, commit first so the tag matches what's flashed." >&2
+      exit 1
+    fi
+
+    build_out="$("$repo_root/just/scripts/build-elf.sh" "{{bin}}" "{{target}}" {{args}})"
+    elf="${build_out#*:}"
+    just _flash-elf "$elf"
+
+    args_line="args: {{args}}"
+    defmt_line="DEFMT_LOG: ${DEFMT_LOG:-from .cargo/config.toml}"
+
+    # Same commit with the same args and DEFMT_LOG is the same firmware, keep its tag.
+    prefix="{{event}}/{{trim_start_match(bin, "fw-")}}"
+    tag=""
+    for t in $(git tag -l "$prefix/*" --points-at HEAD); do
+      msg="$(git tag -l --format='%(contents)' "$t")"
+      if grep -Fxq "$args_line" <<<"$msg" && grep -Fxq "$defmt_line" <<<"$msg"; then
+        tag="$t"
+        echo "Already tagged as $tag"
+        break
+      fi
+    done
+
+    if [[ -z "$tag" ]]; then
+      n=1
+      while git rev-parse -q --verify "refs/tags/$prefix/$n" >/dev/null; do
+        n=$((n + 1))
+      done
+      tag="$prefix/$n"
+
+      git tag -a "$tag" -F - <<EOF
+    $tag
+
+    board: {{bin}} ({{chip}})
+    flashed: $(date -u '+%Y-%m-%d %H:%M UTC')
+    $args_line
+    $defmt_line
+
+    submodules:
+    $(git -C "$repo_root" submodule status)
+    EOF
+    fi
+
+    # Also runs for an existing tag, so rerunning after an offline flash-tag pushes it.
+    git push --quiet origin "refs/tags/$tag"
+    echo "Pushed $tag"
 
 # Attach to the target with probe-rs, using the most recently built ELF as the specified binary.
 attach:

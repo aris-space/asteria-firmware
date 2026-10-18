@@ -89,13 +89,16 @@ where
         const TX_TIMEOUT: Duration = Duration::from_millis(100);
 
         let mut last_sent = Instant::now();
-        let throttle_period = Duration::from_millis((1000. / max_freq_hz) as u64);
-        let resend_period = Duration::from_millis((1000. / min_freq_hz) as u64);
-
+        let throttle_period = Duration::try_from_millis((1000. / max_freq_hz) as u64)
+            .expect("a too large throttle period just prevents anything sent at all");
+        let resend_period = Duration::try_from_millis((1000. / min_freq_hz) as u64);
         loop {
-            let data = match embassy_time::with_timeout(resend_period, watch.changed()).await {
-                Ok(t) => t,
-                Err(_) => watch.get().await,
+            let data = match resend_period {
+                Some(period) => match embassy_time::with_timeout(period, watch.changed()).await {
+                    Ok(t) => t,
+                    Err(_) => watch.get().await,
+                },
+                None => watch.changed().await,
             };
             let Some(msg) = filter_map(data) else {
                 embedded_utils::trace!("Skipping new data of type {}", core::any::type_name::<T>());
