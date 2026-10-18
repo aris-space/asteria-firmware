@@ -175,6 +175,11 @@ flash-tag event *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    if [[ "{{event}}" == -* ]]; then
+      echo "First argument is the event name, e.g. just flash-tag portugal {{event}} {{args}}" >&2
+      exit 2
+    fi
+
     repo_root="$(git rev-parse --show-toplevel)"
     if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no --ignore-submodules=none)" ]]; then
       echo "Tree is dirty, commit first so the tag matches what's flashed." >&2
