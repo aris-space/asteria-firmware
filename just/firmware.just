@@ -190,21 +190,24 @@ flash-tag event *args:
 
     # Same commit with the same args and DEFMT_LOG is the same firmware, keep its tag.
     prefix="{{event}}/{{trim_start_match(bin, "fw-")}}"
+    tag=""
     for t in $(git tag -l "$prefix/*" --points-at HEAD); do
       msg="$(git tag -l --format='%(contents)' "$t")"
       if grep -Fxq "$args_line" <<<"$msg" && grep -Fxq "$defmt_line" <<<"$msg"; then
-        echo "Already tagged as $t"
-        exit 0
+        tag="$t"
+        echo "Already tagged as $tag"
+        break
       fi
     done
 
-    n=1
-    while git rev-parse -q --verify "refs/tags/$prefix/$n" >/dev/null; do
-      n=$((n + 1))
-    done
-    tag="$prefix/$n"
+    if [[ -z "$tag" ]]; then
+      n=1
+      while git rev-parse -q --verify "refs/tags/$prefix/$n" >/dev/null; do
+        n=$((n + 1))
+      done
+      tag="$prefix/$n"
 
-    git tag -a "$tag" -F - <<EOF
+      git tag -a "$tag" -F - <<EOF
     $tag
 
     board: {{bin}} ({{chip}})
@@ -215,10 +218,13 @@ flash-tag event *args:
     submodules:
     $(git -C "$repo_root" submodule status)
     EOF
+    fi
 
+    # Also runs for an existing tag, so rerunning after an offline flash-tag publishes it.
     git push --quiet origin "refs/tags/$tag"
-    gh release create "$tag" "$elf" --verify-tag --notes-from-tag --latest=false >/dev/null
-    echo "Tagged and released $tag"
+    gh release view "$tag" >/dev/null 2>&1 \
+      || gh release create "$tag" "$elf" --verify-tag --notes-from-tag --latest=false >/dev/null
+    echo "Pushed and released $tag"
 
 # Attach to the target with probe-rs, using the most recently built ELF as the specified binary.
 attach:
