@@ -1,0 +1,9 @@
+chip    := "STM32G4A1KEUx"
+bin     := "fw-camera-board"
+use_probe_rs := "true"
+
+# SWD clock in kHz for every probe-rs call. We need this, because the debug connector on this board
+# is a bit unreliable with the default.
+export PROBE_RS_SPEED := env("PROBE_RS_SPEED", "200")
+
+import '../just/firmware.just'

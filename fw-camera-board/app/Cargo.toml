@@ -1,0 +1,63 @@
+[package]
+name = "fw-camera-board"
+version = "0.1.0"
+edition = "2024"
+authors = ["Louis Schell <louis.schell1@gmx.de>"]
+license = "MIT OR Apache-2.0"
+
+[features]
+default = ["debug"]
+debug = ["dep:panic-probe"]
+
+[dependencies]
+# cortex-m setup
+cortex-m = { version = "0.7.7", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7.5"
+
+# Embassy
+embassy-stm32 = { version = "*", features = [
+    "stm32g4a1ke",
+    "time-driver-any",
+    "memory-x",
+    "unstable-pac",
+    "defmt",
+] }
+embassy-time = { version = "*", features = ["tick-hz-32_768", "defmt", "defmt-timestamp-uptime"] }
+embassy-executor = { version = "*", features = ["platform-cortex-m", "executor-thread", "defmt"] }
+embassy-sync = { version = "*", features = ["defmt"] }
+
+assign-resources = "0.5.0"
+bitflags = "2.9.4"
+
+# CAN
+can-utils = { path = "../../crates/can-utils", features = ["defmt"] }
+data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
+dp-flight-computer = { path = "../../data-definitions/datapoints/dp-flight-computer", version = "=0.3", features = [
+    "can",
+    "derive_defmt",
+] }
+dp-system-management = { path = "../../data-definitions/datapoints/dp-system-management", version = "=0.3", features = [
+    "can",
+    "derive_defmt",
+] }
+datatypes = { path = "../../data-definitions/datatypes", features = ["derive_defmt"] }
+embedded-can = "0.4.1"
+
+defmt = "1.0.1"
+defmt-rtt = { version = "1.0.0", features = ["disable-blocking-mode"] }
+
+panic-probe = { version = "1.0.0", features = [
+    "defmt",
+    "defmt-error",
+    "print-defmt",
+], optional = true }
+panic-reset = "0.1.1"
+
+[build-dependencies]
+built = { version = "0.8", features = ["git2"] }
+
+[[bin]]
+name = "fw-camera-board"
+test = false
+doctest = false
+bench = false
