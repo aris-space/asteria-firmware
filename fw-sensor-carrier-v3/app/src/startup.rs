@@ -1,5 +1,6 @@
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::gpio::Level;
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::Uart;
 
@@ -39,7 +40,15 @@ pub async fn prepare(
         resources.yellow_led,
         resources.red_led,
     );
-    level_1_spawner.spawn(tasks::leds::task(leds).expect("Failed to spawn LED task"));
+    level_1_spawner.spawn(
+        tasks::leds::startup(leds.green, level_1_spawner).expect("Failed to spawn green LED task"),
+    );
+    level_1_spawner
+        .spawn(tasks::leds::sd_status(leds.yellow).expect("Failed to spawn yellow LED task"));
+    level_1_spawner.spawn(
+        embedded_utils::led::build_status(leds.red, crate::built::BUILD_INFO.get(), Level::High)
+            .expect("Failed to spawn build status task"),
+    );
 
     let flash = resources.flash.setup();
     let storage = storage::Storage::init(flash);

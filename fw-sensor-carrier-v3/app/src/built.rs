@@ -6,10 +6,11 @@
 #![allow(clippy::needless_raw_string_hashes)]
 
 use datatypes::status::BuildInformationCommon;
+use embassy_sync::lazy_lock::LazyLock;
 
 include!(concat!(env!("OUT_DIR"), "/built.rs"));
 
-pub fn can_build_information() -> BuildInformationCommon {
+pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
     let mut commit_hash = [0; _];
     if let Some(hash) = GIT_COMMIT_HASH_SHORT {
         let len = hash.len().min(commit_hash.len());
@@ -28,4 +29,4 @@ pub fn can_build_information() -> BuildInformationCommon {
             dp_sensor_carrier::VERSION_PATCH,
         ],
     }
-}
+});

@@ -242,7 +242,7 @@ pub async fn status(can: BufferedFdCanSender) -> ! {
 #[embassy_executor::task]
 pub async fn build_info(can: BufferedFdCanSender) -> ! {
     every(can, BUILD_INFO_PERIOD, || {
-        Some(Message::BuildInfo(crate::built::can_build_information()))
+        Some(Message::BuildInfo(crate::built::BUILD_INFO.get().clone()))
     })
     .await
 }

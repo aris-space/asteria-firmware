@@ -1031,7 +1031,10 @@ dependencies = [
 name = "embedded-utils"
 version = "0.1.0"
 dependencies = [
+ "datatypes",
  "defmt 1.0.1",
+ "embassy-executor",
+ "embassy-stm32",
  "embassy-time",
 ]
 
@@ -1158,6 +1161,7 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "embedded-partitions",
  "embedded-storage-async",
+ "embedded-utils",
  "heapless 0.9.3",
  "libm",
  "lsm303agr",

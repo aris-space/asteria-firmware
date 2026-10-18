@@ -21,6 +21,7 @@ libm = "0.2.11"
 ms5607 = { path = "../../crates/devices/ms5607", features = ["defmt-03"] }
 lsm6dso32 = { path = "../../crates/devices/lsm6dso32", features = ["defmt-03"] }
 can-utils = { path = "../../crates/can-utils", features = ["defmt"] }
+embedded-utils = { path = "../../crates/embedded-utils", features = ["defmt"] }
 data-core = { path = "../../data-definitions/core", version = "0.1.0", features = ["can"] }
 dp-sensor-carrier = { path = "../../data-definitions/datapoints/dp-sensor-carrier", version = "=0.3", features = [
     "can",
