@@ -145,14 +145,7 @@ flash *args:
     ) >"$upload_log" 2>&1 &
     upload_pid="$!"
 
-    if [[ "{{use_probe_rs}}" == "true" ]]; then
-        probe-rs download --chip {{chip}} --chip-erase "$elf"
-        # download leaves the core halted in its flash loader; start the new firmware.
-        probe-rs reset --chip {{chip}}
-    else
-        arm-none-eabi-objcopy -O binary "$elf" "${elf}.bin"
-        STM32_Programmer_CLI -c port=SWD -d "${elf}.bin" 0x08000000 -rst
-    fi
+    just _flash-elf "$elf"
 
     if wait "$upload_pid"; then
       cat "$upload_log"
@@ -160,6 +153,109 @@ flash *args:
       echo "ELF upload failed. s5cmd output:" >&2
       cat "$upload_log" >&2
       exit 1
+    fi
+
+# Flash a built ELF without attaching, shared by flash and flash-tag.
+_flash-elf elf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ "{{use_probe_rs}}" == "true" ]]; then
+        probe-rs download --chip {{chip}} --chip-erase "{{elf}}"
+        # download leaves the core halted in its flash loader; start the new firmware.
+        probe-rs reset --chip {{chip}}
+    else
+        arm-none-eabi-objcopy -O binary "{{elf}}" "{{elf}}.bin"
+        STM32_Programmer_CLI -c port=SWD -d "{{elf}}.bin" 0x08000000 -rst
+    fi
+
+# Usage: just flash-tag portugal --release
+# Refuses to run on a dirty tree. Flashing the same commit with the same args again reuses the existing tag.
+# Build and flash like `flash`, tag the commit as <event>/<board>/<n>, upload the ELF as tags/<tag>.elf, push the tag.
+flash-tag event *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ " {{args}} " == *" --message-format "* ]] || [[ " {{args}} " == *" --message-format="* ]]; then
+      echo "Do not pass --message-format; recipe needs JSON output." >&2
+      exit 2
+    fi
+
+    event="{{event}}"
+    if [[ ! "$event" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+      echo "Event name may only contain letters, digits, '.', '_' and '-': $event" >&2
+      exit 2
+    fi
+    board="{{trim_start_match(bin, "fw-")}}"
+
+    repo_root="$(git rev-parse --show-toplevel)"
+    dirty="$(git -C "$repo_root" status --porcelain --untracked-files=no --ignore-submodules=none)"
+    if [[ -n "$dirty" ]]; then
+      echo "Tree is dirty, commit first, then flash-tag:" >&2
+      echo "$dirty" >&2
+      exit 1
+    fi
+    commit="$(git rev-parse HEAD)"
+
+    # Pull tags others made for this event so numbering doesn't collide. Fine to fail offline.
+    git fetch origin --tags --quiet || echo "Could not fetch tags from origin, numbering from local tags." >&2
+
+    build_out="$("$repo_root/just/scripts/build-elf.sh" "{{bin}}" "{{target}}" {{args}})"
+    ts="${build_out%%:*}"
+    elf="${build_out#*:}"
+    echo "Using ELF: $elf"
+
+    just _flash-elf "$elf"
+
+    upload_script="$repo_root/just/scripts/upload-elf.sh"
+    ASTERIA_ARTIFACT_TIMESTAMP_MS="$ts" "$upload_script" "$elf" "$ts.elf" \
+      || echo "ELF upload failed, it's cached in .artifacts, run just sync-artifacts later." >&2
+
+    args_line="args: {{args}}"
+    defmt_line="DEFMT_LOG: ${DEFMT_LOG:-from .cargo/config.toml}"
+
+    # Same commit and same build settings means the same firmware, so keep its tag.
+    tag=""
+    last=0
+    for t in $(git tag -l "$event/$board/*"); do
+      n="${t##*/}"
+      [[ "$n" =~ ^[0-9]+$ ]] || continue
+      (( n > last )) && last="$n"
+      msg="$(git tag -l --format='%(contents)' "$t")"
+      if [[ "$(git rev-parse "$t^{commit}")" == "$commit" ]] \
+        && grep -Fxq "$args_line" <<<"$msg" && grep -Fxq "$defmt_line" <<<"$msg"; then
+        tag="$t"
+      fi
+    done
+
+    if [[ -n "$tag" ]]; then
+      echo "Already tagged as $tag, not making a new tag"
+      exit 0
+    fi
+
+    tag="$event/$board/$((last + 1))"
+    git tag -a "$tag" "$commit" -F - <<EOF
+    $tag
+
+    board: {{bin}} ({{chip}})
+    flashed: $(date -u '+%Y-%m-%d %H:%M UTC')
+    artifact: $ts.elf
+    elf: tags/$tag.elf
+    $args_line
+    $defmt_line
+
+    submodules:
+    $(git -C "$repo_root" submodule status)
+    EOF
+    echo "Tagged $tag at ${commit:0:7}"
+
+    "$upload_script" "$elf" "tags/$tag.elf" \
+      || echo "Tag ELF upload failed, retry with: just upload-elf-as $elf tags/$tag.elf" >&2
+
+    if git push --quiet origin "refs/tags/$tag"; then
+      echo "Pushed $tag to origin"
+    else
+      echo "Push failed, the tag only exists locally. Retry with: git push origin $tag" >&2
     fi
 
 # Attach to the target with probe-rs, using the most recently built ELF as the specified binary.
