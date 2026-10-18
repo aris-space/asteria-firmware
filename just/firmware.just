@@ -185,12 +185,18 @@ flash-tag event *args:
     elf="${build_out#*:}"
     just _flash-elf "$elf"
 
+    args_line="args: {{args}}"
+    defmt_line="DEFMT_LOG: ${DEFMT_LOG:-from .cargo/config.toml}"
+
+    # Same commit with the same args and DEFMT_LOG is the same firmware, keep its tag.
     prefix="{{event}}/{{trim_start_match(bin, "fw-")}}"
-    existing="$(git tag -l "$prefix/*" --points-at HEAD)"
-    if [[ -n "$existing" ]]; then
-      echo "Already tagged as $existing"
-      exit 0
-    fi
+    for t in $(git tag -l "$prefix/*" --points-at HEAD); do
+      msg="$(git tag -l --format='%(contents)' "$t")"
+      if grep -Fxq "$args_line" <<<"$msg" && grep -Fxq "$defmt_line" <<<"$msg"; then
+        echo "Already tagged as $t"
+        exit 0
+      fi
+    done
 
     n=1
     while git rev-parse -q --verify "refs/tags/$prefix/$n" >/dev/null; do
@@ -203,8 +209,8 @@ flash-tag event *args:
 
     board: {{bin}} ({{chip}})
     flashed: $(date -u '+%Y-%m-%d %H:%M UTC')
-    args: {{args}}
-    DEFMT_LOG: ${DEFMT_LOG:-from .cargo/config.toml}
+    $args_line
+    $defmt_line
 
     submodules:
     $(git -C "$repo_root" submodule status)
