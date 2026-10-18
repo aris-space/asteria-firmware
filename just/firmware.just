@@ -170,7 +170,7 @@ _flash-elf elf:
     fi
 
 # Usage: just flash-tag portugal --release
-# Build and flash like `flash`, tag the commit as <event>/<board>/<n>, push it and attach the ELF to a GitHub release.
+# Build and flash like `flash`, then tag the commit as <event>/<board>/<n> and push the tag.
 flash-tag event *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -225,11 +225,9 @@ flash-tag event *args:
     EOF
     fi
 
-    # Also runs for an existing tag, so rerunning after an offline flash-tag publishes it.
+    # Also runs for an existing tag, so rerunning after an offline flash-tag pushes it.
     git push --quiet origin "refs/tags/$tag"
-    gh release view "$tag" >/dev/null 2>&1 \
-      || gh release create "$tag" "$elf" --verify-tag --notes-from-tag --latest=false >/dev/null
-    echo "Pushed and released $tag"
+    echo "Pushed $tag"
 
 # Attach to the target with probe-rs, using the most recently built ELF as the specified binary.
 attach:
