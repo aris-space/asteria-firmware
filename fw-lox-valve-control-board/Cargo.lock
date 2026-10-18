@@ -655,6 +655,7 @@ dependencies = [
  "built",
  "cortex-m",
  "cortex-m-rt",
+ "datatypes",
  "defmt 1.0.1",
  "defmt-rtt",
  "embassy-executor",

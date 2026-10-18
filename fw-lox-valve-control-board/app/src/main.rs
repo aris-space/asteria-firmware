@@ -8,7 +8,6 @@ mod blinky;
 mod modbus_server;
 mod valve;
 
-use crate::blinky::status_blinky;
 use core::future::pending;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
@@ -25,6 +24,18 @@ use crate::valve::init_lox_valve_motor;
 
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
+
+    use datatypes::status::BuildInformationCommon;
+    use embassy_sync::lazy_lock::LazyLock;
+
+    /// Only the flags the build status LED looks at are filled in, this board has no CAN.
+    pub static BUILD_INFO: LazyLock<BuildInformationCommon> =
+        LazyLock::new(|| BuildInformationCommon {
+            is_release: PROFILE == "release",
+            debug_defmt_rtt: FEATURES_LOWERCASE.contains(&"defmt"),
+            is_git_dirty: GIT_DIRTY.unwrap_or(false),
+            ..Default::default()
+        });
 }
 
 #[cfg(not(feature = "defmt"))]
@@ -105,7 +116,11 @@ async fn main(spawner: Spawner) -> ! {
     )
     .unwrap();
 
-    spawner.spawn(status_blinky(green, red).expect("Failed to spawn status blinky task"));
+    spawner.spawn(blinky::heartbeat(green).expect("failed to spawn heartbeat"));
+    spawner.spawn(
+        embedded_utils::led::build_status(red, built_info::BUILD_INFO.get(), Level::High)
+            .expect("failed to spawn build status"),
+    );
     spawner.spawn(modbus_server_task(modbus_usart).expect("Failed to spawn Modbus server task"));
 
     match init_lox_valve_motor(motor_usart, endstop).await {
