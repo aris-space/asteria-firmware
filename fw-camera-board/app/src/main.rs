@@ -11,8 +11,7 @@ use embassy_executor::Spawner;
 mod built;
 mod clocks;
 mod resources;
-// TODO: untested on hw
-// mod runcam;
+mod runcam;
 mod signals;
 mod startup;
 mod tasks;

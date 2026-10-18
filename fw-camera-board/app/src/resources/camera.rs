@@ -14,8 +14,6 @@ impl CameraPower {
     }
 }
 
-// TODO: untested on hw
-#[allow(dead_code)]
 impl CameraUart {
     pub fn setup(self) -> Uart<'static, Async> {
         bind_interrupts!(struct CameraIrqs {
