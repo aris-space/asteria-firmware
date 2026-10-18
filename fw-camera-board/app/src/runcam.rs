@@ -62,6 +62,7 @@ impl RunCam {
         self.power.set_low();
     }
 
+    /// Wait until the camera has booted and fetch the device info.
     pub async fn wait_until_booted(&mut self) -> Result<Features, Error> {
         let deadline = Instant::now() + BOOT_TIMEOUT;
         loop {
@@ -73,10 +74,12 @@ impl RunCam {
         }
     }
 
+    /// Starts the recording (if supported) and returns immediately.
     pub async fn start_recording(&mut self) -> Result<(), Error> {
         self.send(&[CAMERA_CONTROL, START_RECORDING]).await
     }
 
+    /// Stops the recording of the camera (if supported), and waits for the file to be closed.
     pub async fn stop_recording(&mut self, features: Features) -> Result<(), Error> {
         if features.contains(Features::STOP_RECORDING) {
             self.send(&[CAMERA_CONTROL, STOP_RECORDING]).await?;
