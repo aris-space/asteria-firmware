@@ -90,9 +90,9 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
-    let green = Output::new(p.PC15, Level::High, Speed::Low);
-    let _yellow = Output::new(p.PC14, Level::High, Speed::Low);
-    let red = Output::new(p.PC13, Level::High, Speed::Low);
+    let green = Output::new(p.PC15, Level::Low, Speed::Low);
+    let _yellow = Output::new(p.PC14, Level::Low, Speed::Low);
+    let red = Output::new(p.PC13, Level::Low, Speed::Low);
 
     // Solenoids
     let oxidizer_vent_valve = Output::new(p.PA10, Level::Low, Speed::Medium);
@@ -169,10 +169,10 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(board_status_update_task(mcu_temp).expect("board status task failed"));
 
     spawner.spawn(
-        embedded_utils::led::heartbeat(green, Level::Low).expect("failed to spawn heartbeat"),
+        embedded_utils::led::heartbeat(green, Level::High).expect("failed to spawn heartbeat"),
     );
     spawner.spawn(
-        embedded_utils::led::build_status(red, build_info::BUILD_INFO.get(), Level::Low)
+        embedded_utils::led::build_status(red, build_info::BUILD_INFO.get(), Level::High)
             .expect("failed to spawn build status"),
     );
 

@@ -113,8 +113,8 @@ async fn main(spawner: Spawner) -> ! {
     let p = embassy_stm32::init(config);
 
     // LEDs
-    let green = Output::new(p.PC15, Level::High, Speed::Low);
-    let red = Output::new(p.PC13, Level::High, Speed::Low);
+    let green = Output::new(p.PC15, Level::Low, Speed::Low);
+    let red = Output::new(p.PC13, Level::Low, Speed::Low);
 
     //Used the yellow LED as critical error indicator
     CRICITAL_ERROR_INDICATOR
@@ -224,10 +224,10 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(board_status_update_task(mcu_temp).expect("Board Status Task failed"));
 
     spawner.spawn(
-        embedded_utils::led::heartbeat(green, Level::Low).expect("failed to spawn heartbeat"),
+        embedded_utils::led::heartbeat(green, Level::High).expect("failed to spawn heartbeat"),
     );
     spawner.spawn(
-        embedded_utils::led::build_status(red, build_info::BUILD_INFO.get(), Level::Low)
+        embedded_utils::led::build_status(red, build_info::BUILD_INFO.get(), Level::High)
             .expect("failed to spawn build status"),
     );
 
