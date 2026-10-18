@@ -405,14 +405,12 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // === Other Tasks ===
-    spawner.spawn(embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"));
     spawner.spawn(
-        embedded_utils::led::build_status(
-            led_red,
-            crate::build_info::LED_BUILD_INFO.get(),
-            false,
-        )
-        .expect("failed to spawn build status"),
+        embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"),
+    );
+    spawner.spawn(
+        embedded_utils::led::build_status(led_red, crate::build_info::LED_BUILD_INFO.get(), false)
+            .expect("failed to spawn build status"),
     );
 
     // setup CAN on FDCAN3 PF6/PF7 and start the loops
@@ -428,4 +426,3 @@ async fn main(spawner: Spawner) -> ! {
         pending::<()>().await;
     }
 }
-

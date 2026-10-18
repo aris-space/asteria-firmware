@@ -38,6 +38,10 @@ pub async fn build_status(
 ) -> ! {
     let warning_build =
         build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
-    let (on_ms, off_ms) = if warning_build { (125, 125) } else { (1800, 200) };
+    let (on_ms, off_ms) = if warning_build {
+        (125, 125)
+    } else {
+        (1800, 200)
+    };
     blink(&mut led, active_low, on_ms, off_ms).await
 }

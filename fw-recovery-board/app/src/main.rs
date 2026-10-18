@@ -266,14 +266,12 @@ async fn main(spawner: Spawner) -> ! {
         .sender()
         .send(crate::build_info::BUILD_INFO.get().clone());
 
-    spawner.spawn(embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"));
     spawner.spawn(
-        embedded_utils::led::build_status(
-            led_red,
-            crate::build_info::BUILD_INFO.get(),
-            false,
-        )
-        .expect("failed to spawn build status"),
+        embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"),
+    );
+    spawner.spawn(
+        embedded_utils::led::build_status(led_red, crate::build_info::BUILD_INFO.get(), false)
+            .expect("failed to spawn build status"),
     );
     spawner.spawn(actuator_control::steering_task(steering, steer_pwr, steering_watchdog).unwrap());
     spawner.spawn(actuator_control::separation_task(separation).unwrap());
@@ -342,4 +340,3 @@ async fn main(spawner: Spawner) -> ! {
         }
     }
 }
-

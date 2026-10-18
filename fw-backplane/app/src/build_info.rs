@@ -52,4 +52,3 @@ pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
         can_semver,
     }
 });
-

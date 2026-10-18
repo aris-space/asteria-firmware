@@ -170,12 +170,8 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(embedded_utils::led::heartbeat(green, true).expect("failed to spawn heartbeat"));
     spawner.spawn(
-        embedded_utils::led::build_status(
-            red,
-            crate::build_info::BUILD_INFO.get(),
-            true,
-        )
-        .expect("failed to spawn build status"),
+        embedded_utils::led::build_status(red, crate::build_info::BUILD_INFO.get(), true)
+            .expect("failed to spawn build status"),
     );
 
     spawner.spawn(buzzer_task(buzzer_pwm).unwrap());
@@ -194,4 +190,3 @@ async fn main(spawner: Spawner) -> ! {
         pending::<()>().await;
     }
 }
-

@@ -117,14 +117,12 @@ async fn main(spawner: Spawner) -> ! {
     let can_tx = make_multiplexable(can_tx);
 
     // Spawn activity LED
-    spawner.spawn(embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"));
     spawner.spawn(
-        embedded_utils::led::build_status(
-            led_red,
-            crate::build_info::BUILD_INFO.get(),
-            false,
-        )
-        .expect("failed to spawn build status"),
+        embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"),
+    );
+    spawner.spawn(
+        embedded_utils::led::build_status(led_red, crate::build_info::BUILD_INFO.get(), false)
+            .expect("failed to spawn build status"),
     );
 
     // Spawn active power source + indicator task

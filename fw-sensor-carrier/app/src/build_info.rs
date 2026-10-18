@@ -53,7 +53,6 @@ pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
     }
 });
 
-
 /// `BUILD_INFO` in the type `embedded_utils::led::build_status` expects. This board
 /// still sends the legacy hermes-can type over CAN.
 pub static LED_BUILD_INFO: LazyLock<datatypes::status::BuildInformationCommon> =
