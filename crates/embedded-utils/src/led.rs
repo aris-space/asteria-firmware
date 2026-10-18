@@ -1,19 +1,18 @@
-// Copyright 2026 ARIS
-// SPDX-License-Identifier: MIT OR Apache-2.0
-
 //! Standard board LED tasks, see "Board LEDs" in docs/ARCHITECTURE.md.
 //!
-//! `active_low` is for LEDs that light when the pin is driven low.
+//! `on_level` is the pin level at which the LED lights.
 
 use datatypes::status::BuildInformationCommon;
 use embassy_stm32::gpio::{Level, Output};
 use embassy_time::Timer;
 
-async fn blink(led: &mut Output<'static>, active_low: bool, on_ms: u64, off_ms: u64) -> ! {
-    let on = Level::from(!active_low);
-    let off = Level::from(active_low);
+async fn blink(led: &mut Output<'static>, on_level: Level, on_ms: u64, off_ms: u64) -> ! {
+    let off = match on_level {
+        Level::High => Level::Low,
+        Level::Low => Level::High,
+    };
     loop {
-        led.set_level(on);
+        led.set_level(on_level);
         Timer::after_millis(on_ms).await;
         led.set_level(off);
         Timer::after_millis(off_ms).await;
@@ -22,8 +21,8 @@ async fn blink(led: &mut Output<'static>, active_low: bool, on_ms: u64, off_ms: 
 
 /// Green heartbeat LED: 750 ms on, 250 ms off (75% duty).
 #[embassy_executor::task]
-pub async fn heartbeat(mut led: Output<'static>, active_low: bool) -> ! {
-    blink(&mut led, active_low, 750, 250).await
+pub async fn heartbeat(mut led: Output<'static>, on_level: Level) -> ! {
+    blink(&mut led, on_level, 750, 250).await
 }
 
 /// Red build status LED.
@@ -34,7 +33,7 @@ pub async fn heartbeat(mut led: Output<'static>, active_low: bool) -> ! {
 pub async fn build_status(
     mut led: Output<'static>,
     build_info: &'static BuildInformationCommon,
-    active_low: bool,
+    on_level: Level,
 ) -> ! {
     let warning_build =
         build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
@@ -43,5 +42,5 @@ pub async fn build_status(
     } else {
         (1800, 200)
     };
-    blink(&mut led, active_low, on_ms, off_ms).await
+    blink(&mut led, on_level, on_ms, off_ms).await
 }

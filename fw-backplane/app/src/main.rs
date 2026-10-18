@@ -118,10 +118,10 @@ async fn main(spawner: Spawner) -> ! {
 
     // Spawn activity LED
     spawner.spawn(
-        embedded_utils::led::heartbeat(led_green, false).expect("failed to spawn heartbeat"),
+        embedded_utils::led::heartbeat(led_green, Level::High).expect("failed to spawn heartbeat"),
     );
     spawner.spawn(
-        embedded_utils::led::build_status(led_red, crate::build_info::BUILD_INFO.get(), false)
+        embedded_utils::led::build_status(led_red, build_info::BUILD_INFO.get(), Level::High)
             .expect("failed to spawn build status"),
     );
 
@@ -148,7 +148,7 @@ async fn main(spawner: Spawner) -> ! {
     OUTPUTS
         .build_info
         .sender()
-        .send(crate::build_info::BUILD_INFO.get().clone());
+        .send(build_info::BUILD_INFO.get().clone());
     OUTPUTS
         .start_broadcasting(spawner, can_tx)
         .expect("Failed to start CAN broadcasters");

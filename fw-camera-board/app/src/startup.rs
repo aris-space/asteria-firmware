@@ -1,6 +1,6 @@
 use embassy_executor::Spawner;
 use embassy_stm32::can::Can;
-use embassy_stm32::gpio::Output;
+use embassy_stm32::gpio::{Level, Output};
 
 use crate::runcam::RunCam;
 use crate::{resources, tasks};
@@ -33,8 +33,8 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner) {
     thread_spawner.spawn(
         embedded_utils::led::build_status(
             board.debug_led,
-            crate::build_info::BUILD_INFO.get(),
-            false,
+            crate::built::BUILD_INFO.get(),
+            Level::High,
         )
         .expect("Failed to spawn LED task"),
     );

@@ -173,9 +173,11 @@ async fn main(spawner: Spawner) -> ! {
             .expect("failed to prepare board_status_update_task spawn token"),
     );
 
-    spawner.spawn(embedded_utils::led::heartbeat(green, true).expect("failed to spawn heartbeat"));
     spawner.spawn(
-        embedded_utils::led::build_status(red, crate::build_info::BUILD_INFO.get(), true)
+        embedded_utils::led::heartbeat(green, Level::Low).expect("failed to spawn heartbeat"),
+    );
+    spawner.spawn(
+        embedded_utils::led::build_status(red, build_info::BUILD_INFO.get(), Level::Low)
             .expect("failed to spawn build status"),
     );
 

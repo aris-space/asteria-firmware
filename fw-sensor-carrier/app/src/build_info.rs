@@ -1,4 +1,6 @@
+use embassy_stm32::gpio::Output;
 use embassy_sync::lazy_lock::LazyLock;
+use embassy_time::Timer;
 use hermes_can::messages::debug_info::BuildInformationCommon;
 
 pub mod built {
@@ -53,15 +55,21 @@ pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
     }
 });
 
-/// `BUILD_INFO` in the type `embedded_utils::led::build_status` expects. This board
-/// still sends the legacy hermes-can type over CAN.
-pub static LED_BUILD_INFO: LazyLock<datatypes::status::BuildInformationCommon> =
-    LazyLock::new(|| {
-        let info = BUILD_INFO.get();
-        datatypes::status::BuildInformationCommon {
-            is_release: info.is_release,
-            debug_defmt_rtt: info.debug_defmt_rtt,
-            is_git_dirty: info.is_git_dirty,
-            ..Default::default()
-        }
-    });
+#[embassy_executor::task]
+pub async fn build_status_blinky(mut led: Output<'static>) {
+    let build_info = BUILD_INFO.get();
+    let warning_build =
+        build_info.is_git_dirty || !build_info.is_release || build_info.debug_defmt_rtt;
+    let (on_ms, off_ms) = if warning_build {
+        (125, 125)
+    } else {
+        (1800, 200)
+    };
+
+    loop {
+        led.set_high();
+        Timer::after_millis(on_ms).await;
+        led.set_low();
+        Timer::after_millis(off_ms).await;
+    }
+}
