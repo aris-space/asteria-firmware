@@ -186,6 +186,12 @@ flash-tag event *args:
     just _flash-elf "$elf"
 
     prefix="{{event}}/{{trim_start_match(bin, "fw-")}}"
+    existing="$(git tag -l "$prefix/*" --points-at HEAD)"
+    if [[ -n "$existing" ]]; then
+      echo "Already tagged as $existing"
+      exit 0
+    fi
+
     n=1
     while git rev-parse -q --verify "refs/tags/$prefix/$n" >/dev/null; do
       n=$((n + 1))
