@@ -6,6 +6,8 @@ use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{self, Uart};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 
+use crate::resources::camera::CameraUart;
+
 const BOOT_TIMEOUT: Duration = Duration::from_secs(15);
 const BOOT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const FILE_CLOSE_DELAY: Duration = Duration::from_secs(2);
@@ -46,19 +48,32 @@ impl From<usart::Error> for Error {
 
 pub struct RunCam {
     power: Output<'static>,
-    uart: Uart<'static, Async>,
+    uart: CameraUart,
 }
 
 impl RunCam {
-    pub fn new(power: Output<'static>, uart: Uart<'static, Async>) -> Self {
+    pub fn new(power: Output<'static>, uart: CameraUart) -> Self {
         Self { power, uart }
     }
 
-    pub fn power_on(&mut self) {
+    pub fn power_on(&mut self) -> PoweredRunCam<'_> {
         self.power.set_high();
+        PoweredRunCam {
+            power: &mut self.power,
+            uart: self.uart.open(),
+        }
     }
+}
 
-    pub fn power_off(&mut self) {
+pub struct PoweredRunCam<'d> {
+    power: &'d mut Output<'static>,
+    uart: Uart<'d, Async>,
+}
+
+impl PoweredRunCam<'_> {
+    pub fn power_off(self) {
+        // idle-high TX back-powers the camera otherwise
+        drop(self.uart);
         self.power.set_low();
     }
 
