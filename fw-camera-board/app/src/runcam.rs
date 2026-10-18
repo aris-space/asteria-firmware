@@ -6,6 +6,8 @@ use embassy_stm32::mode::Async;
 use embassy_stm32::usart::{self, Uart};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 
+use crate::resources::camera::CameraUart;
+
 const BOOT_TIMEOUT: Duration = Duration::from_secs(15);
 const BOOT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const FILE_CLOSE_DELAY: Duration = Duration::from_secs(2);
@@ -46,20 +48,35 @@ impl From<usart::Error> for Error {
 
 pub struct RunCam {
     power: Output<'static>,
-    uart: Uart<'static, Async>,
+    uart: CameraUart,
 }
 
 impl RunCam {
-    pub fn new(power: Output<'static>, uart: Uart<'static, Async>) -> Self {
+    pub fn new(power: Output<'static>, uart: CameraUart) -> Self {
         Self { power, uart }
     }
 
-    pub fn power_on(&mut self) {
+    /// Powers the camera and opens a fresh UART to it.
+    pub fn power_on(&mut self) -> PoweredRunCam<'_> {
         self.power.set_high();
+        PoweredRunCam {
+            power: &mut self.power,
+            uart: self.uart.open(),
+        }
     }
+}
 
-    pub fn power_off(&mut self) {
-        self.power.set_low();
+pub struct PoweredRunCam<'d> {
+    power: &'d mut Output<'static>,
+    uart: Uart<'d, Async>,
+}
+
+impl PoweredRunCam<'_> {
+    /// Closes the UART first so TX doesn't back-power the camera, then cuts power.
+    pub fn power_off(self) {
+        let Self { power, uart } = self;
+        drop(uart);
+        power.set_low();
     }
 
     /// Wait until the camera has booted and fetch the device info.

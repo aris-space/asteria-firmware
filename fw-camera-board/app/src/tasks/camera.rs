@@ -8,13 +8,13 @@ use embassy_time::{Duration, Timer, with_timeout};
 use crate::runcam::{Features, RunCam};
 use crate::signals;
 
-const OFF_DELAY: Duration = Duration::from_secs(5 * 60);
+const OFF_DELAY: Duration = Duration::from_millis(5000);
 /// Spreads the cameras' inrush currents.
 // TODO: tune on hw, 0 disables the stagger
 const STAGGER_STEP: Duration = Duration::from_millis(0);
 
 #[embassy_executor::task]
-pub async fn task(mut camera: RunCam, address: u8) {
+pub async fn task(mut runcam: RunCam, address: u8) {
     let mut arming = signals::FC_ARMING
         .receiver()
         .expect("camera: FC arming receiver available");
@@ -30,7 +30,7 @@ pub async fn task(mut camera: RunCam, address: u8) {
         );
         Timer::after(stagger).await;
         info!("camera: powering on");
-        camera.power_on();
+        let mut camera = runcam.power_on();
         let features = match camera.wait_until_booted().await {
             Ok(features) => {
                 info!("camera: booted, features {=u16:#06x}", features.bits());
