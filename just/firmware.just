@@ -171,7 +171,7 @@ _flash-elf elf:
 
 # Usage: just flash-tag portugal --release
 # Refuses to run on a dirty tree. Flashing the same commit with the same args again reuses the existing tag.
-# Build and flash like `flash`, tag the commit as <event>/<board>/<n>, upload the ELF as tags/<tag>.elf, push the tag.
+# Build and flash like `flash`, tag the commit as <event>/<board>/<n>, push it and attach the ELF to a GitHub release.
 flash-tag event *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -201,15 +201,10 @@ flash-tag event *args:
     git fetch origin --tags --quiet || echo "Could not fetch tags from origin, numbering from local tags." >&2
 
     build_out="$("$repo_root/just/scripts/build-elf.sh" "{{bin}}" "{{target}}" {{args}})"
-    ts="${build_out%%:*}"
     elf="${build_out#*:}"
     echo "Using ELF: $elf"
 
     just _flash-elf "$elf"
-
-    upload_script="$repo_root/just/scripts/upload-elf.sh"
-    ASTERIA_ARTIFACT_TIMESTAMP_MS="$ts" "$upload_script" "$elf" "$ts.elf" \
-      || echo "ELF upload failed, it's cached in .artifacts, run just sync-artifacts later." >&2
 
     args_line="args: {{args}}"
     defmt_line="DEFMT_LOG: ${DEFMT_LOG:-from .cargo/config.toml}"
@@ -239,8 +234,6 @@ flash-tag event *args:
 
     board: {{bin}} ({{chip}})
     flashed: $(date -u '+%Y-%m-%d %H:%M UTC')
-    artifact: $ts.elf
-    elf: tags/$tag.elf
     $args_line
     $defmt_line
 
@@ -249,13 +242,22 @@ flash-tag event *args:
     EOF
     echo "Tagged $tag at ${commit:0:7}"
 
-    "$upload_script" "$elf" "tags/$tag.elf" \
-      || echo "Tag ELF upload failed, retry with: just upload-elf-as $elf tags/$tag.elf" >&2
+    # Keep a copy so the release can still be made later if we're offline now.
+    saved_elf="$repo_root/target/flash-tag/$tag/{{bin}}.elf"
+    mkdir -p "$(dirname "$saved_elf")"
+    cp "$elf" "$saved_elf"
 
-    if git push --quiet origin "refs/tags/$tag"; then
-      echo "Pushed $tag to origin"
+    if ! git push --quiet origin "refs/tags/$tag"; then
+      echo "Push failed, the tag only exists locally. Retry with:" >&2
+      echo "  git push origin $tag && gh release create $tag $saved_elf --verify-tag --notes-from-tag --latest=false" >&2
+      exit 0
+    fi
+    echo "Pushed $tag to origin"
+
+    if gh release create "$tag" "$saved_elf" --verify-tag --notes-from-tag --latest=false >/dev/null; then
+      echo "Attached ELF to release $tag"
     else
-      echo "Push failed, the tag only exists locally. Retry with: git push origin $tag" >&2
+      echo "Release failed. Retry with: gh release create $tag $saved_elf --verify-tag --notes-from-tag --latest=false" >&2
     fi
 
 # Attach to the target with probe-rs, using the most recently built ELF as the specified binary.

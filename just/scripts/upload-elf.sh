@@ -73,8 +73,8 @@ save_local_artifact() {
   local local_dir local_path
 
   local_dir="$(resolve_local_artifact_dir)"
+  mkdir -p "$local_dir"
   local_path="$local_dir/$object_name"
-  mkdir -p "$(dirname "$local_path")"
   cp "$elf_path" "$local_path"
   echo "Saved local artifact: $local_path"
 }
@@ -189,6 +189,7 @@ main() {
   if [[ -z "$object_name" ]]; then
     object_name="$(artifact_timestamp_ms).elf"
   fi
+  [[ "$object_name" == */* ]] && die "Object name must not contain '/': $object_name"
 
   # Always cache locally, regardless of B2 configuration.
   save_local_artifact "$elf_path" "$object_name"
