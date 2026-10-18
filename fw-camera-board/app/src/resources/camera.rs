@@ -29,8 +29,6 @@ impl Camera {
     }
 }
 
-/// The UART only exists while the camera is powered. Dropping it puts TX back to
-/// analog, otherwise the idle-high TX back-powers the camera and it never resets.
 pub struct CameraUart {
     periph: Peri<'static, peripherals::USART1>,
     tx: Peri<'static, peripherals::PA9>,

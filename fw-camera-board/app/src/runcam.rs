@@ -56,7 +56,6 @@ impl RunCam {
         Self { power, uart }
     }
 
-    /// Powers the camera and opens a fresh UART to it.
     pub fn power_on(&mut self) -> PoweredRunCam<'_> {
         self.power.set_high();
         PoweredRunCam {
@@ -72,11 +71,10 @@ pub struct PoweredRunCam<'d> {
 }
 
 impl PoweredRunCam<'_> {
-    /// Closes the UART first so TX doesn't back-power the camera, then cuts power.
     pub fn power_off(self) {
-        let Self { power, uart } = self;
-        drop(uart);
-        power.set_low();
+        // idle-high TX back-powers the camera otherwise
+        drop(self.uart);
+        self.power.set_low();
     }
 
     /// Wait until the camera has booted and fetch the device info.
