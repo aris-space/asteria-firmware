@@ -38,9 +38,6 @@ pub fn spawn_tasks(board: PreparedBoard, thread_spawner: Spawner) {
             .expect("Failed to spawn camera task"),
     );
 
-    #[cfg(feature = "bench-arming")]
-    thread_spawner.spawn(tasks::bench::task().expect("Failed to spawn bench task"));
-
     let (_, can_rx, _) = board.can.split();
     thread_spawner.spawn(tasks::can::rx(can_rx).expect("Failed to spawn CAN RX task"));
 }

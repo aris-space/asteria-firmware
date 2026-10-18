@@ -10,10 +10,7 @@ use embassy_time::{Duration, Timer, with_timeout};
 use crate::runcam::{self, RunCam};
 use crate::signals;
 
-#[cfg(not(feature = "bench-arming"))]
 const OFF_DELAY: Duration = Duration::from_secs(5 * 60);
-#[cfg(feature = "bench-arming")]
-const OFF_DELAY: Duration = Duration::from_secs(10);
 /// Spreads the cameras' inrush currents.
 // TODO: tune on hw, 0 disables the stagger
 const STAGGER_STEP: Duration = Duration::from_millis(0);

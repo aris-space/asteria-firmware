@@ -8,8 +8,6 @@ license = "MIT OR Apache-2.0"
 [features]
 default = ["debug"]
 debug = ["dep:panic-probe"]
-# Simulate FC arming on the bench, no CAN needed. Never flash this for flight.
-bench-arming = []
 
 [dependencies]
 # cortex-m setup
