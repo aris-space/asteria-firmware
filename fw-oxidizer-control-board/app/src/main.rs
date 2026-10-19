@@ -40,8 +40,7 @@ mod built_info {
 #[cfg(feature = "defmt")]
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::actuators::main_valves;
-use crate::actuators::valves::valve_task;
+use crate::actuators::valves::{main_valve_task, valve_task};
 use crate::buzzer::buzzer_task;
 use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
@@ -167,7 +166,7 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     spawner.spawn(valve_task(oxidizer_vent_valve).expect("valve task failed"));
-    spawner.spawn(main_valves::valve_task(oss_ml_vlv, fss_ml_vlv).expect("Valve Task failed"));
+    spawner.spawn(main_valve_task(oss_ml_vlv, fss_ml_vlv).expect("Valve Task failed"));
 
     spawner.spawn(can_rx_task(rx).unwrap());
     spawner.spawn(board_status_update_task(mcu_temp).expect("board status task failed"));
