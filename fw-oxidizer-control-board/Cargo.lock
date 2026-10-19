@@ -417,6 +417,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dp-engine-control-board"
+version = "0.6.0"
+dependencies = [
+ "bincode",
+ "data-core",
+ "datatypes",
+ "defmt 1.0.1",
+ "gated-derive",
+]
+
+[[package]]
 name = "dp-oxidizer-control-board"
 version = "0.6.0"
 dependencies = [
@@ -821,6 +832,7 @@ dependencies = [
  "datatypes",
  "defmt 1.0.1",
  "defmt-rtt",
+ "dp-engine-control-board",
  "dp-oxidizer-control-board",
  "dp-system-management",
  "dpr",

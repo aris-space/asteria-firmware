@@ -1,7 +1,6 @@
 use crate::Irqs;
 use crate::globals::STATE;
 use crate::sensors::CAN_BOARD_STATUS_FREQ_HZ;
-use can_utils::collector::Collector;
 use can_utils::rxtx::TypedCanReceive as _;
 use data_core::can::hal::CanDecode as _;
 use datatypes::status::{ArmingState, BoardId, SensorStatus, StatusCommonMessage};
@@ -18,10 +17,6 @@ data_core::can::sparse_decodable_can_message! {
     enum ReceivedMessage {
         ResetAll(dp_system_management::Message::ResetAll),
         ResetSpecific(dp_system_management::Message::ResetSpecific),
-        FuelMainValveControlFC(dp_engine_control_board::Message::FuelMainValveControlFC),
-        FuelMainValveControlRFS(dp_engine_control_board::Message::FuelMainValveControlRFS),
-        OxidizerMainValveControlFC(dp_engine_control_board::Message::OxidizerMainValveControlFC),
-        OxidizerMainValveControlRFS(dp_engine_control_board::Message::OxidizerMainValveControlRFS),
     }
 }
 
@@ -47,9 +42,6 @@ pub async fn can_rx_task(mut can_rx: CanRx<'static>) -> ! {
                     );
                     reset_now();
                 }
-            }
-            Ok(msg) => {
-                let _ = STATE.update_from(msg);
             }
             Err(err) => {
                 error!("CAN RX error: {:?}", err);

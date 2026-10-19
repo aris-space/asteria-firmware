@@ -37,7 +37,7 @@ mod built_info {
 #[cfg(feature = "defmt")]
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::actuators::valves::{check_main_arming, valve_task};
+use crate::actuators::valves::check_main_arming;
 use crate::buzzer::buzzer_task;
 use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
@@ -177,9 +177,9 @@ async fn main(spawner: Spawner) -> ! {
         Default::default(),
     );
 
-    //Solenoids
-    let oss_ml_vlv = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
-    let fss_ml_vlv = Output::new(p.PA10, Level::Low, Speed::VeryHigh);
+    // Solenoids: unused, the main valves are on the oxidizer control board
+    let _oss_ml_vlv = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
+    let _fss_ml_vlv = Output::new(p.PA10, Level::Low, Speed::VeryHigh);
 
     // Solenoid Standby Control
     let mut sol1_stby = Output::new(p.PB15, Level::High, Speed::Low);
@@ -215,8 +215,6 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(
         thermocouple_task(tc, max, &OXD_RNL_T, &OXD_TNK_T).expect("Thermocouple Task failed"),
     );
-
-    spawner.spawn(valve_task(oss_ml_vlv, fss_ml_vlv).expect("Valve Task failed"));
 
     spawner.spawn(check_main_arming(main_arming_pin).expect("Check main arming Task failed"));
 

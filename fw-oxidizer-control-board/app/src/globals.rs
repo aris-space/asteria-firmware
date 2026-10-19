@@ -3,7 +3,7 @@ use crate::drivers::WATCH;
 use crate::drivers::solenoid_detection::SolenoidStates;
 use can_utils::broadcast::Broadcast;
 use can_utils::collector::Collector;
-use datatypes::actuator::{DPRValve, NormallyOpenValve};
+use datatypes::actuator::{DPRValve, NormallyClosedValve, NormallyOpenValve};
 use datatypes::status::{BuildInformationCommon, DprGainInfo, DprLoopInfo};
 use datatypes::units::BarG;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
@@ -57,6 +57,25 @@ pub struct BoardState {
         pattern = "crate::can_impl::ReceivedMessage::OxidizerVentValveControlFC(#value) | crate::can_impl::ReceivedMessage::OxidizerVentValveControlRFS(#value)"
     )]
     pub oxidizer_vent_control: Watch<ThreadModeRawMutex, NormallyOpenValve, 5>,
+    // Main valves, sent as engine control board messages
+    #[broadcast(
+        map = "dp_engine_control_board::Message::FuelMainValveState(#value)",
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
+    )]
+    #[collector(
+        pattern = "crate::can_impl::ReceivedMessage::FuelMainValveControlFC(#value) | crate::can_impl::ReceivedMessage::FuelMainValveControlRFS(#value)"
+    )]
+    pub fuel_main_control: Watch<ThreadModeRawMutex, NormallyClosedValve, 5>,
+    #[broadcast(
+        map = "dp_engine_control_board::Message::OxidizerMainValveState(#value)",
+        min_freq_hz = 4.0,
+        max_freq_hz = 6.0
+    )]
+    #[collector(
+        pattern = "crate::can_impl::ReceivedMessage::OxidizerMainValveControlFC(#value) | crate::can_impl::ReceivedMessage::OxidizerMainValveControlRFS(#value)"
+    )]
+    pub oxidizer_main_control: Watch<ThreadModeRawMutex, NormallyClosedValve, 5>,
     #[broadcast(
         map = "dp_oxidizer_control_board::Message::BoardStatus(#value)",
         min_freq_hz = 0.8,
@@ -95,6 +114,8 @@ impl BoardState {
             oxidizer_tank_differential_pressure: Watch::new(),
             dpr_control_loop: Watch::new(),
             oxidizer_vent_control: Watch::new(),
+            fuel_main_control: Watch::new(),
+            oxidizer_main_control: Watch::new(),
             board_status: Watch::new(),
             build_info: Watch::new(),
             pressure_bus_status: Watch::new(),

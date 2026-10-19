@@ -40,7 +40,7 @@ mod built_info {
 #[cfg(feature = "defmt")]
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::actuators::valves::valve_task;
+use crate::actuators::valves::{main_valve_task, valve_task};
 use crate::buzzer::buzzer_task;
 use crate::can_impl::{ReceivedMessage, board_status_update_task, can_rx_task};
 use crate::drivers::solenoid_detection::solenoid_detection_task;
@@ -97,6 +97,8 @@ async fn main(spawner: Spawner) -> ! {
     // Solenoids
     let oxidizer_vent_valve = Output::new(p.PA10, Level::Low, Speed::Medium);
     let oxidizer_dpr_valve = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
+    let oss_ml_vlv = Output::new(p.PB2, Level::Low, Speed::VeryHigh);
+    let fss_ml_vlv = Output::new(p.PB0, Level::Low, Speed::VeryHigh);
 
     // Solenoid Standby Control
     let mut sol1_stby = Output::new(p.PB15, Level::High, Speed::Low);
@@ -164,6 +166,7 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     spawner.spawn(valve_task(oxidizer_vent_valve).expect("valve task failed"));
+    spawner.spawn(main_valve_task(oss_ml_vlv, fss_ml_vlv).expect("main valve task failed"));
 
     spawner.spawn(can_rx_task(rx).unwrap());
     spawner.spawn(board_status_update_task(mcu_temp).expect("board status task failed"));
