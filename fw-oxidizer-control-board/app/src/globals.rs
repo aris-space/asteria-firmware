@@ -57,7 +57,6 @@ pub struct BoardState {
         pattern = "crate::can_impl::ReceivedMessage::OxidizerVentValveControlFC(#value) | crate::can_impl::ReceivedMessage::OxidizerVentValveControlRFS(#value)"
     )]
     pub oxidizer_vent_control: Watch<ThreadModeRawMutex, NormallyOpenValve, 5>,
-    // Main valves, sent as engine control board messages
     #[broadcast(
         map = "dp_engine_control_board::Message::FuelMainValveState(#value)",
         min_freq_hz = 4.0,

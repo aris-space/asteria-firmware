@@ -177,10 +177,6 @@ async fn main(spawner: Spawner) -> ! {
         Default::default(),
     );
 
-    // Solenoids: unused, the main valves are on the oxidizer control board
-    let _oss_ml_vlv = Output::new(p.PB11, Level::Low, Speed::VeryHigh);
-    let _fss_ml_vlv = Output::new(p.PA10, Level::Low, Speed::VeryHigh);
-
     // Solenoid Standby Control
     let mut sol1_stby = Output::new(p.PB15, Level::High, Speed::Low);
     let mut sol2_stby = Output::new(p.PB1, Level::High, Speed::Low);
