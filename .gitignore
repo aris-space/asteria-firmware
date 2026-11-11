@@ -16,3 +16,5 @@
 .fetched-logs/
 
 crates/Cargo.lock
+# Decoded SD logs
+fw-sensor-carrier-v3/out/

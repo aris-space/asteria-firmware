@@ -3,3 +3,11 @@ bin     := "fw-sensor-carrier-v3"
 use_probe_rs := "false"
 
 import '../just/firmware.just'
+
+# Decode the SD card logs to Parquet, one directory per session.
+# Usage: just sd-logs /Volumes/CARD ./decoded
+sd-logs input output:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    cargo run --manifest-path ../tools/Cargo.toml --target "$host" --bin sensor-log --release -- "{{input}}" "{{output}}"
