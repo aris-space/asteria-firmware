@@ -1,9 +1,9 @@
-//! Full-rate CSV logging, with a new `LOGnnnn` directory per session.
+//! Full-rate binary logging, with a new `LOGnnnn` directory per session.
 
-mod csv;
+mod record;
 mod writer;
 
-use core::fmt::{Debug, Write as _};
+use core::fmt::Write as _;
 
 use block_device_adapters::{BufStream, StreamSlice};
 use defmt::{Debug2Format, debug, info, warn};
@@ -14,34 +14,37 @@ use embassy_stm32::time::mhz;
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_fatfs::{
-    DefaultTimeProvider, Error as FatError, FileSystem, FsOptions, LossyOemCpConverter,
+    DefaultTimeProvider, Dir, Error as FatError, File, FileSystem, FsOptions, LossyOemCpConverter,
 };
-use embedded_io_async::{Seek, Write};
+use embedded_io_async::{ErrorType, Write as _};
 use embedded_partitions::mbr::Mbr;
-use heapless::{String, Vec};
+use heapless::String;
 use static_cell::ConstStaticCell;
 
 use crate::resources::sd::Sd;
 use crate::signals;
 use crate::types::SdSession;
-use csv::{DROP_FILE, FILE_COUNT, FILES, RECORD_KINDS, Record};
-use writer::{CsvLog, LogBuffer};
+use record::{Kind, MAX_FRAME, RECORD_KINDS, Record};
+use writer::{LogBuffer, SegmentLog};
 
 const FLUSH_PERIOD: Duration = Duration::from_secs(1);
 
-// Static buffers prevent stack overflow when the estimator interrupts SD logging.
-static LOG_BUFFERS: ConstStaticCell<[LogBuffer; FILE_COUNT]> =
-    ConstStaticCell::new([const { LogBuffer::new() }; FILE_COUNT]);
+// A static buffer prevents stack overflow when the estimator interrupts SD logging.
+static LOG_BUFFER: ConstStaticCell<LogBuffer> = ConstStaticCell::new(LogBuffer::new());
+static SCHEMA: ConstStaticCell<[u8; 6144]> = ConstStaticCell::new([0; 6144]);
 
-type SdFileSystem<'a> = FileSystem<
-    StreamSlice<BufStream<StorageDevice<'a, 'static, Card>, 512>>,
-    DefaultTimeProvider,
-    LossyOemCpConverter,
->;
+type SdIo<'sd> = StreamSlice<BufStream<StorageDevice<'sd, 'static, Card>, 512>>;
+type SdFileSystem<'sd> = FileSystem<SdIo<'sd>, DefaultTimeProvider, LossyOemCpConverter>;
+type SdDir<'fs, 'sd> = Dir<'fs, SdIo<'sd>, DefaultTimeProvider, LossyOemCpConverter>;
+type SdFile<'fs, 'sd> = File<'fs, SdIo<'sd>, DefaultTimeProvider, LossyOemCpConverter>;
+type SdError<'sd> = FatError<<SdIo<'sd> as ErrorType>::Error>;
 
 #[embassy_executor::task]
 pub async fn task(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>) {
-    let buffers = LOG_BUFFERS.take();
+    let buffer = LOG_BUFFER.take();
+    let schema = record::schema_json(SCHEMA.take());
+    // Describe the session next to its data.
+    let files: [(&str, &[u8]); 1] = [("SCHEMA.TXT", schema)];
     signals::SD_LOGGING.sender().send(false);
     debug!(
         "SD: card detect pin is {}",
@@ -49,17 +52,39 @@ pub async fn task(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>
     );
     // Allow the switched SD supply to settle after setup.
     Timer::after(Duration::from_millis(250)).await;
+    // Outlives card errors, so logging resumes in the same directory.
+    let mut log_dir = None;
     loop {
-        let _ = run_session(&mut sdmmc, buffers).await;
+        let _ = run_session(&mut sdmmc, buffer, &files, &mut log_dir).await;
         signals::SD_LOGGING.sender().send(false);
         Timer::after(Duration::from_secs(5)).await;
     }
 }
 
-async fn run_session(sdmmc: &mut Sd, buffers: &mut [LogBuffer; FILE_COUNT]) -> Result<(), ()> {
+async fn run_session(
+    sdmmc: &mut Sd,
+    buffer: &mut LogBuffer,
+    files: &[(&str, &[u8])],
+    log_dir: &mut Option<String<8>>,
+) -> Result<(), ()> {
     let fs = mount(sdmmc).await?;
-    let log = next_log_dir(&fs).await?;
-    let mut logs = create_logs(&fs, &log, buffers).await?;
+    let name = match log_dir {
+        Some(name) => name.clone(),
+        None => next_log_dir(&fs).await?,
+    };
+    *log_dir = Some(name.clone());
+    let dir = fs
+        .root_dir()
+        .create_dir(&name)
+        .await
+        .map_err(|e| warn!("SD: log directory create failed: {}", Debug2Format(&e)))?;
+    for (file_name, contents) in files {
+        write_file(&dir, file_name, contents).await?;
+    }
+    let mut log = SegmentLog::new(dir, buffer)
+        .await
+        .map_err(|e| warn!("SD: segment create failed: {}", Debug2Format(&e)))?;
+    info!("SD: logging to {}", name.as_str());
 
     let mut state = signals::STATE_CHANNEL
         .subscriber()
@@ -98,58 +123,51 @@ async fn run_session(sdmmc: &mut Sd, buffers: &mut [LogBuffer; FILE_COUNT]) -> R
         let next = select(sensors, mark.next_message());
         if let Either::First(next) = select(next, Timer::at(last_flush + FLUSH_PERIOD)).await {
             let (kind, received) = match next {
-                Either::First(Either6::First(message)) => (0, received(message, Record::State)),
-                Either::First(Either6::Second(message)) => (1, received(message, Record::Imu)),
-                Either::First(Either6::Third(message)) => (2, received(message, Record::Mag)),
-                Either::First(Either6::Fourth(message)) => (3, received(message, Record::Gnss)),
-                Either::First(Either6::Fifth(message)) => (4, received(message, Record::Baro)),
-                Either::First(Either6::Sixth(message)) => (5, received(message, Record::Dht)),
-                Either::Second(message) => (6, received(message, Record::Mark)),
+                Either::First(Either6::First(message)) => (Kind::State, received(message)),
+                Either::First(Either6::Second(message)) => (Kind::Imu, received(message)),
+                Either::First(Either6::Third(message)) => (Kind::Mag, received(message)),
+                Either::First(Either6::Fourth(message)) => (Kind::Gnss, received(message)),
+                Either::First(Either6::Fifth(message)) => (Kind::Baro, received(message)),
+                Either::First(Either6::Sixth(message)) => (Kind::Dht, received(message)),
+                Either::Second(message) => (Kind::Marks, received(message)),
             };
             match received {
                 Ok(record) => {
-                    let log = &mut logs[kind];
-                    let Ok(row) = csv::format_record(&record) else {
-                        warn!("SD: {} row exceeded buffer", log.name);
-                        continue;
-                    };
                     let started = Instant::now();
-                    log.append(row.as_bytes()).await.map_err(|e| {
-                        warn!("SD: {} write failed: {}", log.name, Debug2Format(&e))
-                    })?;
+                    let mut frame = [0; MAX_FRAME];
+                    log.append(record.encode(&mut frame))
+                        .await
+                        .map_err(|e| warn!("SD: write failed: {}", Debug2Format(&e)))?;
                     longest_write = longest_write.max(started.elapsed());
                 }
-                Err(lost) => dropped[kind] += lost,
+                Err(lost) => dropped[kind as usize] += lost,
             }
         }
         if Instant::now() < last_flush + FLUSH_PERIOD {
             continue;
         }
 
-        if dropped.iter().any(|&count| count > 0) {
-            let row = csv::format_drops(Instant::now(), &dropped);
-            let log = &mut logs[DROP_FILE];
-            log.append(row.as_bytes())
+        let lost = dropped.iter().sum::<u64>();
+        if lost > 0 {
+            let record = Record::drops(Instant::now(), &dropped);
+            let mut frame = [0; MAX_FRAME];
+            log.append(record.encode(&mut frame))
                 .await
-                .map_err(|e| warn!("SD: {} write failed: {}", log.name, Debug2Format(&e)))?;
+                .map_err(|e| warn!("SD: write failed: {}", Debug2Format(&e)))?;
         }
 
-        let mut rows = [0u32; FILE_COUNT];
         let started = Instant::now();
-        for (log, rows) in logs.iter_mut().zip(&mut rows) {
-            *rows = log
-                .flush()
-                .await
-                .map_err(|e| warn!("SD: {} flush failed: {}", log.name, Debug2Format(&e)))?;
-        }
+        log.flush()
+            .await
+            .map_err(|e| warn!("SD: flush failed: {}", Debug2Format(&e)))?;
         longest_write = longest_write.max(started.elapsed());
-        session_dropped += dropped.iter().sum::<u64>();
+        session_dropped += lost;
         signals::SD_SESSION.sender().send(SdSession {
-            log: log.clone(),
+            log: name.clone(),
             dropped: session_dropped,
         });
         signals::SD_LOGGING.sender().send(true);
-        if dropped.iter().any(|&count| count > 0) {
+        if lost > 0 {
             warn!(
                 "SD: dropped state/IMU/mag/GNSS/baro/DHT/mark readings: {}",
                 dropped
@@ -157,13 +175,7 @@ async fn run_session(sdmmc: &mut Sd, buffers: &mut [LogBuffer; FILE_COUNT]) -> R
         }
         // Card writes must finish before the sample channels fill.
         debug!(
-            "SD: flushed state={}, IMU={}, mag={}, GNSS={}, baro={}, DHT={}, dropped={}, longest card write={} ms",
-            rows[0],
-            rows[1],
-            rows[2],
-            rows[3],
-            rows[4],
-            rows[5],
+            "SD: flushed, dropped={}, longest card write={} ms",
             dropped,
             longest_write.as_millis(),
         );
@@ -198,10 +210,9 @@ async fn mount(sdmmc: &mut Sd) -> Result<SdFileSystem<'_>, ()> {
         .into_partition(partition)
         .await
         .map_err(|e| warn!("SD: partition open failed: {}", Debug2Format(&e)))?;
-    let fs = FileSystem::new(slice, FsOptions::new())
+    FileSystem::new(slice, FsOptions::new())
         .await
-        .map_err(|e| warn!("SD: FAT mount failed: {}", Debug2Format(&e)))?;
-    Ok(fs)
+        .map_err(|e| warn!("SD: FAT mount failed: {}", Debug2Format(&e)))
 }
 
 async fn next_log_dir(fs: &SdFileSystem<'_>) -> Result<String<8>, ()> {
@@ -223,32 +234,22 @@ async fn next_log_dir(fs: &SdFileSystem<'_>) -> Result<String<8>, ()> {
     Err(())
 }
 
-async fn create_logs<'buf>(
-    fs: &SdFileSystem<'_>,
-    dir_name: &str,
-    buffers: &'buf mut [LogBuffer; FILE_COUNT],
-) -> Result<Vec<CsvLog<'buf, impl Write<Error: Debug> + Seek>, FILE_COUNT>, ()> {
-    let dir = fs
-        .root_dir()
-        .create_dir(dir_name)
+async fn write_file(dir: &SdDir<'_, '_>, name: &str, contents: &[u8]) -> Result<(), ()> {
+    let mut file = dir
+        .create_file(name)
         .await
-        .map_err(|e| warn!("SD: {} create failed: {}", dir_name, Debug2Format(&e)))?;
-
-    let mut logs = Vec::<_, FILE_COUNT>::new();
-    for (spec, buffer) in FILES.iter().zip(buffers) {
-        let file = dir
-            .create_file(spec.name)
-            .await
-            .map_err(|e| warn!("SD: {} create failed: {}", spec.name, Debug2Format(&e)))?;
-        let _ = logs.push(CsvLog::new(spec.name, spec.header, file, buffer));
-    }
-    info!("SD: logging to {}", dir_name);
-    Ok(logs)
+        .map_err(|e| warn!("SD: {} create failed: {}", name, Debug2Format(&e)))?;
+    file.write_all(contents)
+        .await
+        .map_err(|e| warn!("SD: {} write failed: {}", name, Debug2Format(&e)))?;
+    file.flush()
+        .await
+        .map_err(|e| warn!("SD: {} write failed: {}", name, Debug2Format(&e)))
 }
 
-fn received<T: Clone>(message: WaitResult<T>, record: fn(T) -> Record) -> Result<Record, u64> {
+fn received<T: Clone + Into<Record>>(message: WaitResult<T>) -> Result<Record, u64> {
     match message {
-        WaitResult::Message(value) => Ok(record(value)),
+        WaitResult::Message(value) => Ok(value.into()),
         WaitResult::Lagged(lost) => Err(lost),
     }
 }

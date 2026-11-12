@@ -1,8 +1,12 @@
-use embedded_io_async::{Seek, SeekFrom, Write};
+use embedded_io_async::Write;
+
+use super::{SdDir, SdError, SdFile};
 
 // Aligned, whole-block writes let SDMMC use multi-block transfers.
 const BLOCK_SIZE: usize = 512;
 const BUFFER_SIZE: usize = 8 * BLOCK_SIZE;
+// A new file keeps each one short and bounds what a bad one can lose.
+const SEGMENT_SIZE: usize = 32 * 1024 * 1024;
 
 #[repr(align(4))]
 pub struct LogBuffer {
@@ -17,56 +21,77 @@ impl LogBuffer {
     }
 }
 
-/// Buffers rows for whole-block SD writes.
-/// Flush rewinds the partial block so later writes stay block-aligned.
-pub struct CsvLog<'buf, F> {
-    pub name: &'static str,
-    file: F,
+/// Appends frames to numbered segment files, always in whole blocks.
+pub struct SegmentLog<'fs, 'sd, 'buf> {
+    dir: SdDir<'fs, 'sd>,
+    file: SdFile<'fs, 'sd>,
+    segment: u32,
+    segment_len: usize,
     buffer: &'buf mut LogBuffer,
     used: usize,
-    rows: u32,
 }
 
-impl<'buf, F: Write + Seek> CsvLog<'buf, F> {
-    pub fn new(name: &'static str, header: &str, file: F, buffer: &'buf mut LogBuffer) -> Self {
-        buffer.bytes[..header.len()].copy_from_slice(header.as_bytes());
-        Self {
-            name,
-            file,
-            buffer,
-            used: header.len(),
-            rows: 0,
+impl<'fs, 'sd, 'buf> SegmentLog<'fs, 'sd, 'buf> {
+    pub async fn new(
+        dir: SdDir<'fs, 'sd>,
+        buffer: &'buf mut LogBuffer,
+    ) -> Result<Self, SdError<'sd>> {
+        // A session resumed after a card error continues with the next free number.
+        let mut segment = 1;
+        while dir.open_file(&segment_name(segment)).await.is_ok() {
+            segment += 1;
         }
+        let file = dir.create_file(&segment_name(segment)).await?;
+        Ok(Self {
+            dir,
+            file,
+            segment,
+            segment_len: 0,
+            buffer,
+            used: 0,
+        })
     }
 
-    pub async fn append(&mut self, row: &[u8]) -> Result<(), F::Error> {
-        if self.used + row.len() > BUFFER_SIZE {
+    pub async fn append(&mut self, frame: &[u8]) -> Result<(), SdError<'sd>> {
+        if self.used + frame.len() > BUFFER_SIZE {
             self.write_blocks().await?;
         }
-        self.buffer.bytes[self.used..][..row.len()].copy_from_slice(row);
-        self.used += row.len();
-        self.rows += 1;
+        self.buffer.bytes[self.used..][..frame.len()].copy_from_slice(frame);
+        self.used += frame.len();
         Ok(())
     }
 
-    async fn write_blocks(&mut self) -> Result<(), F::Error> {
+    /// Writes whole blocks, keeping the partial block for the next call.
+    async fn write_blocks(&mut self) -> Result<(), SdError<'sd>> {
         let whole = self.used / BLOCK_SIZE * BLOCK_SIZE;
         self.file.write_all(&self.buffer.bytes[..whole]).await?;
+        self.segment_len += whole;
         self.buffer.bytes.copy_within(whole..self.used, 0);
         self.used -= whole;
         Ok(())
     }
 
-    /// Writes buffered rows and returns the count since the last flush.
-    pub async fn flush(&mut self) -> Result<u32, F::Error> {
-        self.write_blocks().await?;
+    /// Pads the partial block with zeros (empty frames) and writes everything
+    /// out, so a power loss costs at most what came after this call.
+    pub async fn flush(&mut self) -> Result<(), SdError<'sd>> {
         if self.used > 0 {
-            self.file.write_all(&self.buffer.bytes[..self.used]).await?;
-            self.file
-                .seek(SeekFrom::Current(-(self.used as i64)))
-                .await?;
+            let padded = self.used.next_multiple_of(BLOCK_SIZE);
+            self.buffer.bytes[self.used..padded].fill(0);
+            self.used = padded;
+            self.write_blocks().await?;
         }
         self.file.flush().await?;
-        Ok(core::mem::take(&mut self.rows))
+        if self.segment_len >= SEGMENT_SIZE {
+            self.segment += 1;
+            self.segment_len = 0;
+            self.file = self.dir.create_file(&segment_name(self.segment)).await?;
+        }
+        Ok(())
     }
+}
+
+fn segment_name(number: u32) -> heapless::String<12> {
+    let mut name = heapless::String::new();
+    core::fmt::write(&mut name, format_args!("SEG{number:04}.BIN")).unwrap();
+    name
 }
