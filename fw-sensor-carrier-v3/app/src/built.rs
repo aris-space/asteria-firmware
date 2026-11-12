@@ -5,10 +5,30 @@
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::needless_raw_string_hashes)]
 
+use core::fmt;
+
 use datatypes::status::BuildInformationCommon;
 use embassy_sync::lazy_lock::LazyLock;
 
 include!(concat!(env!("OUT_DIR"), "/built.rs"));
+
+/// The `key=value` lines fw-test-board writes to its `build_info.txt`.
+pub fn write_info(out: &mut impl fmt::Write) -> fmt::Result {
+    let dirty = GIT_DIRTY.map_or("none", |dirty| if dirty { "true" } else { "false" });
+    writeln!(out, "pkg_name={PKG_NAME}")?;
+    writeln!(out, "version={PKG_VERSION}")?;
+    writeln!(out, "profile={PROFILE}")?;
+    writeln!(out, "target={TARGET}")?;
+    writeln!(
+        out,
+        "git_commit_short={}",
+        GIT_COMMIT_HASH_SHORT.unwrap_or("none")
+    )?;
+    writeln!(out, "git_dirty={dirty}")?;
+    writeln!(out, "features={FEATURES_LOWERCASE_STR}")?;
+    writeln!(out, "rustc={RUSTC}")?;
+    writeln!(out, "rustc_version={RUSTC_VERSION}")
+}
 
 pub static BUILD_INFO: LazyLock<BuildInformationCommon> = LazyLock::new(|| {
     let mut commit_hash = [0; _];

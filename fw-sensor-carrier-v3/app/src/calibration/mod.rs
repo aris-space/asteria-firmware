@@ -43,6 +43,16 @@ pub async fn load(storage: &Storage) {
     dht::CAL.load(storage).await;
 }
 
+/// Writes the calibration every sensor runs with as the `cal set` lines that
+/// store it, the same lines `cal show` prints.
+pub fn write_applied(out: &mut impl fmt::Write) -> fmt::Result {
+    imu::CAL.write_applied(out)?;
+    mag::CAL.write_applied(out)?;
+    gnss::CAL.write_applied(out)?;
+    baro::CAL.write_applied(out)?;
+    dht::CAL.write_applied(out)
+}
+
 /// Parses and stores the calibration of the sensor named `sensor` from
 /// `name=… latency_us=… <correction fields>`.
 pub async fn set<'a>(
@@ -199,6 +209,13 @@ impl<Id: SensorId, C: Correction, const N: usize> Calibrations<Id, C, N> {
         self.applied
             .try_get()
             .map_or(StoredCal::DEFAULT, |cals| cals[id.index()])
+    }
+
+    fn write_applied(&self, out: &mut impl fmt::Write) -> fmt::Result {
+        for id in self.ids {
+            writeln!(out, "cal set {} {}", id.name(), self.applied(id))?;
+        }
+        Ok(())
     }
 
     /// The calibration in flash, which a reset would apply.

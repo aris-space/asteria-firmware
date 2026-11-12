@@ -22,8 +22,8 @@ use heapless::String;
 use static_cell::ConstStaticCell;
 
 use crate::resources::sd::Sd;
-use crate::signals;
 use crate::types::SdSession;
+use crate::{built, calibration, signals};
 use record::{Kind, MAX_FRAME, RECORD_KINDS, Record};
 use writer::{LogBuffer, SegmentLog};
 
@@ -32,6 +32,8 @@ const FLUSH_PERIOD: Duration = Duration::from_secs(1);
 // A static buffer prevents stack overflow when the estimator interrupts SD logging.
 static LOG_BUFFER: ConstStaticCell<LogBuffer> = ConstStaticCell::new(LogBuffer::new());
 static SCHEMA: ConstStaticCell<[u8; 6144]> = ConstStaticCell::new([0; 6144]);
+static CAL: ConstStaticCell<String<2048>> = ConstStaticCell::new(String::new());
+static BUILD: ConstStaticCell<String<512>> = ConstStaticCell::new(String::new());
 
 type SdIo<'sd> = StreamSlice<BufStream<StorageDevice<'sd, 'static, Card>, 512>>;
 type SdFileSystem<'sd> = FileSystem<SdIo<'sd>, DefaultTimeProvider, LossyOemCpConverter>;
@@ -43,8 +45,16 @@ type SdError<'sd> = FatError<<SdIo<'sd> as ErrorType>::Error>;
 pub async fn task(mut sdmmc: Sd, detect: Input<'static>, _power: Output<'static>) {
     let buffer = LOG_BUFFER.take();
     let schema = record::schema_json(SCHEMA.take());
+    let cal = CAL.take();
+    calibration::write_applied(cal).expect("calibration fits its buffer");
     // Describe the session next to its data.
-    let files: [(&str, &[u8]); 1] = [("SCHEMA.TXT", schema)];
+    let build = BUILD.take();
+    built::write_info(build).expect("build info fits its buffer");
+    let files: [(&str, &[u8]); 3] = [
+        ("SCHEMA.TXT", schema),
+        ("CAL.TXT", cal.as_bytes()),
+        ("BUILD.TXT", build.as_bytes()),
+    ];
     signals::SD_LOGGING.sender().send(false);
     debug!(
         "SD: card detect pin is {}",
